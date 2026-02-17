@@ -87,7 +87,7 @@ export default function BoardPage() {
   useEffect(() => {
     if (!authLoading && !user) {
       router.push('/login');
-    } else if (!authLoading && user && !user.emailVerified) {
+    } else if (!authLoading && user && !user.emailVerified && !user.isAnonymous) {
       router.push('/verify-email');
     }
   }, [user, authLoading, router]);
@@ -706,7 +706,7 @@ export default function BoardPage() {
   const visibleCollabs = collaborators.slice(0, MAX_VISIBLE);
   const overflowCount = collaborators.length - MAX_VISIBLE;
 
-  if (!mounted || authLoading || !user || !user.emailVerified) {
+  if (!mounted || authLoading || !user || (!user.emailVerified && !user.isAnonymous)) {
     return (
       <div className="w-full h-screen flex items-center justify-center">
         <div className="text-lg text-gray-600">Loading...</div>

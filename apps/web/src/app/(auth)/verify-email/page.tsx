@@ -29,9 +29,9 @@ function VerifyEmailContent() {
     }
   }, [user, loading, router]);
 
-  // If user is already verified, redirect
+  // If user is already verified or is a guest, redirect
   useEffect(() => {
-    if (user?.emailVerified) {
+    if (user?.emailVerified || user?.isAnonymous) {
       router.push(redirectTo);
     }
   }, [user, router, redirectTo]);

@@ -104,11 +104,11 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Redirect to login if not authenticated, or to verify-email if unverified
+  // Redirect to login if not authenticated, or to verify-email if unverified (skip for guests)
   useEffect(() => {
     if (!authLoading && !user) {
       router.push('/login');
-    } else if (!authLoading && user && !user.emailVerified) {
+    } else if (!authLoading && user && !user.emailVerified && !user.isAnonymous) {
       router.push('/verify-email');
     }
   }, [user, authLoading, router]);
@@ -282,7 +282,7 @@ export default function DashboardPage() {
     });
   }, [allBoards, search, sortBy, user?.uid, visibilityFilter]);
 
-  if (authLoading || !user || !user.emailVerified || boardsLoading) {
+  if (authLoading || !user || (!user.emailVerified && !user.isAnonymous) || boardsLoading) {
     return (
       <div className="relative flex h-screen w-full items-center justify-center overflow-hidden">
         <div className="neon-orb left-[-3rem] top-6 h-64 w-64 bg-cyan-300/45" />

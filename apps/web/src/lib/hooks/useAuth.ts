@@ -52,6 +52,7 @@ export const useAuth = () => {
           displayName: firebaseUser.displayName,
           photoURL: firebaseUser.photoURL,
           emailVerified: firebaseUser.emailVerified,
+          isAnonymous: firebaseUser.isAnonymous,
         };
         setUser(u);
         writeCache(u);

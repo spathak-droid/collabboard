@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { signIn, signInWithGoogle } from '@/lib/firebase/auth';
+import { signIn, signInWithGoogle, signInAsGuest } from '@/lib/firebase/auth';
 
 export const LoginForm = () => {
   const router = useRouter();
@@ -14,6 +14,7 @@ export const LoginForm = () => {
   const returnUrl = searchParams.get('returnUrl');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [guestName, setGuestName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   
@@ -46,6 +47,25 @@ export const LoginForm = () => {
       router.push(returnUrl || '/dashboard');
     } catch (err: any) {
       setError(err.message || 'Failed to sign in with Google');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGuestLogin = async () => {
+    const name = guestName.trim();
+    if (!name) {
+      setError('Please enter your name to continue as a guest.');
+      return;
+    }
+    setError('');
+    setLoading(true);
+
+    try {
+      await signInAsGuest(name);
+      router.push(returnUrl || '/dashboard');
+    } catch (err: any) {
+      setError(err.message || 'Failed to sign in as guest');
     } finally {
       setLoading(false);
     }
@@ -134,6 +154,38 @@ export const LoginForm = () => {
         </div>
       </div>
       
+      <div className="mt-6">
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-slate-200"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="bg-[var(--surface)] px-2 text-slate-500">Or continue as guest</span>
+          </div>
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <input
+            type="text"
+            value={guestName}
+            onChange={(e) => setGuestName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleGuestLogin(); } }}
+            placeholder="Enter your name"
+            maxLength={50}
+            disabled={loading}
+            className="flex-1 rounded-xl border border-cyan-100 bg-white/80 px-3 py-2.5 text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-cyan-300 focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
+          />
+          <button
+            type="button"
+            onClick={handleGuestLogin}
+            disabled={loading}
+            className="shrink-0 rounded-xl border border-slate-200 bg-white/90 px-4 py-2.5 font-semibold text-slate-700 transition-colors hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? 'Joining...' : 'Join as Guest'}
+          </button>
+        </div>
+      </div>
+
       <div className="mt-6 text-center text-sm text-slate-600">
         Don&apos;t have an account?{' '}
         <a href={returnUrl ? `/signup?returnUrl=${encodeURIComponent(returnUrl)}` : '/signup'} className="font-semibold text-cyan-700 hover:text-cyan-900">

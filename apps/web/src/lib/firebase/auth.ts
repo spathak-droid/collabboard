@@ -8,6 +8,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  signInAnonymously,
   GoogleAuthProvider,
   GithubAuthProvider,
   signOut as firebaseSignOut,
@@ -53,6 +54,14 @@ export const signInWithGoogle = async () => {
 
 export const signInWithGithub = async () => {
   const userCredential = await signInWithPopup(auth(), githubProvider);
+  return userCredential.user;
+};
+
+export const signInAsGuest = async (displayName: string) => {
+  const userCredential = await signInAnonymously(auth());
+  if (userCredential.user) {
+    await updateProfile(userCredential.user, { displayName: displayName || 'Guest' });
+  }
   return userCredential.user;
 };
 

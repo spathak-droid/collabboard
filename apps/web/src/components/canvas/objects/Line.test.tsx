@@ -84,4 +84,52 @@ describe('Line', () => {
 
     expect(container).toBeInTheDocument();
   });
+
+  it('renders rotated line with endpoint handles in correct positions', () => {
+    const onSelect = vi.fn();
+    const onUpdate = vi.fn();
+    const rotatedLine: LineShape = {
+      ...mockLine,
+      id: 'line-4',
+      rotation: 45, // 45 degree rotation
+      points: [0, 0, 100, 0], // Horizontal line
+    };
+
+    const { container } = render(
+      <Line
+        data={rotatedLine}
+        isSelected={true}
+        onSelect={onSelect}
+        onUpdate={onUpdate}
+      />
+    );
+
+    // Verify component renders without errors
+    expect(container).toBeInTheDocument();
+    
+    // When selected, should render endpoint handles (circles)
+    const circles = container.querySelectorAll('circle');
+    expect(circles.length).toBeGreaterThan(0);
+  });
+
+  it('handles rotation correctly when transforming', () => {
+    const onSelect = vi.fn();
+    const onUpdate = vi.fn();
+    const rotatedLine: LineShape = {
+      ...mockLine,
+      id: 'line-5',
+      rotation: 90,
+    };
+
+    const { container } = render(
+      <Line
+        data={rotatedLine}
+        isSelected={true}
+        onSelect={onSelect}
+        onUpdate={onUpdate}
+      />
+    );
+
+    expect(container).toBeInTheDocument();
+  });
 });

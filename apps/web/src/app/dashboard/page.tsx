@@ -26,6 +26,7 @@ import {
   type BoardMember,
 } from '@/lib/supabase/client';
 import { getUserColor } from '@/lib/utils/colors';
+import { getCachedBoards, setCachedBoards } from '@/lib/utils/boardsCache';
 import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
 
 type BoardVisibilityFilter = 'all' | 'owned' | 'shared';
@@ -117,6 +118,14 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return;
 
+    // Load cached boards immediately for instant display
+    const cachedBoards = getCachedBoards(user.uid);
+    if (cachedBoards && cachedBoards.length > 0) {
+      setBoards(cachedBoards);
+      setBoardsLoading(false);
+      console.log(`[Dashboard] Loaded ${cachedBoards.length} boards from cache`);
+    }
+
     let cancelled = false;
 
     const init = async () => {
@@ -135,6 +144,9 @@ export default function DashboardPage() {
         if (!cancelled) {
           setBoards(data);
           setError(null);
+          
+          // Cache the fresh data
+          setCachedBoards(user.uid, data);
 
           // Fetch collaborators for each board in parallel (non-blocking)
           Promise.all(
@@ -195,7 +207,11 @@ export default function DashboardPage() {
           owner_name: user.displayName,
           owner_email: user.email,
         };
-        setBoards((prev) => [boardWithOwner, ...prev]);
+        setBoards((prev) => {
+          const updated = [boardWithOwner, ...prev];
+          setCachedBoards(user.uid, updated); // Update cache
+          return updated;
+        });
         setShowNewBoardModal(false);
         router.push(`/board/${created.id}`);
       } else {
@@ -223,9 +239,13 @@ export default function DashboardPage() {
   const handleDeleteBoard = useCallback(
     async (boardId: string) => {
       await deleteBoardFromDb(boardId);
-      setBoards((prev) => prev.filter((b) => b.id !== boardId));
+      setBoards((prev) => {
+        const updated = prev.filter((b) => b.id !== boardId);
+        if (user) setCachedBoards(user.uid, updated); // Update cache
+        return updated;
+      });
     },
-    []
+    [user]
   );
 
   const allBoards = useMemo<BoardRow[]>(() => {

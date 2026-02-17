@@ -19,6 +19,7 @@ interface StickyNoteProps {
   onUpdate: (updates: Partial<StickyNoteType>) => void;
   onDelete?: () => void;
   onDragMove?: (id: string, x: number, y: number) => void;
+  onTransformMove?: (id: string, x: number, y: number, rotation: number, dimensions?: { width?: number; height?: number }) => void;
 }
 
 const StickyNoteComponent = ({
@@ -27,6 +28,7 @@ const StickyNoteComponent = ({
   onSelect,
   onUpdate,
   onDragMove,
+  onTransformMove,
 }: StickyNoteProps) => {
   const groupRef = useRef<Konva.Group>(null);
   const textRef = useRef<Konva.Text>(null);
@@ -142,6 +144,18 @@ const StickyNoteComponent = ({
     if (node) {
       localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
     }
+    window.dispatchEvent(new Event('object-transform-start'));
+  };
+
+  const handleTransform = () => {
+    const node = groupRef.current;
+    if (node && onTransformMove) {
+      const scaleX = node.scaleX();
+      const scaleY = node.scaleY();
+      const liveWidth = noteWidth * scaleX;
+      const liveHeight = noteHeight * scaleY;
+      onTransformMove(data.id, node.x(), node.y(), node.rotation(), { width: liveWidth, height: liveHeight });
+    }
   };
 
   const handleTransformEnd = () => {
@@ -177,6 +191,8 @@ const StickyNoteComponent = ({
       transformerRef.current.forceUpdate();
       transformerRef.current.getLayer()?.batchDraw();
     }
+
+    window.dispatchEvent(new Event('object-transform-end'));
 
     onUpdate({
       x: finalX,
@@ -295,6 +311,7 @@ const StickyNoteComponent = ({
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
         onTransformStart={handleTransformStart}
+        onTransform={handleTransform}
         onTransformEnd={handleTransformEnd}
       >
         <Rect

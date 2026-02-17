@@ -18,9 +18,10 @@ interface RectangleProps {
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<RectShape>) => void;
   onDragMove?: (id: string, x: number, y: number) => void;
+  onTransformMove?: (id: string, x: number, y: number, rotation: number, dimensions?: { width?: number; height?: number }) => void;
 }
 
-const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove }: RectangleProps) => {
+const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, onTransformMove }: RectangleProps) => {
   const groupRef = useRef<Konva.Group>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const [isEditingText, setIsEditingText] = useState(false);
@@ -86,6 +87,18 @@ const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove }
     if (node) {
       localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
     }
+    window.dispatchEvent(new Event('object-transform-start'));
+  };
+
+  const handleTransform = () => {
+    const node = groupRef.current;
+    if (node && onTransformMove) {
+      const scaleX = node.scaleX();
+      const scaleY = node.scaleY();
+      const liveWidth = data.width * scaleX;
+      const liveHeight = data.height * scaleY;
+      onTransformMove(data.id, node.x(), node.y(), node.rotation(), { width: liveWidth, height: liveHeight });
+    }
   };
 
   const handleTransformEnd = () => {
@@ -120,6 +133,8 @@ const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove }
       transformerRef.current.forceUpdate();
       transformerRef.current.getLayer()?.batchDraw();
     }
+
+    window.dispatchEvent(new Event('object-transform-end'));
 
     onUpdate({
       width: newWidth,
@@ -245,6 +260,7 @@ const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove }
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
         onTransformStart={handleTransformStart}
+        onTransform={handleTransform}
         onTransformEnd={handleTransformEnd}
       >
         <Rect

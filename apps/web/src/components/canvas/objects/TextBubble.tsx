@@ -18,6 +18,7 @@ interface TextBubbleProps {
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<TextBubbleShape>) => void;
   onDragMove?: (id: string, x: number, y: number) => void;
+  onTransformMove?: (id: string, x: number, y: number, rotation: number, dimensions?: { width?: number; height?: number }) => void;
 }
 
 const TAIL_HEIGHT_RATIO = 0.12;
@@ -29,6 +30,7 @@ const TextBubbleComponent = ({
   onSelect,
   onUpdate,
   onDragMove,
+  onTransformMove,
 }: TextBubbleProps) => {
   const groupRef = useRef<Konva.Group>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
@@ -102,6 +104,18 @@ const TextBubbleComponent = ({
     if (node) {
       localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
     }
+    window.dispatchEvent(new Event('object-transform-start'));
+  };
+
+  const handleTransform = () => {
+    const node = groupRef.current;
+    if (node && onTransformMove) {
+      const scaleX = node.scaleX();
+      const scaleY = node.scaleY();
+      const liveWidth = data.width * scaleX;
+      const liveHeight = data.height * scaleY;
+      onTransformMove(data.id, node.x(), node.y(), node.rotation(), { width: liveWidth, height: liveHeight });
+    }
   };
 
   const handleTransformEnd = () => {
@@ -135,6 +149,8 @@ const TextBubbleComponent = ({
       transformerRef.current.forceUpdate();
       transformerRef.current.getLayer()?.batchDraw();
     }
+
+    window.dispatchEvent(new Event('object-transform-end'));
 
     onUpdate({
       width: newWidth,
@@ -253,6 +269,7 @@ const TextBubbleComponent = ({
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
         onTransformStart={handleTransformStart}
+        onTransform={handleTransform}
         onTransformEnd={handleTransformEnd}
       >
         <Shape

@@ -27,6 +27,7 @@ import { supabase, updateBoard, fetchBoardMembers, ensureBoardAccess, fetchOnlin
 import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
 import { ConnectionDots } from '@/components/canvas/objects/ConnectionDots';
 import { findNearestAnchor, resolveLinePoints } from '@/lib/utils/connectors';
+import { calculateAutoFit } from '@/lib/utils/autoFit';
 import { STICKY_COLORS } from '@/types/canvas';
 import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, LineShape, TextBubbleShape, AnchorPosition } from '@/types/canvas';
 
@@ -135,7 +136,7 @@ export default function BoardPage() {
     isSelected,
   } = useSelection();
   
-  const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode } = useCanvasStore();
+  const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode, setScale, setPosition } = useCanvasStore();
   const [previewPosition, setPreviewPosition] = useState<{ x: number; y: number } | null>(null);
 
   // ── Connector drawing state ──
@@ -147,7 +148,30 @@ export default function BoardPage() {
 
   // Track live drag positions for smooth line following during shape drag
   const liveDragRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  const liveTransformRef = useRef<Map<string, { x: number; y: number; rotation: number; width?: number; height?: number; radius?: number }>>(new Map());
   const [, setDragTick] = useState(0);
+  const [isTransforming, setIsTransforming] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Listen for global transform events to hide connection dots
+  useEffect(() => {
+    const handleTransformStart = () => setIsTransforming(true);
+    const handleTransformEnd = () => setIsTransforming(false);
+    const handleDragStart = () => setIsDragging(true);
+    const handleDragEnd = () => setIsDragging(false);
+    
+    window.addEventListener('object-transform-start', handleTransformStart);
+    window.addEventListener('object-transform-end', handleTransformEnd);
+    window.addEventListener('object-drag-start', handleDragStart);
+    window.addEventListener('object-drag-end', handleDragEnd);
+    
+    return () => {
+      window.removeEventListener('object-transform-start', handleTransformStart);
+      window.removeEventListener('object-transform-end', handleTransformEnd);
+      window.removeEventListener('object-drag-start', handleDragStart);
+      window.removeEventListener('object-drag-end', handleDragEnd);
+    };
+  }, []);
   
   // Redirect to login if not authenticated, or to verify-email if unverified
   useEffect(() => {
@@ -170,6 +194,36 @@ export default function BoardPage() {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showAllUsers]);
+
+  // Auto-fit canvas when objects first load
+  const hasAutoFittedRef = useRef(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+  
+  useEffect(() => {
+    if (hasAutoFittedRef.current || !mounted) return;
+    
+    // If no objects yet, wait a bit to see if they load
+    if (objects.length === 0) {
+      const timer = setTimeout(() => {
+        // If still no objects after 1 second, show canvas at default zoom
+        setIsInitializing(false);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+    
+    // Objects loaded - calculate and apply immediately
+    const viewport = { width: window.innerWidth, height: window.innerHeight };
+    const autoFit = calculateAutoFit(objects, viewport.width, viewport.height);
+    
+    if (autoFit) {
+      setScale(autoFit.scale);
+      setPosition(autoFit.position);
+      hasAutoFittedRef.current = true;
+      console.log(`[Auto-fit] ${objects.length} objects, zoom: ${Math.round(autoFit.scale * 100)}%`);
+    }
+    
+    setIsInitializing(false);
+  }, [objects.length, mounted, setScale, setPosition]);
 
   const handleBackToDashboard = () => {
     router.push('/dashboard');
@@ -388,8 +442,9 @@ export default function BoardPage() {
   // Update a shape and reposition any connected lines
   const updateShapeAndConnectors = useCallback(
     (shapeId: string, updates: Partial<WhiteboardObject>) => {
-      // Clear live drag position — the real state is now being persisted
+      // Clear live drag/transform positions — the real state is now being persisted
       liveDragRef.current.delete(shapeId);
+      liveTransformRef.current.delete(shapeId);
 
       updateObject(shapeId, updates);
 
@@ -425,6 +480,15 @@ export default function BoardPage() {
     []
   );
 
+  // Live-update connected lines while a shape is being transformed (rotated/resized)
+  const handleShapeTransformMove = useCallback(
+    (shapeId: string, liveX: number, liveY: number, liveRotation: number, dimensions?: { width?: number; height?: number; radius?: number }) => {
+      liveTransformRef.current.set(shapeId, { x: liveX, y: liveY, rotation: liveRotation, ...dimensions });
+      setDragTick((t) => t + 1);
+    },
+    []
+  );
+
   // Build an objects map for resolving connector positions
   const objectsMap = useMemo(() => {
     const map = new Map<string, WhiteboardObject>();
@@ -434,13 +498,23 @@ export default function BoardPage() {
 
   // Overlay live drag positions on top of objectsMap for smooth line rendering
   // Computed every render (cheap — only iterates liveDragRef entries)
-  const liveObjectsMap: Map<string, WhiteboardObject> = liveDragRef.current.size === 0
+  const liveObjectsMap: Map<string, WhiteboardObject> = liveDragRef.current.size === 0 && liveTransformRef.current.size === 0
     ? objectsMap
     : (() => {
         const map = new Map(objectsMap);
         liveDragRef.current.forEach((pos, id) => {
           const obj = map.get(id);
           if (obj) map.set(id, { ...obj, x: pos.x, y: pos.y } as WhiteboardObject);
+        });
+        liveTransformRef.current.forEach((transform, id) => {
+          const obj = map.get(id);
+          if (obj) {
+            const updates: any = { x: transform.x, y: transform.y, rotation: transform.rotation };
+            if (transform.width !== undefined) updates.width = transform.width;
+            if (transform.height !== undefined) updates.height = transform.height;
+            if (transform.radius !== undefined) updates.radius = transform.radius;
+            map.set(id, { ...obj, ...updates } as WhiteboardObject);
+          }
         });
         return map;
       })();
@@ -923,6 +997,16 @@ export default function BoardPage() {
         />
       )}
 
+      {/* Loading overlay while initializing zoom */}
+      {isInitializing && (
+        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading board...</p>
+          </div>
+        </div>
+      )}
+
       <Canvas 
         boardId={boardId} 
         objects={objects}
@@ -1016,6 +1100,7 @@ export default function BoardPage() {
                 }}
                 onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
                 onDragMove={handleShapeDragMove}
+                onTransformMove={handleShapeTransformMove}
               />
             );
           }
@@ -1035,6 +1120,7 @@ export default function BoardPage() {
                 }}
                 onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
                 onDragMove={handleShapeDragMove}
+                onTransformMove={handleShapeTransformMove}
               />
             );
           }
@@ -1054,6 +1140,7 @@ export default function BoardPage() {
                 }}
                 onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
                 onDragMove={handleShapeDragMove}
+                onTransformMove={handleShapeTransformMove}
               />
             );
           }
@@ -1097,6 +1184,7 @@ export default function BoardPage() {
                 }}
                 onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
                 onDragMove={handleShapeDragMove}
+                onTransformMove={handleShapeTransformMove}
               />
             );
           }
@@ -1111,7 +1199,7 @@ export default function BoardPage() {
             const o = objectsMap.get(sid);
             return o?.type === 'line';
           });
-          const showDots = activeTool === 'line' || isDrawingLine || isSelected(obj.id) || hoveredShapeId === obj.id || anyLineSelected;
+          const showDots = !isTransforming && !isDragging && (activeTool === 'line' || isDrawingLine || isSelected(obj.id) || hoveredShapeId === obj.id || anyLineSelected);
           if (!showDots) return null;
           return (
             <ConnectionDots

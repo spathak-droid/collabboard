@@ -18,9 +18,10 @@ interface CircleProps {
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<CircleShape>) => void;
   onDragMove?: (id: string, x: number, y: number) => void;
+  onTransformMove?: (id: string, x: number, y: number, rotation: number, dimensions?: { radius?: number }) => void;
 }
 
-const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove }: CircleProps) => {
+const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, onTransformMove }: CircleProps) => {
   const groupRef = useRef<Konva.Group>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const [isEditingText, setIsEditingText] = useState(false);
@@ -80,6 +81,17 @@ const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove }: C
     if (node) {
       localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
     }
+    window.dispatchEvent(new Event('object-transform-start'));
+  };
+
+  const handleTransform = () => {
+    const node = groupRef.current;
+    if (node && onTransformMove) {
+      const scaleX = node.scaleX();
+      const scaleY = node.scaleY();
+      const liveRadius = data.radius * Math.max(scaleX, scaleY);
+      onTransformMove(data.id, node.x(), node.y(), node.rotation(), { radius: liveRadius });
+    }
   };
 
   const handleTransformEnd = () => {
@@ -110,6 +122,8 @@ const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove }: C
       transformerRef.current.forceUpdate();
       transformerRef.current.getLayer()?.batchDraw();
     }
+
+    window.dispatchEvent(new Event('object-transform-end'));
 
     onUpdate({
       radius: newRadius,
@@ -232,6 +246,7 @@ const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove }: C
         onDragMove={handleDragMove}
         onDragEnd={handleDragEnd}
         onTransformStart={handleTransformStart}
+        onTransform={handleTransform}
         onTransformEnd={handleTransformEnd}
       >
         <KonvaCircle

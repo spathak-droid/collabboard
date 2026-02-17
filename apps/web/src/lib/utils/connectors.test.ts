@@ -103,6 +103,56 @@ describe('getAnchorPoints', () => {
     };
     expect(getAnchorPoints(line)).toHaveLength(0);
   });
+
+  it('accounts for rotation when computing rectangle anchor positions', () => {
+    const rotatedRect: RectShape = {
+      ...mockRect,
+      rotation: 90, // 90 degrees
+    };
+
+    const anchors = getAnchorPoints(rotatedRect);
+    const top = anchors.find((a) => a.anchor === 'top')!;
+    const right = anchors.find((a) => a.anchor === 'right')!;
+    const bottom = anchors.find((a) => a.anchor === 'bottom')!;
+    const left = anchors.find((a) => a.anchor === 'left')!;
+
+    // Rectangle: x=100, y=100, width=200, height=100, rotation=90°
+    // Rotation is around top-left (100, 100)
+    // Top center (local): (100, 0) → rotated 90°: (0, 100) → global: (100, 200)
+    expect(top.x).toBeCloseTo(100, 0);
+    expect(top.y).toBeCloseTo(200, 0);
+
+    // Right center (local): (200, 50) → rotated 90°: (-50, 200) → global: (50, 300)
+    expect(right.x).toBeCloseTo(50, 0);
+    expect(right.y).toBeCloseTo(300, 0);
+
+    // Bottom center (local): (100, 100) → rotated 90°: (-100, 100) → global: (0, 200)
+    expect(bottom.x).toBeCloseTo(0, 0);
+    expect(bottom.y).toBeCloseTo(200, 0);
+
+    // Left center (local): (0, 50) → rotated 90°: (-50, 0) → global: (50, 100)
+    expect(left.x).toBeCloseTo(50, 0);
+    expect(left.y).toBeCloseTo(100, 0);
+  });
+
+  it('accounts for rotation when computing circle anchor positions', () => {
+    const rotatedCircle: CircleShape = {
+      ...mockCircle,
+      rotation: 45, // 45 degrees
+    };
+
+    const anchors = getAnchorPoints(rotatedCircle);
+    
+    // Circle at (500, 300) with radius=50, rotation=45°
+    // Top anchor (0, -50) rotates 45° around center
+    const top = anchors.find((a) => a.anchor === 'top')!;
+    const cos45 = Math.cos(Math.PI / 4);
+    const sin45 = Math.sin(Math.PI / 4);
+    // (0, -50) rotated: (0 * cos45 - (-50) * sin45, 0 * sin45 + (-50) * cos45)
+    // = (50 * sin45, -50 * cos45) = (35.36, -35.36)
+    expect(top.x).toBeCloseTo(500 + 50 * sin45, 0);
+    expect(top.y).toBeCloseTo(300 - 50 * cos45, 0);
+  });
 });
 
 describe('getAnchorPosition', () => {

@@ -122,11 +122,22 @@ const LineComponent = ({
     });
   };
 
-  // Endpoint handle positions (absolute canvas coords)
-  const startX = drawX + drawPoints[0];
-  const startY = drawY + drawPoints[1];
-  const endX = drawX + drawPoints[2];
-  const endY = drawY + drawPoints[3];
+  // Endpoint handle positions (absolute canvas coords, accounting for rotation)
+  const rotationRad = (renderRotation * Math.PI) / 180;
+  const cosR = Math.cos(rotationRad);
+  const sinR = Math.sin(rotationRad);
+
+  // Transform start point through rotation
+  const startXLocal = drawPoints[0];
+  const startYLocal = drawPoints[1];
+  const startX = drawX + startXLocal * cosR - startYLocal * sinR;
+  const startY = drawY + startXLocal * sinR + startYLocal * cosR;
+
+  // Transform end point through rotation
+  const endXLocal = drawPoints[2];
+  const endYLocal = drawPoints[3];
+  const endX = drawX + endXLocal * cosR - endYLocal * sinR;
+  const endY = drawY + endXLocal * sinR + endYLocal * cosR;
 
   const handleEndpointDragMove = (endpoint: 'start' | 'end') => (e: Konva.KonvaEventObject<DragEvent>) => {
     e.cancelBubble = true;
@@ -144,18 +155,24 @@ const LineComponent = ({
       node.y(snapY);
     }
 
+    // If line is rotated, we need to transform the other endpoint too
+    const otherEndpointX = endpoint === 'start' ? endX : startX;
+    const otherEndpointY = endpoint === 'start' ? endY : startY;
+
     if (endpoint === 'start') {
       onUpdate({
-        points: [snapX, snapY, drawPoints[2] + drawX, drawPoints[3] + drawY],
+        points: [snapX, snapY, otherEndpointX, otherEndpointY],
         x: 0,
         y: 0,
+        rotation: 0, // Reset rotation when detaching
         startAnchor: undefined,
       });
     } else {
       onUpdate({
-        points: [drawPoints[0] + drawX, drawPoints[1] + drawY, snapX, snapY],
+        points: [otherEndpointX, otherEndpointY, snapX, snapY],
         x: 0,
         y: 0,
+        rotation: 0, // Reset rotation when detaching
         endAnchor: undefined,
       });
     }

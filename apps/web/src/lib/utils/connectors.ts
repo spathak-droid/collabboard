@@ -15,26 +15,58 @@ const SNAP_DISTANCE = 20; // px — how close the cursor must be to snap
 
 /**
  * Get the 4 anchor points (top, right, bottom, left) for a shape in canvas coordinates.
+ * Accounts for object rotation around the top-left corner (Konva default).
  */
 export const getAnchorPoints = (obj: WhiteboardObject): AnchorPoint[] => {
+  const rotation = obj.rotation || 0;
+  const rotRad = (rotation * Math.PI) / 180;
+  const cosR = Math.cos(rotRad);
+  const sinR = Math.sin(rotRad);
+  
   if (obj.type === 'rect' || obj.type === 'sticky' || obj.type === 'textBubble') {
-    const cx = obj.x + obj.width / 2;
-    const cy = obj.y + obj.height / 2;
-    return [
-      { objectId: obj.id, anchor: 'top', x: cx, y: obj.y },
-      { objectId: obj.id, anchor: 'right', x: obj.x + obj.width, y: cy },
-      { objectId: obj.id, anchor: 'bottom', x: cx, y: obj.y + obj.height },
-      { objectId: obj.id, anchor: 'left', x: obj.x, y: cy },
+    // Anchor points in local coordinates (relative to top-left, which is the rotation origin)
+    const halfW = obj.width / 2;
+    const halfH = obj.height / 2;
+    
+    const localAnchors = [
+      { anchor: 'top' as const, x: halfW, y: 0 },           // top center
+      { anchor: 'right' as const, x: obj.width, y: halfH }, // right center
+      { anchor: 'bottom' as const, x: halfW, y: obj.height }, // bottom center
+      { anchor: 'left' as const, x: 0, y: halfH },          // left center
     ];
+    
+    // Apply rotation around origin (0,0) which is top-left corner
+    return localAnchors.map(({ anchor, x, y }) => {
+      const rotX = x * cosR - y * sinR;
+      const rotY = x * sinR + y * cosR;
+      return {
+        objectId: obj.id,
+        anchor,
+        x: obj.x + rotX,
+        y: obj.y + rotY,
+      };
+    });
   }
 
   if (obj.type === 'circle') {
-    return [
-      { objectId: obj.id, anchor: 'top', x: obj.x, y: obj.y - obj.radius },
-      { objectId: obj.id, anchor: 'right', x: obj.x + obj.radius, y: obj.y },
-      { objectId: obj.id, anchor: 'bottom', x: obj.x, y: obj.y + obj.radius },
-      { objectId: obj.id, anchor: 'left', x: obj.x - obj.radius, y: obj.y },
+    // Circle position is the center, rotation is around center
+    const localAnchors = [
+      { anchor: 'top' as const, x: 0, y: -obj.radius },
+      { anchor: 'right' as const, x: obj.radius, y: 0 },
+      { anchor: 'bottom' as const, x: 0, y: obj.radius },
+      { anchor: 'left' as const, x: -obj.radius, y: 0 },
     ];
+    
+    return localAnchors.map(({ anchor, x, y }) => {
+      const rotX = x * cosR - y * sinR;
+      const rotY = x * sinR + y * cosR;
+      return {
+        objectId: obj.id,
+        anchor,
+        x: obj.x + rotX,
+        y: obj.y + rotY,
+      };
+    });
   }
 
   return [];

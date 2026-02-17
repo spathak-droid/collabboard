@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="280" viewBox="0 0 320 280">
+  <defs>
+    <linearGradient id="bubbleGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4F8CFF"/>
+      <stop offset="100%" stop-color="#1E3A8A"/>
+    </linearGradient>
+  </defs>
+
+  <path d="M28 0 h264 a28 28 0 0 1 28 28 v164 a28 28 0 0 1-28 28 H80 L30 260 L56 220 H28 a28 28 0 0 1-28-28 V28 A28 28 0 0 1 28 0z" fill="url(#bubbleGrad)"/>
+  <line x1="60" y1="70" x2="240" y2="70" stroke="#fff" stroke-width="14" stroke-linecap="round" opacity="0.7"/>
+  <line x1="60" y1="120" x2="190" y2="120" stroke="#fff" stroke-width="14" stroke-linecap="round" opacity="0.5"/>
+  <line x1="60" y1="170" x2="150" y2="170" stroke="#fff" stroke-width="14" stroke-linecap="round" opacity="0.35"/>
+</svg>

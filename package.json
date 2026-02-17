@@ -1,0 +1,23 @@
+{
+  "name": "collabboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Collaborative whiteboard platform - monorepo",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:web & npm run dev:server",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:server": "npm run dev -w apps/server",
+    "build": "npm run build -w apps/web",
+    "build:web": "npm run build -w apps/web",
+    "start:server": "npm run start -w apps/server",
+    "lint": "npm run lint -w apps/web",
+    "test": "npm run test -w apps/web -- --run",
+    "check:server": "node --check apps/server/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "whiteboard-server",
+  "version": "1.0.0",
+  "description": "Hocuspocus WebSocket server for CollabBoard",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "yjs",
+    "hocuspocus",
+    "websocket",
+    "collaborative"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@hocuspocus/extension-database": "^3.4.4",
+    "@hocuspocus/server": "^3.4.4",
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.7"
+  }
+}

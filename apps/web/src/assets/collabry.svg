@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="800" height="600" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#36A9E1"/>
+      <stop offset="100%" stop-color="#1B75BC"/>
+    </linearGradient>
+
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8CC63F"/>
+      <stop offset="100%" stop-color="#39B54A"/>
+    </linearGradient>
+
+    <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBB03B"/>
+      <stop offset="100%" stop-color="#F15A24"/>
+    </linearGradient>
+
+    <linearGradient id="pinkGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EC008C"/>
+      <stop offset="100%" stop-color="#D4145A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Circular collaboration icon -->
+  <g transform="translate(400,200)">
+    <circle r="120" fill="none"/>
+
+    <path d="M0,-120 A120,120 0 0,1 104,-60 L40,-20 A60,60 0 0,0 0,-60 Z" fill="url(#blueGrad)"/>
+    <path d="M104,-60 A120,120 0 0,1 104,60 L40,20 A60,60 0 0,0 40,-20 Z" fill="url(#orangeGrad)"/>
+    <path d="M104,60 A120,120 0 0,1 0,120 L0,60 A60,60 0 0,0 40,20 Z" fill="url(#pinkGrad)"/>
+    <path d="M0,120 A120,120 0 0,1 -104,60 L-40,20 A60,60 0 0,0 0,60 Z" fill="url(#greenGrad)"/>
+
+    <circle r="35" fill="#ffffff"/>
+  </g>
+
+  <!-- Text -->
+  <text x="400" y="420"
+        text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif"
+        font-size="90"
+        font-weight="bold"
+        fill="#333333">
+    collabry
+  </text>
+
+</svg>

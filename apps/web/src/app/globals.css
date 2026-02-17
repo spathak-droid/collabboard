@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #051126;
+  --surface: rgba(255, 255, 255, 0.86);
+  --surface-border: rgba(24, 70, 137, 0.16);
+  --accent: #006eff;
+  --accent-2: #00b9e8;
+  --accent-3: #00d084;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sora), system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(0, 110, 255, 0.2);
+  color: var(--foreground);
+}
+
+@keyframes drift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -14px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes pulseAura {
+  0% {
+    opacity: 0.52;
+  }
+  50% {
+    opacity: 0.82;
+  }
+  100% {
+    opacity: 0.52;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background: var(--surface);
+    border: none;
+    backdrop-filter: blur(18px);
+  }
+
+  .neon-orb {
+    display: none;
+  }
+
+  .neon-title {
+    background: linear-gradient(120deg, var(--accent), var(--accent-2) 55%, var(--accent-3));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .hero-bg {
+    background:
+      radial-gradient(circle at 8% 10%, rgba(0, 185, 232, 0.2), transparent 42%),
+      radial-gradient(circle at 92% 8%, rgba(0, 110, 255, 0.18), transparent 40%),
+      radial-gradient(circle at 75% 88%, rgba(0, 208, 132, 0.14), transparent 42%),
+      linear-gradient(150deg, #f7fbff 0%, #eef7ff 46%, #f8fbff 100%);
+  }
+
+  .hero-blob {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(48px);
+    pointer-events: none;
+    opacity: 0.7;
+    animation: drift 10s ease-in-out infinite;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}

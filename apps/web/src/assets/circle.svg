@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <radialGradient id="blueGlow" cx="30%" cy="25%" r="80%">
+      <stop offset="0%" stop-color="#67B7FF"></stop>
+      <stop offset="55%" stop-color="#3B82F6"></stop>
+      <stop offset="100%" stop-color="#1E3A8A"></stop>
+    </radialGradient>
+  </defs>
+
+  <!-- black background -->
+  <rect width="1024" height="1024" fill="#000"></rect>
+
+  <!-- centered circle -->
+  <circle cx="512" cy="512" r="340" fill="url(#blueGlow)"></circle>
+</svg>

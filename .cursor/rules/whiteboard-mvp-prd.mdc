@@ -1,0 +1,314 @@
+---
+description: Collaborative Whiteboard MVP requirements and technical standards
+alwaysApply: true
+---
+
+# Whiteboard MVP - Product Requirements
+
+This project is building a collaborative whiteboard platform with **bulletproof multiplayer** as the core principle. All code must align with the Week 1 MVP requirements.
+
+## Core Principle
+
+A simple whiteboard with perfect real-time sync beats a feature-rich board with broken collaboration.
+
+## Tech Stack (Mandatory)
+
+- **Frontend**: Next.js 14 + TypeScript + Konva.js
+- **Authentication**: Firebase Auth (Email, Google, GitHub)
+- **Real-time Sync**: Yjs + Hocuspocus (Railway)
+- **Database**: Supabase Postgres
+- **State Management**: Zustand (local UI state only)
+- **API**: tRPC (type-safe)
+- **Deployment**: Vercel (frontend) + Railway (WebSocket)
+
+## MVP Hard Requirements (All Mandatory)
+
+1. ✅ Infinite canvas with pan/zoom (60fps, 10%-500% range)
+2. ✅ Sticky notes with editable text (200x200px, 5 colors)
+3. ✅ At least one shape type (Rectangle/Circle/Line)
+4. ✅ Create, move, resize, rotate objects
+5. ✅ Real-time CRDT sync (<200ms latency)
+6. ✅ Multiplayer cursors with name labels
+7. ✅ Presence awareness (online users list)
+8. ✅ Firebase Auth (3 providers)
+9. ✅ Production deployment on Vercel
+
+## Critical Implementation Rules
+
+### Real-Time Sync
+
+```typescript
+// ✅ GOOD: Use Yjs for all shared state
+const yObjects = ydoc.getMap('objects');
+yObjects.set(objectId, { x, y, color, text });
+
+// ❌ BAD: Never use setState for shared data
+setObjects([...objects, newObject]); // Will break multiplayer!
+```
+
+### Performance Requirements
+
+- Canvas must render at 60fps with 1000+ objects
+- Sync latency: <200ms between users
+- Page load: <3 seconds (TTI)
+- Sync on drag **end only**, not during drag
+
+### Data Structures
+
+```typescript
+// Sticky Note
+{
+  id: string,
+  type: 'sticky',
+  x: number, y: number,
+  width: 200, height: 200,
+  color: string, // #FFF59D, #F48FB1, #81D4FA, #A5D6A7, #FFCC80
+  text: string,
+  rotation: 0,
+  zIndex: number,
+  createdBy: string,
+  modifiedAt: number
+}
+
+// Shape
+{
+  id: string,
+  type: 'rect' | 'circle' | 'line',
+  x: number, y: number,
+  width: number, height: number,
+  fill: string,
+  stroke: string,
+  strokeWidth: 2,
+  rotation: number,
+  zIndex: number
+}
+```
+
+### Authentication Flow
+
+- All board routes require Firebase Auth
+- WebSocket connections must verify Firebase JWT token
+- Token refresh handled automatically (60-min tokens)
+
+### Persistence
+
+- Auto-save every 30 seconds to Supabase
+- Save full Yjs document state (base64 encoded)
+- Load latest snapshot on board open
+
+## Explicitly Out of Scope (Week 1)
+
+Do NOT implement these features:
+
+- ❌ Connectors/arrows between objects
+- ❌ Frames (grouping)
+- ❌ Standalone text elements
+- ❌ Copy/paste
+- ❌ Undo/redo
+- ❌ Templates
+- ❌ Export (PNG/PDF/SVG)
+- ❌ Comments
+- ❌ Version history
+- ❌ Mobile support
+
+## File Organization
+
+```
+app/
+  (auth)/login, signup
+  (dashboard)/page.tsx
+  board/[id]/page.tsx
+components/
+  canvas/Canvas.tsx, Canvas.test.tsx
+  canvas/Toolbar.tsx, Toolbar.test.tsx
+  canvas/objects/StickyNote.tsx, StickyNote.test.tsx
+  canvas/objects/Rectangle.tsx, Rectangle.test.tsx
+lib/
+  firebase/auth.ts
+  yjs/provider.ts
+  hooks/useCanvas.ts, useSelection.ts, useYjs.ts
+  store/canvas.ts (Zustand)
+server/ (separate repo for Hocuspocus)
+```
+
+## Code Quality Standards
+
+- TypeScript strict mode (no `any` types)
+- All components must be functional (no class components)
+- Use Konva.js for all canvas rendering (not raw Canvas API)
+- Handle disconnects gracefully (show banner, auto-reconnect)
+- Never lose data during concurrent edits (Yjs CRDT guarantees this)
+
+## Testing (TDD - Mandatory)
+
+**Approach:** Test-Driven Development. Write tests first, then implement.
+
+### Frontend Component Rule
+
+**Every new component MUST have test cases created alongside it.** No component is complete without tests.
+
+### TDD Workflow
+
+1. **Red**: Write a failing test that describes the expected behavior
+2. **Green**: Implement the minimum code to make the test pass
+3. **Refactor**: Clean up while keeping tests green
+
+### Component Test Requirements
+
+When creating a component:
+- Create `ComponentName.test.tsx` (or `.spec.tsx`) in the same directory
+- Tests must exist before or alongside the component—never ship without them
+- Cover: rendering, user interactions, props, edge cases
+
+```typescript
+// ✅ GOOD: StickyNote.test.tsx exists alongside StickyNote.tsx
+components/canvas/objects/
+  StickyNote.tsx
+  StickyNote.test.tsx
+  Rectangle.tsx
+  Rectangle.test.tsx
+```
+
+### What to Test (Frontend)
+
+| Component Type | Test Focus |
+|----------------|------------|
+| **UI Components** | Renders correctly, handles props, responds to user events |
+| **Canvas Objects** | Position, selection state, color, text content |
+| **Hooks** | Return values, state updates, side effects |
+| **Utils** | Pure functions: input → output |
+
+### Example: Component Test Structure
+
+```typescript
+// StickyNote.test.tsx
+import { render, screen, userEvent } from '@testing-library/react';
+import { StickyNote } from './StickyNote';
+
+describe('StickyNote', () => {
+  it('renders with default color and text', () => {
+    render(<StickyNote id="1" x={0} y={0} text="" color="#FFF59D" />);
+    expect(screen.getByRole('group')).toBeInTheDocument();
+  });
+
+  it('enters edit mode on double-click', async () => {
+    const user = userEvent.setup();
+    render(<StickyNote id="1" x={0} y={0} text="Hello" color="#FFF59D" />);
+    await user.dblclick(screen.getByText('Hello'));
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
+  });
+
+  it('calls onTextChange when text is edited', async () => {
+    const onTextChange = vi.fn();
+    const user = userEvent.setup();
+    render(<StickyNote id="1" x={0} y={0} text="" color="#FFF59D" onTextChange={onTextChange} />);
+    await user.dblclick(screen.getByRole('group'));
+    await user.type(screen.getByRole('textbox'), 'New text');
+    expect(onTextChange).toHaveBeenCalledWith('New text');
+  });
+});
+```
+
+### Test Stack
+
+- **Unit/Component**: Vitest + React Testing Library (or Jest)
+- **E2E**: Playwright (per PRD: signup → create board → real-time sync flow)
+
+### Checklist Before Merging a Component
+
+- [ ] Test file exists (`ComponentName.test.tsx`)
+- [ ] Tests cover core behavior (render, props, interactions)
+- [ ] All tests pass
+- [ ] No skipped or `.only` tests committed
+
+## Deployment Checklist
+
+- [ ] Vercel: Next.js app with env variables set
+- [ ] Railway: Hocuspocus server running on port 1234
+- [ ] Firebase: Auth providers enabled (Email, Google, GitHub)
+- [ ] Supabase: Database tables created with RLS policies
+- [ ] Sentry: Error tracking configured
+
+## Creative Freedom & Enhancements
+
+While MVP requirements are mandatory, you're encouraged to:
+
+### ✅ Allowed Enhancements
+
+- **Better UX**: Improved animations, transitions, visual feedback
+- **Code quality**: Better abstractions, reusable hooks, cleaner architecture
+- **Performance optimizations**: Memoization, virtualization, lazy loading
+- **Developer experience**: Better error messages, logging, debugging tools
+- **Accessibility**: Keyboard shortcuts, focus management (beyond MVP minimum)
+- **Polish**: Loading states, empty states, error boundaries
+- **Additional testing**: Integration tests, visual regression, expanded E2E coverage
+- **Nice-to-have features** IF:
+  - They don't delay MVP completion
+  - They don't complicate the codebase significantly
+  - They enhance the core multiplayer experience
+
+### 🚫 Still Not Allowed (Week 1)
+
+Don't implement these even if you think they're "quick wins":
+- Undo/redo (complex with CRDT)
+- Copy/paste (clipboard complexity)
+- Export features (PNG/PDF)
+- Mobile responsive design (focus desktop first)
+- Advanced permissions/roles
+- Comments or chat features
+
+### Best Practices (Beyond PRD)
+
+```typescript
+// ✅ GOOD: Use proper TypeScript types
+interface WhiteboardObject {
+  id: string;
+  type: 'sticky' | 'rect' | 'circle' | 'line';
+  // ... other properties
+}
+
+// ✅ GOOD: Extract reusable hooks
+const useObjectManipulation = (objectId: string) => {
+  const updatePosition = (x: number, y: number) => { /* ... */ };
+  const updateSize = (width: number, height: number) => { /* ... */ };
+  return { updatePosition, updateSize };
+};
+
+// ✅ GOOD: Error boundaries for resilience
+<ErrorBoundary fallback={<ErrorMessage />}>
+  <Canvas />
+</ErrorBoundary>
+
+// ✅ GOOD: Optimistic updates with rollback
+const moveObject = async (id, x, y) => {
+  // Update local state immediately
+  yObjects.set(id, { ...object, x, y });
+  
+  // Yjs handles sync automatically
+};
+```
+
+### Alternative Approaches Welcome
+
+If you find a better way to implement something than specified in the PRD:
+1. **Ensure it still meets the requirement** (60fps, <200ms sync, etc.)
+2. **Prefer simpler over complex** (fewer dependencies, less code)
+3. **Document why it's better** (performance, maintainability, etc.)
+4. **Ask if unsure** about deviating from PRD specs
+
+Examples of good alternatives:
+- Using React 19 features if they improve performance
+- Better state management patterns than shown in PRD
+- More efficient Konva.js rendering techniques
+- Improved Yjs sync strategies
+
+## Questions to Ask Before Implementing
+
+1. Does this feature exist in the MVP checklist? (If no, is it a helpful enhancement?)
+2. Will this break real-time sync?
+3. Can 2+ users use this simultaneously without conflicts?
+4. Does this work at 60fps with 1000+ objects?
+5. Does this enhance or distract from the core experience?
+6. **If creating a component:** Are the test cases written (TDD)?
+
+If unsure, refer to `/Whiteboard_MVP_PRD.md` for complete specifications.

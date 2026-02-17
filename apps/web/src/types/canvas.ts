@@ -1,0 +1,115 @@
+/**
+ * Canvas object types and interfaces
+ */
+
+export type ObjectType = 'sticky' | 'rect' | 'circle' | 'line' | 'textBubble';
+
+export interface BaseObject {
+  id: string;
+  type: ObjectType;
+  x: number;
+  y: number;
+  rotation: number;
+  zIndex: number;
+  createdBy: string;
+  createdAt: number;
+  modifiedBy?: string;
+  modifiedAt?: number;
+}
+
+export interface StickyNote extends BaseObject {
+  type: 'sticky';
+  width: number;
+  height: number;
+  color: string; // #FFF59D, #F48FB1, #81D4FA, #A5D6A7, #FFCC80
+  text?: string; // Optional text inside
+  textSize?: number;
+  textFamily?: 'Inter' | 'Poppins' | 'Merriweather';
+}
+
+export interface RectShape extends BaseObject {
+  type: 'rect';
+  width: number;
+  height: number;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  text?: string; // Optional text inside
+  textSize?: number;
+  textFamily?: 'Inter' | 'Poppins' | 'Merriweather';
+}
+
+export interface CircleShape extends BaseObject {
+  type: 'circle';
+  radius: number;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  text?: string; // Optional text inside
+  textSize?: number;
+  textFamily?: 'Inter' | 'Poppins' | 'Merriweather';
+}
+
+export type AnchorPosition = 'top' | 'right' | 'bottom' | 'left';
+
+export interface ConnectorAnchor {
+  objectId: string;
+  anchor: AnchorPosition;
+}
+
+export interface LineShape extends BaseObject {
+  type: 'line';
+  points: number[]; // [x1, y1, x2, y2]
+  stroke: string;
+  strokeWidth: number;
+  startAnchor?: ConnectorAnchor; // connected to a shape's anchor point
+  endAnchor?: ConnectorAnchor;   // connected to a shape's anchor point
+}
+
+export interface TextBubbleShape extends BaseObject {
+  type: 'textBubble';
+  width: number;
+  height: number;
+  text?: string;
+  textSize?: number;
+  textFamily?: 'Inter' | 'Poppins' | 'Merriweather';
+}
+
+export type WhiteboardObject = StickyNote | RectShape | CircleShape | LineShape | TextBubbleShape;
+
+export interface CanvasState {
+  objects: Map<string, WhiteboardObject>;
+  selectedIds: string[];
+  scale: number;
+  position: { x: number; y: number };
+}
+
+export const STICKY_COLORS = {
+  YELLOW: '#FFF59D',
+  PINK: '#F48FB1',
+  BLUE: '#81D4FA',
+  GREEN: '#A5D6A7',
+  ORANGE: '#FFCC80',
+} as const;
+
+export const SHAPE_COLORS = {
+  BLACK: '#000000',
+  GRAY: '#6B7280',
+  RED: '#EF4444',
+  ORANGE: '#F97316',
+  YELLOW: '#EAB308',
+  GREEN: '#10B981',
+  BLUE: '#3B82F6',
+  INDIGO: '#6366F1',
+  PURPLE: '#A855F7',
+  PINK: '#EC4899',
+} as const;
+
+export const CURSOR_COLORS = [
+  '#FF6B6B',
+  '#4ECDC4',
+  '#45B7D1',
+  '#FFA07A',
+  '#98D8C8',
+  '#F7DC6F',
+] as const;

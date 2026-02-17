@@ -11,6 +11,7 @@ import { signOut } from '@/lib/firebase/auth';
 import { BrandLogo } from '@/components/brand/BrandLogo';
 import { UserMenu } from '@/components/dashboard/UserMenu';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { NewBoardModal } from '@/components/ui/NewBoardModal';
 import { InviteModal } from '@/components/ui/InviteModal';
 import { InviteAppModal } from '@/components/ui/InviteAppModal';
 import {
@@ -91,6 +92,7 @@ export default function DashboardPage() {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [inviteTarget, setInviteTarget] = useState<{ id: string; title: string } | null>(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showNewBoardModal, setShowNewBoardModal] = useState(false);
 
   // Send heartbeat every 60s so other users know we're online
   usePresenceHeartbeat(user?.uid);
@@ -174,14 +176,13 @@ export default function DashboardPage() {
     router.push('/login');
   };
 
-  const handleCreateBoard = useCallback(async () => {
+  const handleCreateBoard = useCallback(async (boardName: string) => {
     if (!user || creating) return;
 
     setCreating(true);
     setError(null);
     try {
-      // ensureUser already ran during dashboard init — skip the duplicate call
-      const title = `Untitled Board ${boards.length + 1}`;
+      const title = boardName || `Untitled Board ${boards.length + 1}`;
 
       const created = await createBoardInDb({
         title,
@@ -195,6 +196,7 @@ export default function DashboardPage() {
           owner_email: user.email,
         };
         setBoards((prev) => [boardWithOwner, ...prev]);
+        setShowNewBoardModal(false);
         router.push(`/board/${created.id}`);
       } else {
         setError('Failed to create board. Check the browser console for details.');
@@ -322,11 +324,11 @@ export default function DashboardPage() {
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-3xl font-semibold text-slate-900">Boards</h2>
             <button
-              onClick={handleCreateBoard}
+              onClick={() => setShowNewBoardModal(true)}
               disabled={creating}
               className="rounded-xl bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {creating ? 'Creating...' : '+ Create New'}
+              + Create New
             </button>
           </div>
 
@@ -460,6 +462,13 @@ export default function DashboardPage() {
           </div>
         </section>
       </main>
+
+      <NewBoardModal
+        open={showNewBoardModal}
+        loading={creating}
+        onConfirm={handleCreateBoard}
+        onClose={() => setShowNewBoardModal(false)}
+      />
 
       <ConfirmModal
         open={!!deleteTarget}

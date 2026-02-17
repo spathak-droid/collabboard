@@ -4,9 +4,9 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { signIn, signInWithGoogle, signInAsGuest } from '@/lib/firebase/auth';
+import { signIn, signInWithGoogle, signInAsGuest, handleRedirectResult } from '@/lib/firebase/auth';
 
 export const LoginForm = () => {
   const router = useRouter();
@@ -17,6 +17,15 @@ export const LoginForm = () => {
   const [guestName, setGuestName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Handle redirect result when returning from Google/GitHub sign-in
+  useEffect(() => {
+    handleRedirectResult().then((user) => {
+      if (user) {
+        router.push(returnUrl || '/dashboard');
+      }
+    });
+  }, [router, returnUrl]);
   
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,11 +52,14 @@ export const LoginForm = () => {
     setLoading(true);
     
     try {
-      await signInWithGoogle();
-      router.push(returnUrl || '/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Failed to sign in with Google');
-    } finally {
+      const user = await signInWithGoogle();
+      if (user) {
+        router.push(returnUrl || '/dashboard');
+      }
+      // If null, redirect is in progress — don't reset loading
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to sign in with Google';
+      setError(message);
       setLoading(false);
     }
   };

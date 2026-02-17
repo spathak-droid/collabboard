@@ -8,6 +8,8 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInAnonymously,
   GoogleAuthProvider,
   GithubAuthProvider,
@@ -48,13 +50,40 @@ export const signIn = async (email: string, password: string) => {
 };
 
 export const signInWithGoogle = async () => {
-  const userCredential = await signInWithPopup(auth(), googleProvider);
-  return userCredential.user;
+  try {
+    const userCredential = await signInWithPopup(auth(), googleProvider);
+    return userCredential.user;
+  } catch (error: unknown) {
+    const code = (error as { code?: string }).code;
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/popup-blocked') {
+      await signInWithRedirect(auth(), googleProvider);
+      return null;
+    }
+    throw error;
+  }
 };
 
 export const signInWithGithub = async () => {
-  const userCredential = await signInWithPopup(auth(), githubProvider);
-  return userCredential.user;
+  try {
+    const userCredential = await signInWithPopup(auth(), githubProvider);
+    return userCredential.user;
+  } catch (error: unknown) {
+    const code = (error as { code?: string }).code;
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/popup-blocked') {
+      await signInWithRedirect(auth(), githubProvider);
+      return null;
+    }
+    throw error;
+  }
+};
+
+export const handleRedirectResult = async () => {
+  try {
+    const result = await getRedirectResult(auth());
+    return result?.user ?? null;
+  } catch {
+    return null;
+  }
 };
 
 export const signInAsGuest = async (displayName: string) => {

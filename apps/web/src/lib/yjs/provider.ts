@@ -29,6 +29,7 @@ export class YjsProvider {
     }
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:1234';
+    console.log(`[Yjs] Connecting to ${wsUrl} for board: ${boardId}`);
 
     this.hocuspocus = new HocuspocusProvider({
       url: wsUrl,
@@ -40,7 +41,18 @@ export class YjsProvider {
         console.log('[Yjs] Authenticated with server');
       },
       onAuthenticationFailed: ({ reason }) => {
-        console.error('[Yjs] Auth failed:', reason);
+        console.error(`[Yjs] Auth failed for ${wsUrl}:`, reason);
+      },
+      onConnect: () => {
+        console.log('[Yjs] Connected to server');
+      },
+      onDisconnect: () => {
+        console.warn('[Yjs] Disconnected from server');
+      },
+      onStatus: ({ status }) => {
+        if (status === 'disconnected') {
+          console.error(`[Yjs] Connection failed to ${wsUrl}. Check if the server is running and the URL is correct.`);
+        }
       },
     });
 

@@ -110,14 +110,16 @@ export class CursorSyncClient {
     };
 
     this.ws.onerror = (event) => {
-      console.error('🖱️  Cursor sync error:', event);
-      this.config.onError?.(new Error('WebSocket error'));
+      const errorMsg = `WebSocket connection failed to ${wsUrl}. Check if the server is running and the URL is correct.`;
+      console.error('🖱️  Cursor sync error:', errorMsg, event);
+      this.config.onError?.(new Error(errorMsg));
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       // Only attempt reconnect if we're not intentionally disconnecting
       if (!this.isDisconnecting) {
-        console.log('🖱️  Cursor sync disconnected');
+        const closeReason = event.code === 1006 ? 'Connection closed abnormally (check server status)' : `Connection closed (code: ${event.code})`;
+        console.log(`🖱️  Cursor sync disconnected: ${closeReason}`);
         this.isConnected = false;
         this.stopHeartbeat();
         this.config.onDisconnect?.();

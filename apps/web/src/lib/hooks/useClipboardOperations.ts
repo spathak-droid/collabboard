@@ -130,8 +130,13 @@ export function useClipboardOperations(
     cloned.forEach((obj) => createObject(obj));
     clipboardRef.current = selectedObjects.map((obj) => ({ ...obj }));
     pasteCountRef.current = 1;
+    
+    // Deselect all, then select the last cloned object (usually the frame if frames were cloned)
     deselectAll();
-  }, [selectedIds, objects, user, cloneObjectsAtPoint, getCurrentCanvasCursor, createObject, deselectAll]);
+    if (cloned.length > 0) {
+      selectObject(cloned[cloned.length - 1].id, false);
+    }
+  }, [selectedIds, objects, user, cloneObjectsAtPoint, getCurrentCanvasCursor, createObject, deselectAll, selectObject]);
 
   return {
     copyToastVisible,

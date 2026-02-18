@@ -8,12 +8,15 @@ const geistMono = localFont({
   variable: "--font-geist-mono",
   weight: "100 900",
   display: "swap",
+  fallback: ["monospace"],
 });
+
 const manrope = Manrope({
   subsets: ["latin"],
   variable: "--font-manrope",
   weight: ["200", "300", "400", "500", "600", "700", "800"],
   display: "swap",
+  fallback: ["system-ui", "arial"],
 });
 
 export const metadata: Metadata = {

@@ -7,6 +7,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Rect as KonvaRect, Circle as KonvaCircle, Line as KonvaLine, Star as KonvaStar } from 'react-konva';
+import Konva from 'konva';
 import { Canvas } from '@/components/canvas/Canvas';
 import { Toolbar } from '@/components/canvas/Toolbar';
 import { StickyNote } from '@/components/canvas/objects/StickyNote';
@@ -220,8 +221,8 @@ export default function BoardPage() {
   
   const handleShapeStrokeColorChange = (color: string) => {
     if (selectedIds.length > 0) {
-      selectedIds.forEach(id => {
-        const obj = objects.find(o => o.id === id);
+      selectedIds.forEach((id: string) => {
+        const obj = objects.find((o: WhiteboardObject) => o.id === id);
         if (obj && obj.type !== 'sticky') {
           updateObject(id, { stroke: color });
         }
@@ -232,8 +233,8 @@ export default function BoardPage() {
   
   const handleShapeFillColorChange = (color: string) => {
     if (selectedIds.length > 0) {
-      selectedIds.forEach(id => {
-        const obj = objects.find(o => o.id === id);
+      selectedIds.forEach((id: string) => {
+        const obj = objects.find((o: WhiteboardObject) => o.id === id);
         if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star' || obj.type === 'frame')) {
           // For frames, only update the frame fill, not contained objects
           updateObject(id, { fill: color });
@@ -245,8 +246,8 @@ export default function BoardPage() {
 
   const handleStickyColorChange = (color: string) => {
     if (selectedIds.length > 0) {
-      selectedIds.forEach(id => {
-        const obj = objects.find(o => o.id === id);
+      selectedIds.forEach((id: string) => {
+        const obj = objects.find((o: WhiteboardObject) => o.id === id);
         if (obj && obj.type === 'sticky') {
           updateObject(id, { color });
         }
@@ -256,8 +257,8 @@ export default function BoardPage() {
   
   const handleTextChange = (text: string) => {
     if (selectedIds.length > 0) {
-      selectedIds.forEach(id => {
-        const obj = objects.find(o => o.id === id);
+      selectedIds.forEach((id: string) => {
+        const obj = objects.find((o: WhiteboardObject) => o.id === id);
         if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'textBubble' || obj.type === 'triangle' || obj.type === 'star')) {
           updateObject(id, { text });
         }
@@ -268,8 +269,8 @@ export default function BoardPage() {
   const handleTextSizeChange = (size: number) => {
     const clamped = Math.max(12, Math.min(48, size));
     if (selectedIds.length > 0) {
-      selectedIds.forEach(id => {
-        const obj = objects.find(o => o.id === id);
+      selectedIds.forEach((id: string) => {
+        const obj = objects.find((o: WhiteboardObject) => o.id === id);
         if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'textBubble' || obj.type === 'triangle' || obj.type === 'star')) {
           updateObject(id, { textSize: clamped });
         }
@@ -279,8 +280,8 @@ export default function BoardPage() {
 
   const handleTextFamilyChange = (family: 'Inter' | 'Poppins' | 'Merriweather') => {
     if (selectedIds.length > 0) {
-      selectedIds.forEach(id => {
-        const obj = objects.find(o => o.id === id);
+      selectedIds.forEach((id: string) => {
+        const obj = objects.find((o: WhiteboardObject) => o.id === id);
         if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'textBubble' || obj.type === 'triangle' || obj.type === 'star')) {
           updateObject(id, { textFamily: family });
         }
@@ -443,8 +444,8 @@ export default function BoardPage() {
           } as WhiteboardObject);
         } else if (obj.type === 'frame') {
           const frame = obj as FrameType;
-          const newContainedIds = (frame.containedObjectIds || []).map(id => idMap.get(id) || id);
-          const frameCount = objects.filter(o => o.type === 'frame').length + cloned.filter(o => o.type === 'frame').length + 1;
+          const newContainedIds = (frame.containedObjectIds || []).map((id: string) => idMap.get(id) || id);
+          const frameCount = objects.filter((o: WhiteboardObject) => o.type === 'frame').length + cloned.filter((o: WhiteboardObject) => o.type === 'frame').length + 1;
           cloned.push({
             ...baseMeta,
             x: frame.x + dx,
@@ -471,10 +472,11 @@ export default function BoardPage() {
   // OLD getConnectedObjectIds removed - now using hook
 
   const handleCanvasClick = useCallback(
-    (e: any) => {
+    (e: Konva.KonvaEventObject<MouseEvent>) => {
       const stage = e.target.getStage();
-      const pointerPosition = stage.getPointerPosition();
+      if (!stage) return;
       
+      const pointerPosition = stage.getPointerPosition();
       if (!pointerPosition) return;
       
       const { x, y } = getPlacementCoordinates(pointerPosition.x, pointerPosition.y);
@@ -618,14 +620,14 @@ export default function BoardPage() {
 
   // Render frames behind all other objects so inner-object clicks are not stolen.
   const renderObjects = useMemo(() => {
-    const frames = objects.filter((obj) => obj.type === 'frame');
-    const others = objects.filter((obj) => obj.type !== 'frame');
+    const frames = objects.filter((obj: WhiteboardObject) => obj.type === 'frame');
+    const others = objects.filter((obj: WhiteboardObject) => obj.type !== 'frame');
     return [...frames, ...others];
   }, [objects]);
 
   // Check if any selected object is a frame, and if so, lock contained objects
   const selectedFrameIds = useMemo(() => {
-    return selectedIds.filter((id) => {
+    return selectedIds.filter((id: string) => {
       const obj = objectsMap.get(id);
       return obj?.type === 'frame';
     });
@@ -711,7 +713,7 @@ export default function BoardPage() {
       const frame = objectsMap.get(frameId);
       if (!frame || frame.type !== 'frame') {
         manipulation.liveDragRef.current.set(frameId, { x: liveX, y: liveY });
-        manipulation.setDragTick((t) => t + 1);
+        manipulation.setDragTick((t: number) => t + 1);
         return;
       }
 
@@ -777,7 +779,7 @@ export default function BoardPage() {
         }
       }
 
-      manipulation.setDragTick((t) => t + 1);
+      manipulation.setDragTick((t: number) => t + 1);
     },
     [objectsMap]
   );
@@ -788,8 +790,8 @@ export default function BoardPage() {
     ? objectsMap
     : (() => {
         const map = new Map(objectsMap);
-        manipulation.liveDragRef.current.forEach((pos, id) => {
-          const obj = map.get(id);
+        manipulation.liveDragRef.current.forEach((pos: { x: number; y: number }, id: string) => {
+          const obj = map.get(id) as WhiteboardObject | undefined;
           if (obj) {
             if (obj.type === 'line') {
               const line = obj as LineShape;
@@ -800,13 +802,13 @@ export default function BoardPage() {
             }
           }
         });
-        liveLinePointsRef.current.forEach((points, id) => {
-          const obj = map.get(id);
+        liveLinePointsRef.current.forEach((points: number[], id: string) => {
+          const obj = map.get(id) as WhiteboardObject | undefined;
           if (obj && obj.type === 'line') {
             map.set(id, { ...obj, points } as WhiteboardObject);
           }
         });
-        manipulation.liveTransformRef.current.forEach((transform, id) => {
+        manipulation.liveTransformRef.current.forEach((transform: { x: number; y: number; rotation: number; width?: number; height?: number; radius?: number }, id: string) => {
           const obj = map.get(id);
           if (obj) {
             const updates: Partial<WhiteboardObject> & {
@@ -826,10 +828,11 @@ export default function BoardPage() {
   // Connector drawing functions moved to useConnectorDrawing hook
 
   const handleMouseMove = useCallback(
-    (e: any) => {
+    (e: Konva.KonvaEventObject<MouseEvent>) => {
       const stage = e.target.getStage();
-      const pointerPosition = stage.getPointerPosition();
+      if (!stage) return;
       
+      const pointerPosition = stage.getPointerPosition();
       if (!pointerPosition) return;
       
       const x = (pointerPosition.x - position.x) / scale;
@@ -983,7 +986,7 @@ export default function BoardPage() {
     const now = Date.now();
     
     // Generate default frame name (frame1, frame2, etc.)
-    const frameCount = objects.filter(obj => obj.type === 'frame').length + 1;
+    const frameCount = objects.filter((obj: WhiteboardObject) => obj.type === 'frame').length + 1;
     const frameName = `frame${frameCount}`;
     
     const frame: FrameType = {
@@ -1017,23 +1020,23 @@ export default function BoardPage() {
     const containedInSelectedFrames = new Set<string>();
 
     // First pass: identify frames and mark their contained objects
-    selectedIds.forEach((id) => {
+    selectedIds.forEach((id: string) => {
       const obj = objectsMap.get(id);
       if (obj?.type === 'frame') {
         // Mark all contained objects as being deleted with their frame
-        obj.containedObjectIds.forEach((containedId) => {
+        obj.containedObjectIds?.forEach((containedId: string) => {
           containedInSelectedFrames.add(containedId);
         });
       }
     });
 
     // Second pass: collect IDs to delete
-    selectedIds.forEach((id) => {
+    selectedIds.forEach((id: string) => {
       const obj = objectsMap.get(id);
       if (obj?.type === 'frame') {
         // When deleting a frame, also delete all contained objects
         idsToDeleteSet.add(id);
-        obj.containedObjectIds.forEach((containedId) => {
+        obj.containedObjectIds?.forEach((containedId: string) => {
           idsToDeleteSet.add(containedId);
         });
       } else {
@@ -1138,7 +1141,7 @@ export default function BoardPage() {
     isYou: boolean;
   };
 
-  const viewingIds = new Set(onlineUsers.map((s) => s.user.id));
+  const viewingIds = new Set(onlineUsers.map((s: { user: { id: string } }) => s.user.id));
 
   const getStatus = (uid: string): PresenceStatus => {
     if (viewingIds.has(uid)) return 'viewing';
@@ -1163,7 +1166,7 @@ export default function BoardPage() {
   }
 
   // 2) Previously-seen users who left this board
-  Array.from(seenUsersRef.current.entries()).forEach(([uid, info]) => {
+  (Array.from(seenUsersRef.current.entries()) as Array<[string, { name: string; color: string }]>).forEach(([uid, info]) => {
     if (addedUids.has(uid)) return;
     addedUids.add(uid);
     collaborators.push({
@@ -1267,7 +1270,7 @@ export default function BoardPage() {
           {/* Collaborator avatars */}
           <div className="relative" ref={usersDropdownRef}>
             <button
-              onClick={() => setShowAllUsers((prev) => !prev)}
+              onClick={() => setShowAllUsers((prev: boolean) => !prev)}
               className="flex items-center focus:outline-none"
               title="View collaborators"
             >
@@ -1404,7 +1407,7 @@ export default function BoardPage() {
       {/* Show selection area properties when selection area is active */}
       {selectionArea && selectedIds.length > 0 && (
         <PropertiesSidebar
-          selectedObjects={objects.filter(obj => selectedIds.includes(obj.id))}
+          selectedObjects={objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id))}
           onStrokeColorChange={handleShapeStrokeColorChange}
           onFillColorChange={handleShapeFillColorChange}
           onStickyColorChange={handleStickyColorChange}
@@ -1421,7 +1424,7 @@ export default function BoardPage() {
       {/* Show regular properties sidebar when no selection area */}
       {!selectionArea && selectedIds.length > 0 && (
         <PropertiesSidebar
-          selectedObjects={objects.filter(obj => selectedIds.includes(obj.id))}
+          selectedObjects={objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id))}
           onStrokeColorChange={handleShapeStrokeColorChange}
           onFillColorChange={handleShapeFillColorChange}
           onStickyColorChange={handleStickyColorChange}
@@ -1429,8 +1432,8 @@ export default function BoardPage() {
           onTextSizeChange={handleTextSizeChange}
           onTextFamilyChange={handleTextFamilyChange}
           onDelete={handleDelete}
-          onDuplicate={objects.filter(obj => selectedIds.includes(obj.id)).some(obj => obj.type === 'frame') ? undefined : clipboard.duplicateSelectedObjects}
-          onCopy={objects.filter(obj => selectedIds.includes(obj.id)).some(obj => obj.type === 'frame') ? undefined : clipboard.copySelectedObjects}
+          onDuplicate={objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id)).some((obj: WhiteboardObject) => obj.type === 'frame') ? undefined : clipboard.duplicateSelectedObjects}
+          onCopy={objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id)).some((obj: WhiteboardObject) => obj.type === 'frame') ? undefined : clipboard.copySelectedObjects}
         />
       )}
 
@@ -1447,7 +1450,7 @@ export default function BoardPage() {
       <Canvas 
         boardId={boardId} 
         objects={objects}
-        onClick={(e) => {
+        onClick={(e: Konva.KonvaEventObject<MouseEvent>) => {
           if (connectorDrawing.isDrawingLine) {
             const stage = e.target.getStage();
             const pointerPosition = stage?.getPointerPosition();
@@ -1460,7 +1463,7 @@ export default function BoardPage() {
             handleCanvasClick(e);
           }
         }}
-        onMouseMove={(e) => {
+        onMouseMove={(e: Konva.KonvaEventObject<MouseEvent>) => {
           handleMouseMove(e);
           handleCanvasMouseMove(e);
         }}
@@ -1573,7 +1576,7 @@ export default function BoardPage() {
           />
         )}
 
-        {renderObjects.map((obj) => {
+        {renderObjects.map((obj: WhiteboardObject) => {
           const renderObj = (liveObjectsMap.get(obj.id) ?? obj) as WhiteboardObject;
 
           if (renderObj.type === 'frame') {
@@ -1594,7 +1597,7 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => updateFrameAndContents(obj.id, updates)}
+                onUpdate={(updates: Partial<FrameType>) => updateFrameAndContents(obj.id, updates)}
                 onDragMove={handleFrameDragMove}
                 onTransformMove={manipulation.handleShapeTransformMove}
               />
@@ -1609,7 +1612,7 @@ export default function BoardPage() {
                 data={renderObj as StickyNoteType}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={!isLocked}
-                onSelect={(e) => {
+                onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
                     e.evt.stopPropagation();
@@ -1621,7 +1624,7 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
+                onUpdate={(updates: Partial<StickyNoteType>) => manipulation.updateShapeAndConnectors(obj.id, updates)}
                 onDragMove={manipulation.handleShapeDragMove}
                 onTransformMove={manipulation.handleShapeTransformMove}
               />
@@ -1692,7 +1695,7 @@ export default function BoardPage() {
                 data={lineData}
                 resolvedPoints={resolved}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                onSelect={(e) => {
+                onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
                     e.evt.stopPropagation();
@@ -1704,7 +1707,7 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => updateObject(obj.id, updates)}
+                onUpdate={(updates: Partial<LineShape>) => updateObject(obj.id, updates)}
                 onEndpointDrag={connectorDrawing.handleEndpointDrag}
                 onEndpointDragEnd={connectorDrawing.handleEndpointDragEnd}
               />
@@ -1719,7 +1722,7 @@ export default function BoardPage() {
                 data={renderObj as TextBubbleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={!isLocked}
-                onSelect={(e) => {
+                onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
                     e.evt.stopPropagation();
@@ -1731,7 +1734,7 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
+                onUpdate={(updates: Partial<TextBubbleShape>) => manipulation.updateShapeAndConnectors(obj.id, updates)}
                 onDragMove={manipulation.handleShapeDragMove}
                 onTransformMove={manipulation.handleShapeTransformMove}
               />
@@ -1796,10 +1799,10 @@ export default function BoardPage() {
         })}
 
         {/* Connection dots on shapes — show when line tool active, drawing, or hovering */}
-        {objects.map((obj) => {
+        {objects.map((obj: WhiteboardObject) => {
           const renderObj = (liveObjectsMap.get(obj.id) ?? obj) as WhiteboardObject;
           if (renderObj.type === 'line' || renderObj.type === 'frame') return null;
-          const anyLineSelected = selectedIds.some((sid) => {
+          const anyLineSelected = selectedIds.some((sid: string) => {
             const o = objectsMap.get(sid);
             return o?.type === 'line';
           });

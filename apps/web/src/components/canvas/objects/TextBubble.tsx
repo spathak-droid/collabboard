@@ -15,6 +15,7 @@ import type { TextBubbleShape } from '@/types/canvas';
 interface TextBubbleProps {
   data: TextBubbleShape;
   isSelected: boolean;
+  isDraggable?: boolean;
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<TextBubbleShape>) => void;
   onDragMove?: (id: string, x: number, y: number) => void;
@@ -27,6 +28,7 @@ const BUBBLE_RADIUS = 16;
 const TextBubbleComponent = ({
   data,
   isSelected,
+  isDraggable = true,
   onSelect,
   onUpdate,
   onDragMove,
@@ -258,10 +260,11 @@ const TextBubbleComponent = ({
     <>
       <Group
         ref={groupRef}
+        id={data.id}
         x={renderX}
         y={renderY}
         rotation={renderRotation}
-        draggable
+        draggable={isDraggable}
         onClick={onSelect}
         onTap={onSelect}
         onDblClick={handleTextEdit}

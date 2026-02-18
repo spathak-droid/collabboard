@@ -1,5 +1,5 @@
 /**
- * ConnectionDots — renders 4 anchor dots (top, right, bottom, left) on a shape.
+ * ConnectionDots — renders shape-specific anchor dots.
  * Shown when the shape is hovered or the line tool is active.
  */
 

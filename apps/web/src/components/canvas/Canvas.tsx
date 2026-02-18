@@ -6,7 +6,7 @@
 'use client';
 
 import { useRef, useEffect, useCallback, useState, memo } from 'react';
-import { Stage, Layer } from 'react-konva';
+import { Stage, Layer, Rect as KonvaRect } from 'react-konva';
 import type Konva from 'konva';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { Grid } from './Grid';
@@ -20,18 +20,18 @@ interface CanvasProps {
   onObjectDragStart?: () => void;
   onObjectDragEnd?: () => void;
   theme?: 'light' | 'dark';
+  stageRef?: React.RefObject<Konva.Stage>;
 }
 
-const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove, onObjectDragStart, onObjectDragEnd, theme = 'light' }: CanvasProps) => {
-  const stageRef = useRef<Konva.Stage>(null);
+const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove, onObjectDragStart, onObjectDragEnd, theme = 'light', stageRef: externalStageRef }: CanvasProps) => {
+  const internalStageRef = useRef<Konva.Stage>(null);
+  const stageRef = externalStageRef || internalStageRef;
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
-  const lastPinchDistance = useRef<number | null>(null);
-  const isPanning = useRef(false);
-  const lastMousePos = useRef({ x: 0, y: 0 });
+  const isSelecting = useRef(false);
   
-  const { scale, position, setScale, setPosition, resetView, gridMode } = useCanvasStore();
+  const { scale, position, setScale, setPosition, resetView, gridMode, activeTool, selectionRect, setSelectionRect } = useCanvasStore();
   const isInlineEditing = () => typeof document !== 'undefined' && !!document.getElementById('inline-shape-editor');
   
   // Set canvas dimensions
@@ -75,7 +75,7 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
     };
   }, []);
   
-  // Handle wheel zoom
+  // Handle wheel zoom and two-finger pan
   const handleWheel = useCallback(
     (e: Konva.KonvaEventObject<WheelEvent>) => {
       e.evt.preventDefault();
@@ -88,34 +88,37 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
       const pointer = stage.getPointerPosition();
       if (!pointer) return;
       
-      // Detect if this is a pinch gesture (smooth, continuous zooming)
+      // Detect if this is a pinch gesture (smooth, continuous zooming with Ctrl key)
       const isPinch = e.evt.ctrlKey;
       
-      // Calculate zoom factor
-      let scaleBy;
-      if (isPinch) {
-        // Trackpad pinch - smoother, more precise
-        scaleBy = 1 - e.evt.deltaY * 0.01;
-      } else {
-        // Mouse wheel or two-finger scroll - zoom based on direction
-        scaleBy = e.evt.deltaY < 0 ? 1.05 : 0.95;
+      // Detect two-finger pan (deltaX or deltaY without Ctrl, not using mouse wheel)
+      const isTwoFingerPan = !e.evt.ctrlKey && (Math.abs(e.evt.deltaX) > 0 || Math.abs(e.evt.deltaY) > 0);
+      
+      if (isTwoFingerPan) {
+        // Two-finger pan (trackpad swipe)
+        setPosition({
+          x: position.x - e.evt.deltaX,
+          y: position.y - e.evt.deltaY,
+        });
+      } else if (isPinch) {
+        // Trackpad pinch zoom - smoother, more precise
+        const scaleBy = 1 - e.evt.deltaY * 0.01;
+        const newScale = Math.max(0.1, Math.min(5, oldScale * scaleBy));
+        
+        // Calculate new position to zoom toward cursor
+        const mousePointTo = {
+          x: (pointer.x - position.x) / oldScale,
+          y: (pointer.y - position.y) / oldScale,
+        };
+        
+        const newPosition = {
+          x: pointer.x - mousePointTo.x * newScale,
+          y: pointer.y - mousePointTo.y * newScale,
+        };
+        
+        setScale(newScale);
+        setPosition(newPosition);
       }
-      
-      const newScale = Math.max(0.1, Math.min(5, oldScale * scaleBy));
-      
-      // Calculate new position to zoom toward cursor
-      const mousePointTo = {
-        x: (pointer.x - position.x) / oldScale,
-        y: (pointer.y - position.y) / oldScale,
-      };
-      
-      const newPosition = {
-        x: pointer.x - mousePointTo.x * newScale,
-        y: pointer.y - mousePointTo.y * newScale,
-      };
-      
-      setScale(newScale);
-      setPosition(newPosition);
     },
     [scale, position, setScale, setPosition]
   );
@@ -132,69 +135,80 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
     [resetView]
   );
   
-  // Handle mouse down for manual panning
+  // Handle mouse down - start selection rectangle
   const handleMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     if (isInlineEditing()) return;
-    // Only start panning if clicking on the stage background
-    if (e.target === e.target.getStage()) {
-      isPanning.current = true;
+    
+    // Start selection if clicking on stage background and activeTool is 'select' or 'frame'
+    if (e.target === e.target.getStage() && (activeTool === 'select' || activeTool === 'frame')) {
+      isSelecting.current = true;
       const stage = e.target.getStage();
       const pos = stage?.getPointerPosition();
-      if (pos) {
-        lastMousePos.current = { x: pos.x, y: pos.y };
-        dragStartPos.current = { x: pos.x, y: pos.y };
+      if (pos && stage) {
+        // Convert screen coordinates to canvas coordinates
+        const canvasX = (pos.x - position.x) / scale;
+        const canvasY = (pos.y - position.y) / scale;
+        dragStartPos.current = { x: canvasX, y: canvasY };
+        
+        // Initialize selection rectangle
+        setSelectionRect({
+          x: canvasX,
+          y: canvasY,
+          width: 0,
+          height: 0,
+        });
       }
     }
-  }, []);
+  }, [activeTool, position, scale, setSelectionRect]);
   
-  // Handle mouse move for manual panning
+  // Handle mouse move - update selection rectangle
   const handleMouseMoveInternal = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     if (isInlineEditing()) return;
-    if (isPanning.current) {
+    
+    // Update selection rectangle if selecting
+    if (isSelecting.current) {
       const stage = e.target.getStage();
       const pos = stage?.getPointerPosition();
-      if (pos) {
-        const dx = pos.x - lastMousePos.current.x;
-        const dy = pos.y - lastMousePos.current.y;
+      if (pos && stage) {
+        // Convert screen coordinates to canvas coordinates
+        const canvasX = (pos.x - position.x) / scale;
+        const canvasY = (pos.y - position.y) / scale;
         
-        setPosition({
-          x: position.x + dx,
-          y: position.y + dy,
+        // Update selection rectangle
+        setSelectionRect({
+          x: Math.min(dragStartPos.current.x, canvasX),
+          y: Math.min(dragStartPos.current.y, canvasY),
+          width: Math.abs(canvasX - dragStartPos.current.x),
+          height: Math.abs(canvasY - dragStartPos.current.y),
         });
-        
-        lastMousePos.current = { x: pos.x, y: pos.y };
       }
     }
     
-    // Call the prop onMouseMove if provided
+    // Call the prop onMouseMove if provided (for selection, etc.)
     if (onMouseMove) {
       onMouseMove(e);
     }
-  }, [position, setPosition, onMouseMove]);
+  }, [position, scale, setSelectionRect, onMouseMove]);
   
-  // Handle mouse up to stop panning
+  // Handle mouse up - finalize selection
   const handleMouseUp = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     if (isInlineEditing()) return;
-    if (isPanning.current) {
-      // Check if we actually panned (moved more than 5 pixels)
-      const stage = stageRef.current;
-      const pos = stage?.getPointerPosition();
-      if (pos) {
-        const dx = Math.abs(pos.x - dragStartPos.current.x);
-        const dy = Math.abs(pos.y - dragStartPos.current.y);
-        setIsDragging(dx > 5 || dy > 5);
-      }
+    
+    if (isSelecting.current) {
+      isSelecting.current = false;
+      // Clear selectionRect to trigger frame creation in parent
+      setSelectionRect(null);
     }
-    isPanning.current = false;
-    setTimeout(() => setIsDragging(false), 50);
-  }, []);
+    
+    setIsDragging(false);
+  }, [setSelectionRect]);
   
-  // Handle click event - only fire if not dragging or panning
+  // Handle click event
   const handleClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (isInlineEditing()) return;
-      // Don't trigger click if we were dragging or panning
-      if (isDragging || isPanning.current) {
+      // Don't trigger click if we were dragging
+      if (isDragging) {
         return;
       }
       
@@ -237,6 +251,22 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
     [setPosition]
   );
   
+  // Set cursor style based on active tool
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    
+    const container = stage.container();
+    if (!container) return;
+    
+    if (!activeTool || activeTool === 'select') {
+      container.style.cursor = 'default';
+    } else {
+      // For drawing tools (sticky, rect, circle, triangle, star, line, textBubble, frame), use crosshair
+      container.style.cursor = 'crosshair';
+    }
+  }, [activeTool, stageRef]);
+
   return (
     <div 
       className="w-full h-screen overflow-hidden"
@@ -274,6 +304,21 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
           
           {/* Canvas objects will be rendered here */}
           {children}
+          
+          {/* Selection rectangle */}
+          {selectionRect && (
+            <KonvaRect
+              x={selectionRect.x}
+              y={selectionRect.y}
+              width={selectionRect.width}
+              height={selectionRect.height}
+              fill="rgba(59, 130, 246, 0.1)"
+              stroke="#3b82f6"
+              strokeWidth={2 / scale}
+              dash={[10 / scale, 5 / scale]}
+              listening={false}
+            />
+          )}
         </Layer>
       </Stage>
     </div>

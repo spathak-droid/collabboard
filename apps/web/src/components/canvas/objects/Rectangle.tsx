@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useRef, useEffect, useState, memo } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Group, Rect, Transformer, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { RectShape } from '@/types/canvas';
@@ -15,118 +15,77 @@ import type { RectShape } from '@/types/canvas';
 interface RectangleProps {
   data: RectShape;
   isSelected: boolean;
+  isDraggable?: boolean;
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<RectShape>) => void;
   onDragMove?: (id: string, x: number, y: number) => void;
   onTransformMove?: (id: string, x: number, y: number, rotation: number, dimensions?: { width?: number; height?: number }) => void;
 }
 
-const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, onTransformMove }: RectangleProps) => {
+const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdate, onDragMove, onTransformMove }: RectangleProps) => {
   const groupRef = useRef<Konva.Group>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const [isEditingText, setIsEditingText] = useState(false);
-
-  // Local override: stores the position the user is actively dragging/transforming to.
-  // While set, incoming Yjs prop changes won't snap the shape.
-  // Cleared automatically once Yjs data matches the committed position.
-  const localPosRef = useRef<{ x: number; y: number; rotation: number } | null>(null);
-  const committedPosRef = useRef<{ x: number; y: number; rotation: number } | null>(null);
-
-  // Once Yjs data catches up to the committed position, clear the override
-  useEffect(() => {
-    if (committedPosRef.current) {
-      const c = committedPosRef.current;
-      if (Math.abs(data.x - c.x) < 1 && Math.abs(data.y - c.y) < 1) {
-        localPosRef.current = null;
-        committedPosRef.current = null;
-      }
-    }
-  }, [data.x, data.y, data.rotation]);
-
-  // Derive render position: local override takes priority
-  const renderX = localPosRef.current?.x ?? data.x;
-  const renderY = localPosRef.current?.y ?? data.y;
-  const renderRotation = localPosRef.current?.rotation ?? data.rotation;
+  
+  // Track base dimensions at transform start to prevent compounding scale
+  const baseDimensionsRef = useRef<{ width: number; height: number } | null>(null);
+  
+  const rectWidth = data.width;
+  const rectHeight = data.height;
 
   useEffect(() => {
     if (isSelected && transformerRef.current && groupRef.current) {
       transformerRef.current.nodes([groupRef.current]);
       transformerRef.current.getLayer()?.batchDraw();
     }
-  }, [isSelected, data.x, data.y, data.width, data.height, data.rotation]);
+  }, [isSelected, data.x, data.y, rectWidth, rectHeight, data.rotation]);
 
   const handleDragStart = () => {
-    const node = groupRef.current;
-    if (node) {
-      localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
-    }
     window.dispatchEvent(new Event('object-drag-start'));
   };
 
   const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
-    localPosRef.current = {
-      x: e.target.x(),
-      y: e.target.y(),
-      rotation: localPosRef.current?.rotation ?? data.rotation,
-    };
     onDragMove?.(data.id, e.target.x(), e.target.y());
   };
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     const finalX = e.target.x();
     const finalY = e.target.y();
-    // Keep localPosRef set to prevent snap-back; record what we committed
-    localPosRef.current = { x: finalX, y: finalY, rotation: localPosRef.current?.rotation ?? data.rotation };
-    committedPosRef.current = { x: finalX, y: finalY, rotation: localPosRef.current.rotation };
     window.dispatchEvent(new Event('object-drag-end'));
     onUpdate({ x: finalX, y: finalY });
   };
 
   const handleTransformStart = () => {
-    const node = groupRef.current;
-    if (node) {
-      localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
-    }
+    baseDimensionsRef.current = { width: data.width, height: data.height };
     window.dispatchEvent(new Event('object-transform-start'));
   };
 
   const handleTransform = () => {
     const node = groupRef.current;
-    if (node && onTransformMove) {
+    if (node && onTransformMove && baseDimensionsRef.current) {
       const scaleX = node.scaleX();
       const scaleY = node.scaleY();
-      const liveWidth = data.width * scaleX;
-      const liveHeight = data.height * scaleY;
+      const liveWidth = baseDimensionsRef.current.width * scaleX;
+      const liveHeight = baseDimensionsRef.current.height * scaleY;
       onTransformMove(data.id, node.x(), node.y(), node.rotation(), { width: liveWidth, height: liveHeight });
     }
   };
 
   const handleTransformEnd = () => {
     const node = groupRef.current;
-    if (!node) return;
+    if (!node || !baseDimensionsRef.current) return;
 
     const scaleX = node.scaleX();
     const scaleY = node.scaleY();
-    const newWidth = Math.max(20, data.width * scaleX);
-    const newHeight = Math.max(20, data.height * scaleY);
+    const newWidth = Math.max(20, baseDimensionsRef.current.width * scaleX);
+    const newHeight = Math.max(20, baseDimensionsRef.current.height * scaleY);
 
     node.scaleX(1);
     node.scaleY(1);
 
-    // Update child Rect dimensions imperatively so the visual stays correct
-    // until React re-renders with the new Yjs data
-    const rectNode = node.findOne('Rect');
-    if (rectNode) {
-      rectNode.width(newWidth);
-      rectNode.height(newHeight);
-    }
-
     const finalX = node.x();
     const finalY = node.y();
     const finalRotation = node.rotation();
-
-    localPosRef.current = { x: finalX, y: finalY, rotation: finalRotation };
-    committedPosRef.current = { x: finalX, y: finalY, rotation: finalRotation };
 
     // Force Transformer to recalculate bounding box
     if (transformerRef.current) {
@@ -135,6 +94,9 @@ const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, 
     }
 
     window.dispatchEvent(new Event('object-transform-end'));
+    
+    // Clear refs after all updates
+    baseDimensionsRef.current = null;
 
     onUpdate({
       width: newWidth,
@@ -249,10 +211,11 @@ const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, 
     <>
       <Group
         ref={groupRef}
-        x={renderX}
-        y={renderY}
-        rotation={renderRotation}
-        draggable
+        id={data.id}
+        x={data.x}
+        y={data.y}
+        rotation={data.rotation}
+        draggable={isDraggable}
         onClick={onSelect}
         onTap={onSelect}
         onDblClick={handleTextEdit}
@@ -266,8 +229,8 @@ const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, 
         <Rect
           x={0}
           y={0}
-          width={data.width}
-          height={data.height}
+          width={rectWidth}
+          height={rectHeight}
           fill={data.fill}
           stroke={data.stroke}
           strokeWidth={data.strokeWidth}
@@ -310,19 +273,4 @@ const RectangleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, 
   );
 };
 
-export const Rectangle = memo(RectangleComponent, (prev, next) => {
-  return (
-    prev.data.x === next.data.x &&
-    prev.data.y === next.data.y &&
-    prev.data.width === next.data.width &&
-    prev.data.height === next.data.height &&
-    prev.data.fill === next.data.fill &&
-    prev.data.stroke === next.data.stroke &&
-    prev.data.rotation === next.data.rotation &&
-    prev.data.text === next.data.text &&
-    prev.data.textSize === next.data.textSize &&
-    prev.data.textFamily === next.data.textFamily &&
-    prev.isSelected === next.isSelected &&
-    prev.onDragMove === next.onDragMove
-  );
-});
+export const Rectangle = RectangleComponent;

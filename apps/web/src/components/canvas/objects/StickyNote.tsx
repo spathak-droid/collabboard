@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState, memo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Circle, Group, Line, Rect, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import type { StickyNote as StickyNoteType } from '@/types/canvas';
@@ -15,6 +15,7 @@ import type { StickyNote as StickyNoteType } from '@/types/canvas';
 interface StickyNoteProps {
   data: StickyNoteType;
   isSelected: boolean;
+  isDraggable?: boolean;
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<StickyNoteType>) => void;
   onDelete?: () => void;
@@ -25,6 +26,7 @@ interface StickyNoteProps {
 const StickyNoteComponent = ({
   data,
   isSelected,
+  isDraggable = true,
   onSelect,
   onUpdate,
   onDragMove,
@@ -34,24 +36,11 @@ const StickyNoteComponent = ({
   const textRef = useRef<Konva.Text>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const [isEditingText, setIsEditingText] = useState(false);
+  
+  // Track base dimensions at transform start to prevent compounding scale
+  const baseDimensionsRef = useRef<{ width: number; height: number } | null>(null);
 
-  const localPosRef = useRef<{ x: number; y: number; rotation: number } | null>(null);
-  const committedPosRef = useRef<{ x: number; y: number; rotation: number } | null>(null);
-
-  useEffect(() => {
-    if (committedPosRef.current) {
-      const c = committedPosRef.current;
-      if (Math.abs(data.x - c.x) < 1 && Math.abs(data.y - c.y) < 1) {
-        localPosRef.current = null;
-        committedPosRef.current = null;
-      }
-    }
-  }, [data.x, data.y, data.rotation]);
-
-  const renderX = localPosRef.current?.x ?? data.x;
-  const renderY = localPosRef.current?.y ?? data.y;
-  const renderRotation = localPosRef.current?.rotation ?? data.rotation;
-
+  // Use data dimensions directly - Konva's scale will handle the visual sizing during transform
   const noteWidth = data.width;
   const noteHeight = data.height;
   const foldSize = 34;
@@ -107,30 +96,19 @@ const StickyNoteComponent = ({
       transformerRef.current.nodes([groupRef.current]);
       transformerRef.current.getLayer()?.batchDraw();
     }
-  }, [isSelected, data.x, data.y, data.width, data.height, data.rotation]);
+  }, [isSelected, data.x, data.y, noteWidth, noteHeight, data.rotation]);
 
   const handleDragStart = () => {
-    const node = groupRef.current;
-    if (node) {
-      localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
-    }
     window.dispatchEvent(new Event('object-drag-start'));
   };
 
   const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
-    localPosRef.current = {
-      x: e.target.x(),
-      y: e.target.y(),
-      rotation: localPosRef.current?.rotation ?? data.rotation,
-    };
     onDragMove?.(data.id, e.target.x(), e.target.y());
   };
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     const finalX = e.target.x();
     const finalY = e.target.y();
-    localPosRef.current = { x: finalX, y: finalY, rotation: localPosRef.current?.rotation ?? data.rotation };
-    committedPosRef.current = { x: finalX, y: finalY, rotation: localPosRef.current.rotation };
     window.dispatchEvent(new Event('object-drag-end'));
     onUpdate({
       x: finalX,
@@ -140,52 +118,37 @@ const StickyNoteComponent = ({
   };
 
   const handleTransformStart = () => {
-    const node = groupRef.current;
-    if (node) {
-      localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
-    }
+    // Capture base dimensions before transform starts
+    baseDimensionsRef.current = { width: data.width, height: data.height };
     window.dispatchEvent(new Event('object-transform-start'));
   };
 
   const handleTransform = () => {
     const node = groupRef.current;
-    if (node && onTransformMove) {
+    if (node && onTransformMove && baseDimensionsRef.current) {
       const scaleX = node.scaleX();
       const scaleY = node.scaleY();
-      const liveWidth = noteWidth * scaleX;
-      const liveHeight = noteHeight * scaleY;
+      const liveWidth = baseDimensionsRef.current.width * scaleX;
+      const liveHeight = baseDimensionsRef.current.height * scaleY;
       onTransformMove(data.id, node.x(), node.y(), node.rotation(), { width: liveWidth, height: liveHeight });
     }
   };
 
   const handleTransformEnd = () => {
     const node = groupRef.current;
-    if (!node) return;
+    if (!node || !baseDimensionsRef.current) return;
 
     const scaleX = node.scaleX();
     const scaleY = node.scaleY();
-    const newWidth = Math.max(120, noteWidth * scaleX);
-    const newHeight = Math.max(120, noteHeight * scaleY);
+    const newWidth = Math.max(120, baseDimensionsRef.current.width * scaleX);
+    const newHeight = Math.max(120, baseDimensionsRef.current.height * scaleY);
 
     node.scaleX(1);
     node.scaleY(1);
 
-    // Update child node dimensions imperatively so the visual stays correct
-    // until React re-renders with the new Yjs data
-    const children = node.getChildren();
-    for (const child of children) {
-      if (child.className === 'Rect') {
-        child.width(newWidth);
-        child.height(newHeight);
-      }
-    }
-
     const finalX = node.x();
     const finalY = node.y();
     const finalRotation = node.rotation();
-
-    localPosRef.current = { x: finalX, y: finalY, rotation: finalRotation };
-    committedPosRef.current = { x: finalX, y: finalY, rotation: finalRotation };
 
     if (transformerRef.current) {
       transformerRef.current.forceUpdate();
@@ -193,6 +156,9 @@ const StickyNoteComponent = ({
     }
 
     window.dispatchEvent(new Event('object-transform-end'));
+    
+    // Clear refs after all updates
+    baseDimensionsRef.current = null;
 
     onUpdate({
       x: finalX,
@@ -300,10 +266,11 @@ const StickyNoteComponent = ({
     <>
       <Group
         ref={groupRef}
-        x={renderX}
-        y={renderY}
-        rotation={renderRotation}
-        draggable={true}
+        id={data.id}
+        x={data.x}
+        y={data.y}
+        rotation={data.rotation}
+        draggable={isDraggable}
         onClick={onSelect}
         onTap={onSelect}
         onDblClick={handleTextEdit}
@@ -398,18 +365,4 @@ const StickyNoteComponent = ({
   );
 };
 
-export const StickyNote = memo(StickyNoteComponent, (prev, next) => {
-  return (
-    prev.data.x === next.data.x &&
-    prev.data.y === next.data.y &&
-    prev.data.rotation === next.data.rotation &&
-    prev.data.width === next.data.width &&
-    prev.data.height === next.data.height &&
-    prev.data.text === next.data.text &&
-    prev.data.textSize === next.data.textSize &&
-    prev.data.textFamily === next.data.textFamily &&
-    prev.data.color === next.data.color &&
-    prev.isSelected === next.isSelected &&
-    prev.onDragMove === next.onDragMove
-  );
-});
+export const StickyNote = StickyNoteComponent;

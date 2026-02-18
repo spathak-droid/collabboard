@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useRef, useEffect, useState, memo } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { Group, Circle as KonvaCircle, Transformer, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { CircleShape } from '@/types/canvas';
@@ -15,108 +15,74 @@ import type { CircleShape } from '@/types/canvas';
 interface CircleProps {
   data: CircleShape;
   isSelected: boolean;
+  isDraggable?: boolean;
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<CircleShape>) => void;
   onDragMove?: (id: string, x: number, y: number) => void;
   onTransformMove?: (id: string, x: number, y: number, rotation: number, dimensions?: { radius?: number }) => void;
 }
 
-const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, onTransformMove }: CircleProps) => {
+const CircleComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdate, onDragMove, onTransformMove }: CircleProps) => {
   const groupRef = useRef<Konva.Group>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const [isEditingText, setIsEditingText] = useState(false);
-
-  const localPosRef = useRef<{ x: number; y: number; rotation: number } | null>(null);
-  const committedPosRef = useRef<{ x: number; y: number; rotation: number } | null>(null);
-
-  useEffect(() => {
-    if (committedPosRef.current) {
-      const c = committedPosRef.current;
-      if (Math.abs(data.x - c.x) < 1 && Math.abs(data.y - c.y) < 1) {
-        localPosRef.current = null;
-        committedPosRef.current = null;
-      }
-    }
-  }, [data.x, data.y, data.rotation]);
-
-  const renderX = localPosRef.current?.x ?? data.x;
-  const renderY = localPosRef.current?.y ?? data.y;
-  const renderRotation = localPosRef.current?.rotation ?? data.rotation;
+  
+  // Track base radius at transform start to prevent compounding scale
+  const baseRadiusRef = useRef<number | null>(null);
+  
+  const circleRadius = data.radius;
 
   useEffect(() => {
     if (isSelected && transformerRef.current && groupRef.current) {
       transformerRef.current.nodes([groupRef.current]);
       transformerRef.current.getLayer()?.batchDraw();
     }
-  }, [isSelected, data.x, data.y, data.radius, data.rotation]);
+  }, [isSelected, data.x, data.y, circleRadius, data.rotation]);
 
   const handleDragStart = () => {
-    const node = groupRef.current;
-    if (node) {
-      localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
-    }
     window.dispatchEvent(new Event('object-drag-start'));
   };
 
   const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
-    localPosRef.current = {
-      x: e.target.x(),
-      y: e.target.y(),
-      rotation: localPosRef.current?.rotation ?? data.rotation,
-    };
     onDragMove?.(data.id, e.target.x(), e.target.y());
   };
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     const finalX = e.target.x();
     const finalY = e.target.y();
-    localPosRef.current = { x: finalX, y: finalY, rotation: localPosRef.current?.rotation ?? data.rotation };
-    committedPosRef.current = { x: finalX, y: finalY, rotation: localPosRef.current.rotation };
     window.dispatchEvent(new Event('object-drag-end'));
     onUpdate({ x: finalX, y: finalY });
   };
 
   const handleTransformStart = () => {
-    const node = groupRef.current;
-    if (node) {
-      localPosRef.current = { x: node.x(), y: node.y(), rotation: node.rotation() };
-    }
+    baseRadiusRef.current = data.radius;
     window.dispatchEvent(new Event('object-transform-start'));
   };
 
   const handleTransform = () => {
     const node = groupRef.current;
-    if (node && onTransformMove) {
+    if (node && onTransformMove && baseRadiusRef.current !== null) {
       const scaleX = node.scaleX();
       const scaleY = node.scaleY();
-      const liveRadius = data.radius * Math.max(scaleX, scaleY);
+      const liveRadius = baseRadiusRef.current * Math.max(scaleX, scaleY);
       onTransformMove(data.id, node.x(), node.y(), node.rotation(), { radius: liveRadius });
     }
   };
 
   const handleTransformEnd = () => {
     const node = groupRef.current;
-    if (!node) return;
+    if (!node || baseRadiusRef.current === null) return;
 
     const scaleX = node.scaleX();
     const scaleY = node.scaleY();
-    const newRadius = Math.max(5, data.radius * Math.max(scaleX, scaleY));
+    const newRadius = Math.max(5, baseRadiusRef.current * Math.max(scaleX, scaleY));
 
     node.scaleX(1);
     node.scaleY(1);
 
-    // Update child Circle radius imperatively
-    const circleNode = node.findOne('Circle');
-    if (circleNode) {
-      (circleNode as Konva.Circle).radius(newRadius);
-    }
-
     const finalX = node.x();
     const finalY = node.y();
     const finalRotation = node.rotation();
-
-    localPosRef.current = { x: finalX, y: finalY, rotation: finalRotation };
-    committedPosRef.current = { x: finalX, y: finalY, rotation: finalRotation };
 
     if (transformerRef.current) {
       transformerRef.current.forceUpdate();
@@ -124,6 +90,9 @@ const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, onT
     }
 
     window.dispatchEvent(new Event('object-transform-end'));
+    
+    // Clear refs after all updates
+    baseRadiusRef.current = null;
 
     onUpdate({
       radius: newRadius,
@@ -235,10 +204,11 @@ const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, onT
     <>
       <Group
         ref={groupRef}
-        x={renderX}
-        y={renderY}
-        rotation={renderRotation}
-        draggable
+        id={data.id}
+        x={data.x}
+        y={data.y}
+        rotation={data.rotation}
+        draggable={isDraggable}
         onClick={onSelect}
         onTap={onSelect}
         onDblClick={handleTextEdit}
@@ -252,7 +222,7 @@ const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, onT
         <KonvaCircle
           x={0}
           y={0}
-          radius={data.radius}
+          radius={circleRadius}
           fill={data.fill}
           stroke={data.stroke}
           strokeWidth={data.strokeWidth}
@@ -295,18 +265,4 @@ const CircleComponent = ({ data, isSelected, onSelect, onUpdate, onDragMove, onT
   );
 };
 
-export const Circle = memo(CircleComponent, (prev, next) => {
-  return (
-    prev.data.x === next.data.x &&
-    prev.data.y === next.data.y &&
-    prev.data.radius === next.data.radius &&
-    prev.data.fill === next.data.fill &&
-    prev.data.stroke === next.data.stroke &&
-    prev.data.rotation === next.data.rotation &&
-    prev.data.text === next.data.text &&
-    prev.data.textSize === next.data.textSize &&
-    prev.data.textFamily === next.data.textFamily &&
-    prev.isSelected === next.isSelected &&
-    prev.onDragMove === next.onDragMove
-  );
-});
+export const Circle = CircleComponent;

@@ -1,0 +1,17 @@
+{
+  "name": "cursor-sync-server",
+  "version": "1.0.0",
+  "description": "Ultra-low latency cursor WebSocket server",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": ["websocket", "cursor", "realtime"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

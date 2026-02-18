@@ -11,6 +11,64 @@ This project is building a collaborative whiteboard platform with **bulletproof 
 
 A simple whiteboard with perfect real-time sync beats a feature-rich board with broken collaboration.
 
+## Change Communication Protocol (Mandatory)
+
+**Before making any changes, ALWAYS clarify:**
+
+1. **What needs to be changed?** - Clearly state the specific feature, bug fix, or improvement
+2. **Which page/file needs to be changed?** - Identify the exact file path(s) and component(s) affected
+3. **Why is this change needed?** - Explain the reasoning, problem being solved, or requirement being met
+
+**When implementing changes, ALWAYS explain:**
+
+- **What was changed** - Specific modifications made to code, components, or files
+- **Where it was changed** - Exact file paths and line numbers (when relevant)
+- **Why it was changed** - Reasoning behind the approach, how it solves the problem, and any trade-offs considered
+
+### Example Change Communication
+
+```
+✅ GOOD Change Communication:
+
+"What needs to be changed: Add double-click to edit functionality for sticky notes
+Which page/file: components/canvas/objects/StickyNote.tsx
+Why: Users need to edit sticky note text after creation (MVP requirement #2)
+
+Implementation:
+- Changed: Added onDoubleClick handler to StickyNote component (lines 45-52)
+- Where: components/canvas/objects/StickyNote.tsx
+- Why: Double-click is standard UX pattern for editing text. Handler toggles edit mode state and focuses textarea for immediate typing. Uses React state to manage edit mode without breaking Yjs sync (text updates still go through Yjs on blur).
+
+Also updated: StickyNote.test.tsx to test double-click behavior
+Why: TDD requirement - tests must exist alongside component changes"
+```
+
+```
+❌ BAD Change Communication:
+
+"Fixed the sticky note editing"
+```
+
+**This protocol ensures:**
+- Clear understanding of requirements before implementation
+- Transparency in decision-making
+- Easier code review and maintenance
+- Better documentation of changes
+
+### Documentation Guidelines
+
+**IMPORTANT:** Do NOT create `.md` files for improvements, optimizations, or explanations.
+
+- ✅ **DO:** Explain improvements, optimizations, and changes directly in the chat
+- ✅ **DO:** Use inline code comments for complex logic explanations
+- ✅ **DO:** Add JSDoc comments for public APIs and functions
+- ❌ **DON'T:** Create separate `.md` documentation files for improvements
+- ❌ **DON'T:** Create `OPTIMIZATIONS.md`, `IMPROVEMENTS.md`, or similar files
+
+**Rationale:** Keep documentation in code (comments) and explanations in chat. Avoid creating additional markdown files that need maintenance and can become outdated.
+
+**Exception:** Only create `.md` files if explicitly requested by the user.
+
 ## Tech Stack (Mandatory)
 
 - **Frontend**: Next.js 14 + TypeScript + Konva.js
@@ -27,7 +85,7 @@ A simple whiteboard with perfect real-time sync beats a feature-rich board with 
 2. ✅ Sticky notes with editable text (200x200px, 5 colors)
 3. ✅ At least one shape type (Rectangle/Circle/Line)
 4. ✅ Create, move, resize, rotate objects
-5. ✅ Real-time CRDT sync (<200ms latency)
+5. ✅ Real-time CRDT sync (<100ms object sync, <50ms cursor sync)
 6. ✅ Multiplayer cursors with name labels
 7. ✅ Presence awareness (online users list)
 8. ✅ Firebase Auth (3 providers)
@@ -48,10 +106,29 @@ setObjects([...objects, newObject]); // Will break multiplayer!
 
 ### Performance Requirements
 
-- Canvas must render at 60fps with 1000+ objects
-- Sync latency: <200ms between users
-- Page load: <3 seconds (TTI)
-- Sync on drag **end only**, not during drag
+**These metrics MUST be verified on every code change and deployment:**
+
+| Metric | Target | Notes |
+|--------|--------|-------|
+| **Frame rate** | 60 FPS | During pan, zoom, object manipulation |
+| **Object sync latency** | <100ms | Time for object changes to sync between users |
+| **Cursor sync latency** | <50ms | Time for cursor position to sync between users |
+| **Object capacity** | 500+ objects | Without performance drops or frame rate degradation |
+| **Concurrent users** | 5+ users | Without performance degradation |
+
+**Additional Performance Standards:**
+- Page load: <3 seconds (TTI - Time to Interactive)
+- Sync on drag **end only**, not during drag (prevents sync spam)
+- Canvas rendering must maintain 60fps even with 500+ objects visible
+
+**Performance Testing Checklist:**
+- [ ] Frame rate stays at 60 FPS during pan/zoom operations
+- [ ] Frame rate stays at 60 FPS when manipulating objects (move, resize, rotate)
+- [ ] Object changes sync to other users within 100ms
+- [ ] Cursor positions sync to other users within 50ms
+- [ ] Canvas performs smoothly with 500+ objects on screen
+- [ ] No degradation with 5+ concurrent users active
+- [ ] Page loads and becomes interactive within 3 seconds
 
 ### Data Structures
 
@@ -291,10 +368,11 @@ const moveObject = async (id, x, y) => {
 ### Alternative Approaches Welcome
 
 If you find a better way to implement something than specified in the PRD:
-1. **Ensure it still meets the requirement** (60fps, <200ms sync, etc.)
+1. **Ensure it still meets ALL performance requirements** (60 FPS, <100ms object sync, <50ms cursor sync, 500+ objects, 5+ users)
 2. **Prefer simpler over complex** (fewer dependencies, less code)
 3. **Document why it's better** (performance, maintainability, etc.)
-4. **Ask if unsure** about deviating from PRD specs
+4. **Verify performance metrics** before considering the change complete
+5. **Ask if unsure** about deviating from PRD specs
 
 Examples of good alternatives:
 - Using React 19 features if they improve performance
@@ -304,11 +382,33 @@ Examples of good alternatives:
 
 ## Questions to Ask Before Implementing
 
-1. Does this feature exist in the MVP checklist? (If no, is it a helpful enhancement?)
-2. Will this break real-time sync?
-3. Can 2+ users use this simultaneously without conflicts?
-4. Does this work at 60fps with 1000+ objects?
-5. Does this enhance or distract from the core experience?
-6. **If creating a component:** Are the test cases written (TDD)?
+**First, clarify the change (see Change Communication Protocol above):**
+1. What needs to be changed?
+2. Which page/file needs to be changed?
+3. Why is this change needed?
+
+**Then, validate the implementation:**
+4. Does this feature exist in the MVP checklist? (If no, is it a helpful enhancement?)
+5. Will this break real-time sync?
+6. Can 2+ users use this simultaneously without conflicts?
+7. **Performance check:** Does this meet all performance targets?
+   - 60 FPS during pan, zoom, object manipulation?
+   - Object sync latency <100ms?
+   - Cursor sync latency <50ms?
+   - Works with 500+ objects without performance drops?
+   - Supports 5+ concurrent users without degradation?
+8. Does this enhance or distract from the core experience?
+9. **If creating a component:** Are the test cases written (TDD)?
+
+**After implementing, verify and explain:**
+10. **Performance verification:** Have all performance metrics been tested and confirmed?
+    - Frame rate: 60 FPS ✓
+    - Object sync: <100ms ✓
+    - Cursor sync: <50ms ✓
+    - Object capacity: 500+ objects ✓
+    - Concurrent users: 5+ users ✓
+11. What was changed (specific modifications)?
+12. Where was it changed (file paths and locations)?
+13. Why was it changed (reasoning and approach)?
 
 If unsure, refer to `/Whiteboard_MVP_PRD.md` for complete specifications.

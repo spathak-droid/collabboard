@@ -1,0 +1,359 @@
+---
+globs: /apps/web
+alwaysApply: false
+---
+# TypeScript & Code Style Guide for apps/web
+
+This guide defines TypeScript and code style conventions for the collaborative whiteboard application.
+
+## Tech Stack
+
+- **Framework**: Next.js 14 App Router with TypeScript strict mode
+- **UI Library**: Material-UI (MUI) for components
+- **Canvas**: Konva.js + react-konva for 2D canvas rendering
+- **State Management**: Zustand for local UI state, Yjs for shared state
+- **Styling**: Tailwind CSS + Material-UI theming
+- **Testing**: Vitest + React Testing Library
+- **Real-time**: Yjs + Hocuspocus for CRDT synchronization
+
+## Code Style and Structure
+
+### General Principles
+- Write concise, technical TypeScript code with accurate examples
+- Use functional and declarative programming patterns; avoid classes
+- Prefer iteration and modularization over code duplication
+- Use descriptive variable names with auxiliary verbs (e.g., `isLoading`, `hasError`, `canEdit`)
+- Structure files in this order:
+  1. Exported component
+  2. Subcomponents
+  3. Helper functions
+  4. Static content/constants
+  5. Type definitions
+
+### File Organization Example
+```typescript
+// 1. Component exports
+export function StickyNote({ data, isSelected, onUpdate }: StickyNoteProps) {
+  // Component implementation
+}
+
+// 2. Subcomponents
+function StickyNoteText({ text, isEditing }: TextProps) {
+  // Subcomponent
+}
+
+// 3. Helper functions
+function calculateTextSize(width: number, height: number): number {
+  return Math.max(12, Math.min(16, height * 0.28));
+}
+
+// 4. Constants
+const DEFAULT_COLORS = ['#FFF59D', '#F48FB1', '#81D4FA'];
+
+// 5. Types (if not imported from @/types)
+interface LocalType {
+  // ...
+}
+```
+
+## Naming Conventions
+
+### Files and Directories
+- Use lowercase with dashes for directories: `components/auth-wizard`, `lib/firebase/auth`
+- Component files: PascalCase: `StickyNote.tsx`, `Canvas.tsx`
+- Test files: `ComponentName.test.tsx` (same directory as component)
+- Utility files: camelCase: `useCanvas.ts`, `canvasUtils.ts`
+
+### Code Naming
+- **Components**: PascalCase: `StickyNote`, `CanvasToolbar`
+- **Functions**: camelCase: `handleDragStart`, `calculatePosition`
+- **Variables**: camelCase: `isSelected`, `currentObject`
+- **Constants**: UPPER_SNAKE_CASE: `MAX_ZOOM`, `DEFAULT_WIDTH`
+- **Types/Interfaces**: PascalCase: `StickyNoteProps`, `CanvasObject`
+
+### Exports
+- **Favor named exports** for components: `export function StickyNote() {}`
+- Use default exports only for Next.js pages: `export default function Page() {}`
+
+## TypeScript Usage
+
+### Type Definitions
+- **Prefer `interface` over `type`** for object shapes
+- Use `type` for unions, intersections, and computed types
+- Avoid `any`; use `unknown` when type is truly unknown
+- Use strict mode (enforced in `tsconfig.json`)
+
+### Examples
+```typescript
+// ✅ GOOD: Interface for props
+interface StickyNoteProps {
+  data: StickyNoteType;
+  isSelected: boolean;
+  onUpdate: (updates: Partial<StickyNoteType>) => void;
+}
+
+// ✅ GOOD: Type for unions
+type ToolType = 'select' | 'sticky' | 'rect' | 'circle';
+
+// ✅ GOOD: Type for computed/utility types
+type ObjectUpdates = Partial<Pick<StickyNoteType, 'x' | 'y' | 'width' | 'height'>>;
+
+// ❌ BAD: Using any
+function processData(data: any) {} // Use unknown or proper type
+
+// ❌ BAD: Using type for simple object shape
+type StickyNoteProps = { // Use interface instead
+  data: StickyNoteType;
+}
+```
+
+### Enums
+- **Avoid enums**; use const objects or union types instead
+```typescript
+// ✅ GOOD: Const object
+const COLORS = {
+  YELLOW: '#FFF59D',
+  PINK: '#F48FB1',
+  BLUE: '#81D4FA',
+} as const;
+
+// ✅ GOOD: Union type
+type Color = '#FFF59D' | '#F48FB1' | '#81D4FA';
+
+// ❌ BAD: Enum
+enum Colors {
+  YELLOW = '#FFF59D',
+  PINK = '#F48FB1',
+}
+```
+
+## Component Patterns
+
+### Functional Components
+- Always use functional components with TypeScript interfaces
+- Use the `function` keyword for component definitions
+- Use arrow functions for callbacks and event handlers
+
+```typescript
+// ✅ GOOD: Function component
+interface CanvasProps {
+  boardId: string;
+  onObjectSelect?: (id: string) => void;
+}
+
+export function Canvas({ boardId, onObjectSelect }: CanvasProps) {
+  const handleClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    // Arrow function for event handler
+  };
+  
+  return <Stage>...</Stage>;
+}
+
+// ❌ BAD: Class component
+class Canvas extends React.Component {} // Don't use classes
+```
+
+### Client Components
+- Use `'use client'` directive at the top of files that need browser APIs
+- Canvas components, interactive UI, and hooks require `'use client'`
+- Server components are preferred when possible (Next.js App Router)
+
+```typescript
+'use client'; // At top of file
+
+import { useState } from 'react';
+import { Stage } from 'react-konva';
+
+export function Canvas() {
+  // Client-side logic
+}
+```
+
+## Syntax and Formatting
+
+### Functions
+- Use `function` keyword for pure functions and components
+- Use arrow functions for callbacks, event handlers, and inline functions
+
+```typescript
+// ✅ GOOD: Function keyword for component
+function StickyNote() {}
+
+// ✅ GOOD: Arrow function for callback
+const handleClick = () => {};
+
+// ✅ GOOD: Arrow function in JSX
+<button onClick={() => handleClick()}>Click</button>
+```
+
+### Conditionals
+- Use concise syntax for simple statements
+- Use curly braces for multi-line blocks
+
+```typescript
+// ✅ GOOD: Concise for simple statements
+if (isSelected) return <SelectedView />;
+
+// ✅ GOOD: Braces for multi-line
+if (isSelected) {
+  return (
+    <SelectedView>
+      <Content />
+    </SelectedView>
+  );
+}
+```
+
+### JSX
+- Use declarative JSX patterns
+- Extract complex logic into helper functions or hooks
+
+```typescript
+// ✅ GOOD: Declarative JSX
+return (
+  <Group>
+    <Rect fill={data.color} />
+    <Text text={displayText} />
+  </Group>
+);
+
+// ❌ BAD: Imperative logic in JSX
+return (
+  <Group>
+    {(() => {
+      const elements = [];
+      for (let i = 0; i < 10; i++) {
+        elements.push(<Rect key={i} />);
+      }
+      return elements;
+    })()}
+  </Group>
+);
+```
+
+## UI and Styling
+
+### Material-UI (MUI)
+- Use Material-UI components for UI elements (buttons, modals, forms)
+- Follow MUI theming patterns for consistent styling
+- Use MUI icons from `@mui/icons-material`
+
+### Tailwind CSS
+- Use Tailwind for utility-first styling
+- Implement responsive design with mobile-first approach
+- Use Tailwind classes for layout, spacing, and colors
+
+### Canvas Styling (Konva)
+- Use Konva's built-in styling props: `fill`, `stroke`, `strokeWidth`
+- Apply styles directly to Konva components: `<Rect fill="#FFF59D" stroke="#000" />`
+
+## Performance Optimization
+
+### React Server Components (RSC)
+- Minimize `'use client'` usage; favor server components when possible
+- Use server components for data fetching and static content
+- Only mark components as client when they need browser APIs or interactivity
+
+### Client Component Optimization
+- Minimize `useEffect` usage; prefer event handlers and derived state
+- Use `useMemo` and `useCallback` sparingly (only when profiling shows benefit)
+- Wrap client components in `Suspense` with fallback when using dynamic imports
+
+### Canvas Performance (Konva)
+- Use `useRef` for Konva node references
+- Batch updates during drag operations (update on drag end, not during drag)
+- Use `shouldComponentUpdate` patterns via React.memo for canvas objects
+- Maintain 60 FPS during pan, zoom, and object manipulation
+
+### Code Splitting
+- Use dynamic imports for non-critical components: `const Modal = dynamic(() => import('./Modal'))`
+- Lazy load heavy dependencies (e.g., Konva transformers)
+
+## State Management
+
+### Local UI State (Zustand)
+- Use Zustand for local UI state (tool selection, sidebar visibility, etc.)
+- Keep Zustand stores small and focused
+- Example: `useToolStore`, `useUIStore`
+
+### Shared State (Yjs)
+- **Never use React state for shared data** (breaks multiplayer sync)
+- Use Yjs maps and arrays for all collaborative state
+- Access Yjs data through provider hooks: `useYjs()`
+- Update shared state through Yjs operations, not React setState
+
+```typescript
+// ✅ GOOD: Yjs for shared state
+const yObjects = ydoc.getMap('objects');
+yObjects.set(objectId, { x, y, color });
+
+// ❌ BAD: React state for shared data
+const [objects, setObjects] = useState([]); // Breaks multiplayer!
+```
+
+## Testing
+
+### Test Structure
+- Create `ComponentName.test.tsx` in the same directory as component
+- Use Vitest + React Testing Library
+- Follow TDD: write tests before or alongside implementation
+
+### Test Patterns
+```typescript
+import { render, screen } from '@testing-library/react';
+import { StickyNote } from './StickyNote';
+
+describe('StickyNote', () => {
+  it('renders with default props', () => {
+    render(<StickyNote data={mockData} isSelected={false} />);
+    expect(screen.getByRole('group')).toBeInTheDocument();
+  });
+});
+```
+
+## Path Aliases
+
+- Use `@/` alias for imports from `src/` directory
+- Example: `import { useCanvas } from '@/hooks/useCanvas'`
+- Configured in `tsconfig.json`: `"@/*": ["./src/*"]`
+
+## Documentation
+
+### JSDoc Comments
+- Add JSDoc comments for complex functions and public APIs
+- Document parameters, return values, and side effects
+
+```typescript
+/**
+ * Updates the position of a canvas object
+ * @param objectId - The unique identifier of the object
+ * @param x - New x coordinate
+ * @param y - New y coordinate
+ * @returns void
+ */
+function updateObjectPosition(objectId: string, x: number, y: number): void {
+  // Implementation
+}
+```
+
+### Inline Comments
+- Use inline comments to explain "why", not "what"
+- Keep comments concise and relevant
+
+## Key Conventions Summary
+
+1. **TypeScript**: Strict mode, prefer interfaces over types, avoid enums
+2. **Components**: Functional components, named exports, `'use client'` when needed
+3. **State**: Zustand for UI, Yjs for shared state (never React state for shared data)
+4. **Styling**: Material-UI for components, Tailwind for utilities, Konva props for canvas
+5. **Testing**: TDD approach, test files alongside components
+6. **Performance**: 60 FPS target, minimize client components, optimize canvas rendering
+7. **Naming**: PascalCase components, camelCase functions/variables, UPPER_SNAKE_CASE constants
+
+## References
+
+- [Next.js 14 Documentation](https://nextjs.org/docs)
+- [TypeScript Handbook](https://www.typescriptlang.org/docs/)
+- [Konva.js Documentation](https://konvajs.org/docs/)
+- [Material-UI Documentation](https://mui.com/)
+- [Yjs Documentation](https://docs.yjs.dev/)

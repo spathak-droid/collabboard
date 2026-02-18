@@ -1,0 +1,164 @@
+---
+description: Assigns Composer 1.5 for code writing and Sonnet for code review
+alwaysApply: true
+---
+
+# Model Role Assignment
+
+This rule defines clear responsibilities for different AI models to optimize the development workflow.
+
+## Model Responsibilities
+
+### Composer 1.5 - Code Implementation
+**Role:** Primary code writer and implementer
+
+**Use Composer 1.5 for:**
+- Writing new features and components
+- Implementing bug fixes
+- Creating tests (following TDD workflow)
+- Refactoring code
+- Setting up new files and boilerplate
+- Writing utility functions and hooks
+- Implementing API endpoints and data flows
+- Creating database schemas and migrations
+
+**Strengths:**
+- Fast code generation
+- Good at following established patterns
+- Efficient at creating boilerplate and repetitive code
+- Handles implementation details well
+
+---
+
+### Sonnet 4.5 - Code Review & Architecture
+**Role:** Code reviewer and architectural advisor
+
+**Use Sonnet for:**
+- Reviewing code written by Composer
+- Identifying bugs, edge cases, and potential issues
+- Checking alignment with PRD requirements
+- Verifying performance standards are met
+- Suggesting architectural improvements
+- Ensuring code quality and best practices
+- Validating real-time sync patterns (Yjs)
+- Reviewing security considerations
+- Checking TypeScript type safety
+- Planning complex features before implementation
+
+**Strengths:**
+- Deep reasoning and analysis
+- Better at spotting subtle bugs
+- Strong architectural thinking
+- Thorough consideration of edge cases
+
+---
+
+## Workflow
+
+### Standard Feature Implementation
+
+1. **Plan (Sonnet):** Architect the approach and identify requirements
+2. **Implement (Composer 1.5):** Write the code following the plan
+3. **Review (Sonnet):** Check code quality, performance, and correctness
+4. **Iterate:** Composer fixes issues found by Sonnet
+
+### Example Workflow
+
+```
+User: "Add ability to change sticky note colors"
+
+Step 1 - Plan (Sonnet):
+- Reviews PRD requirements for sticky notes
+- Identifies files to modify
+- Plans state management approach
+- Considers multiplayer sync implications
+
+Step 2 - Implement (Composer 1.5):
+- Adds color picker UI component
+- Updates StickyNote component
+- Modifies Yjs sync logic
+- Creates test cases
+
+Step 3 - Review (Sonnet):
+- Checks if color changes sync correctly
+- Verifies performance (60 FPS maintained)
+- Tests concurrent edit scenarios
+- Validates against PRD requirements
+- Identifies missing edge cases
+
+Step 4 - Fix (Composer 1.5):
+- Addresses issues found by Sonnet
+- Adds missing tests
+- Optimizes if needed
+```
+
+---
+
+## When to Deviate
+
+**Use Sonnet for implementation when:**
+- The feature is architecturally complex (e.g., CRDT conflict resolution)
+- High risk of subtle bugs (e.g., authentication flows)
+- Requires deep understanding of multiplayer sync
+- Performance optimization is critical
+
+**Use Composer for review when:**
+- Quick syntax or linting checks
+- Verifying simple test coverage
+- Checking code formatting
+
+---
+
+## Key Principles
+
+1. **Composer implements, Sonnet validates** - this is the default flow
+2. **Sonnet plans complex features** - architecture decisions should be reviewed
+3. **Always verify against PRD** - both models must reference requirements
+4. **Performance is non-negotiable** - Sonnet verifies all metrics are met
+5. **Test coverage required** - Composer writes tests, Sonnet ensures completeness
+
+---
+
+## Handoff Protocol
+
+When handing off between models:
+
+**Composer → Sonnet:**
+```
+"Implementation complete. Please review for:
+- Performance requirements (60 FPS, <100ms sync)
+- PRD alignment (sticky note requirements)
+- Edge cases (concurrent edits, disconnects)
+- Test coverage
+- TypeScript type safety"
+```
+
+**Sonnet → Composer:**
+```
+"Review complete. Issues found:
+1. Color sync not propagated to Yjs (line 45 in StickyNote.tsx)
+2. Missing test case for color picker selection
+3. Performance: verify FPS with 500+ objects after color change
+
+Please fix these issues."
+```
+
+---
+
+## Special Cases
+
+### Real-time Sync Changes
+- **Always have Sonnet review** - CRDT sync is critical and error-prone
+- Composer implements, Sonnet validates multiplayer behavior
+
+### Authentication & Security
+- **Always have Sonnet review** - security vulnerabilities require deep analysis
+- Composer implements flows, Sonnet checks for vulnerabilities
+
+### Performance Optimizations
+- **Sonnet should lead** - performance tuning requires deep understanding
+- Sonnet identifies bottlenecks, Composer implements fixes, Sonnet validates
+
+### Test Writing
+- **Composer writes, Sonnet reviews** - TDD workflow
+- Composer creates test cases, Sonnet ensures coverage is complete

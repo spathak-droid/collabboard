@@ -20,6 +20,8 @@ import { Frame } from '@/components/canvas/objects/Frame';
 import { Cursors } from '@/components/canvas/Cursors';
 import { DisconnectBanner } from '@/components/canvas/DisconnectBanner';
 import { PropertiesSidebar } from '@/components/canvas/PropertiesSidebar';
+import { ZoomControl } from '@/components/canvas/ZoomControl';
+import { LatencyStatusButton } from '@/components/canvas/LatencyStatusButton';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useYjs } from '@/lib/hooks/useYjs';
 import { useCursorSync } from '@/lib/hooks/useCursorSync';
@@ -50,8 +52,12 @@ export default function BoardPage() {
   const [shapeFillColor, setShapeFillColor] = useState('#E5E7EB');
   const [showAllUsers, setShowAllUsers] = useState(false);
   const [globalOnlineUids, setGlobalOnlineUids] = useState<Set<string>>(new Set());
+  const [frameWarningVisible, setFrameWarningVisible] = useState(false);
+  const frameWarningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usersDropdownRef = useRef<HTMLDivElement>(null);
+  const [copyToastVisible, setCopyToastVisible] = useState(false);
+  const copyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Send heartbeat every 60s so other users know we're online
   usePresenceHeartbeat(user?.uid);
@@ -100,6 +106,7 @@ export default function BoardPage() {
     updateObject,
     deleteObjects,
     updateCursor,
+    getBroadcastRate,
     hasUnsavedChanges,
   } = useYjs({
     boardId,
@@ -108,12 +115,11 @@ export default function BoardPage() {
   });
 
   // Initialize dedicated cursor sync (bypasses Yjs for ultra-low latency)
-  // Uses same port as Hocuspocus, different path: /cursor/{boardId}
   const { cursors: fastCursors, isConnected: cursorSyncConnected, sendCursor: sendFastCursor } = useCursorSync({
     boardId,
     userId: user?.uid || '',
     userName: user?.displayName || user?.email || 'Anonymous',
-    enabled: !!user && !!boardId, // Re-enabled with single-port mode
+    enabled: !!user && !!boardId, // Enable if user and board are loaded
   });
 
   // Re-fetch board members & global presence whenever someone disconnects
@@ -147,12 +153,16 @@ export default function BoardPage() {
     selectObject,
     deselectAll,
     isSelected,
+    selectByRect,
   } = useSelection();
   
   const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode, setScale, setPosition, selectionRect } = useCanvasStore();
   const [previewPosition, setPreviewPosition] = useState<{ x: number; y: number } | null>(null);
   const isCreatingFrame = useRef(false);
   const pendingFrameRect = useRef<typeof selectionRect>(null);
+  
+  // Selection Area - persistent selection rectangle
+  const [selectionArea, setSelectionArea] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   // ── Connector drawing state ──
   const [isDrawingLine, setIsDrawingLine] = useState(false);
@@ -164,6 +174,10 @@ export default function BoardPage() {
   // Track live drag positions for smooth line following during shape drag
   const liveDragRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const liveTransformRef = useRef<Map<string, { x: number; y: number; rotation: number; width?: number; height?: number; radius?: number }>>(new Map());
+  // Track line points for live drag (for lines contained in frames)
+  const liveLinePointsRef = useRef<Map<string, number[]>>(new Map());
+  // Track initial frame position when drag starts (for calculating contained object deltas)
+  const frameDragStartRef = useRef<Map<string, { x: number; y: number; containedInitialPositions: Map<string, { x: number; y: number; points?: number[] }> }>>(new Map());
   const [, setDragTick] = useState(0);
   const [isTransforming, setIsTransforming] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -173,7 +187,12 @@ export default function BoardPage() {
     const handleTransformStart = () => setIsTransforming(true);
     const handleTransformEnd = () => setIsTransforming(false);
     const handleDragStart = () => setIsDragging(true);
-    const handleDragEnd = () => setIsDragging(false);
+    const handleDragEnd = () => {
+      setIsDragging(false);
+      // Clean up frame drag tracking if drag ends without updateFrameAndContents being called
+      // (e.g., if drag is cancelled)
+      frameDragStartRef.current.clear();
+    };
     
     window.addEventListener('object-transform-start', handleTransformStart);
     window.addEventListener('object-transform-end', handleTransformEnd);
@@ -209,6 +228,15 @@ export default function BoardPage() {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showAllUsers]);
+
+  // Cleanup frame warning timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (frameWarningTimeoutRef.current) {
+        clearTimeout(frameWarningTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Auto-fit canvas when objects first load
   const hasAutoFittedRef = useRef(false);
@@ -274,7 +302,8 @@ export default function BoardPage() {
     if (selectedIds.length > 0) {
       selectedIds.forEach(id => {
         const obj = objects.find(o => o.id === id);
-        if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star')) {
+        if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star' || obj.type === 'frame')) {
+          // For frames, only update the frame fill, not contained objects
           updateObject(id, { fill: color });
         }
       });
@@ -353,7 +382,12 @@ export default function BoardPage() {
         return;
       }
 
-      setPreviewPosition(getPlacementCoordinates(pointerPosition.x, pointerPosition.y));
+      // For frame tool, we still want to show cursor feedback but don't need preview shape
+      if (activeTool === 'frame') {
+        setPreviewPosition(getPlacementCoordinates(pointerPosition.x, pointerPosition.y));
+      } else {
+        setPreviewPosition(getPlacementCoordinates(pointerPosition.x, pointerPosition.y));
+      }
     },
     [activeTool, getPlacementCoordinates]
   );
@@ -362,7 +396,182 @@ export default function BoardPage() {
     if (!activeTool || activeTool === 'select') {
       setPreviewPosition(null);
     }
+    // For frame tool, we want to keep previewPosition active for cursor feedback
   }, [activeTool]);
+
+  // Build an objects map for resolving connector positions
+  const objectsMap = useMemo(() => {
+    const map = new Map<string, WhiteboardObject>();
+    for (const obj of objects) map.set(obj.id, obj);
+    return map;
+  }, [objects]);
+
+  // Get object bounds (needed for frame containment checks and frame creation)
+  const getObjectBounds = useCallback((obj: WhiteboardObject, map: Map<string, WhiteboardObject>) => {
+    const strokePad =
+      'strokeWidth' in obj && typeof obj.strokeWidth === 'number'
+        ? obj.strokeWidth / 2 + 2
+        : 2;
+
+    if (obj.type === 'circle') {
+      return {
+        minX: obj.x - obj.radius - strokePad,
+        minY: obj.y - obj.radius - strokePad,
+        maxX: obj.x + obj.radius + strokePad,
+        maxY: obj.y + obj.radius + strokePad,
+      };
+    }
+
+    if (obj.type === 'line') {
+      const [x1, y1, x2, y2] = resolveLinePoints(obj, map);
+      const pad = (obj.strokeWidth ?? 2) / 2 + 2;
+      return {
+        minX: Math.min(x1, x2) - pad,
+        minY: Math.min(y1, y2) - pad,
+        maxX: Math.max(x1, x2) + pad,
+        maxY: Math.max(y1, y2) + pad,
+      };
+    }
+
+    // Width/height objects rotate around top-left group origin (Konva default).
+    // Use transformed corners so frame bounds include full rotated geometry.
+    const rotation = obj.rotation || 0;
+    const rotRad = (rotation * Math.PI) / 180;
+    const cosR = Math.cos(rotRad);
+    const sinR = Math.sin(rotRad);
+    const localCorners = [
+      { x: 0, y: 0 },
+      { x: obj.width, y: 0 },
+      { x: obj.width, y: obj.height },
+      { x: 0, y: obj.height },
+    ];
+    const worldCorners = localCorners.map((corner) => ({
+      x: obj.x + corner.x * cosR - corner.y * sinR,
+      y: obj.y + corner.x * sinR + corner.y * cosR,
+    }));
+    const xs = worldCorners.map((p) => p.x);
+    const ys = worldCorners.map((p) => p.y);
+
+    return {
+      minX: Math.min(...xs) - strokePad,
+      minY: Math.min(...ys) - strokePad,
+      maxX: Math.max(...xs) + strokePad,
+      maxY: Math.max(...ys) + strokePad,
+    };
+  }, []);
+
+  const getConnectedObjectIds = useCallback((seedIds: string[], allObjects: WhiteboardObject[]) => {
+    const result = new Set<string>(seedIds);
+    const allMap = new Map<string, WhiteboardObject>(allObjects.map((obj) => [obj.id, obj]));
+    const lineObjects = allObjects.filter((obj): obj is LineShape => obj.type === 'line');
+
+    const pointInBounds = (
+      x: number,
+      y: number,
+      bounds: { minX: number; minY: number; maxX: number; maxY: number }
+    ) => {
+      const tolerance = 10;
+      return (
+        x >= bounds.minX - tolerance &&
+        x <= bounds.maxX + tolerance &&
+        y >= bounds.minY - tolerance &&
+        y <= bounds.maxY + tolerance
+      );
+    };
+
+    const getClusterBounds = () => {
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+
+      for (const id of result) {
+        const obj = allMap.get(id);
+        if (!obj || obj.type === 'frame') continue;
+        const bounds = getObjectBounds(obj, allMap);
+        minX = Math.min(minX, bounds.minX);
+        minY = Math.min(minY, bounds.minY);
+        maxX = Math.max(maxX, bounds.maxX);
+        maxY = Math.max(maxY, bounds.maxY);
+      }
+
+      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+        return null;
+      }
+
+      return { minX, minY, maxX, maxY };
+    };
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const clusterBounds = getClusterBounds();
+
+      for (const line of lineObjects) {
+        const lineId = line.id;
+        const startId = line.startAnchor?.objectId;
+        const endId = line.endAnchor?.objectId;
+
+        const touchesClusterByAnchor =
+          (!!startId && result.has(startId)) ||
+          (!!endId && result.has(endId)) ||
+          result.has(lineId);
+
+        const lineBounds = getObjectBounds(line, allMap);
+        const intersectsCluster = clusterBounds
+          ? !(
+              lineBounds.maxX < clusterBounds.minX ||
+              lineBounds.minX > clusterBounds.maxX ||
+              lineBounds.maxY < clusterBounds.minY ||
+              lineBounds.minY > clusterBounds.maxY
+            )
+          : false;
+
+        if (!touchesClusterByAnchor && !intersectsCluster) continue;
+
+        if (!result.has(lineId)) {
+          result.add(lineId);
+          changed = true;
+        }
+
+        if (startId && !result.has(startId)) {
+          result.add(startId);
+          changed = true;
+        }
+        if (endId && !result.has(endId)) {
+          result.add(endId);
+          changed = true;
+        }
+
+        // If endpoints or line span geometrically touch an object, include that object too.
+        const [x1, y1, x2, y2] = resolveLinePoints(line, allMap);
+        const lineSpanBounds = {
+          minX: Math.min(x1, x2),
+          minY: Math.min(y1, y2),
+          maxX: Math.max(x1, x2),
+          maxY: Math.max(y1, y2),
+        };
+        for (const obj of allObjects) {
+          if (obj.type === 'line' || obj.type === 'frame') continue;
+          const bounds = getObjectBounds(obj, allMap);
+          const lineOverlapsObject = !(
+            lineSpanBounds.maxX < bounds.minX ||
+            lineSpanBounds.minX > bounds.maxX ||
+            lineSpanBounds.maxY < bounds.minY ||
+            lineSpanBounds.minY > bounds.maxY
+          );
+          if (lineOverlapsObject || pointInBounds(x1, y1, bounds) || pointInBounds(x2, y2, bounds)) {
+            if (!result.has(obj.id)) {
+              result.add(obj.id);
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+
+    return Array.from(result);
+  }, [getObjectBounds]);
 
   const handleCanvasClick = useCallback(
     (e: any) => {
@@ -372,6 +581,20 @@ export default function BoardPage() {
       if (!pointerPosition) return;
       
       const { x, y } = getPlacementCoordinates(pointerPosition.x, pointerPosition.y);
+      
+      // Check if click is outside the selection area
+      if (selectionArea) {
+        const isOutsideSelectionArea = 
+          x < selectionArea.x ||
+          x > selectionArea.x + selectionArea.width ||
+          y < selectionArea.y ||
+          y > selectionArea.y + selectionArea.height;
+        
+        if (isOutsideSelectionArea) {
+          setSelectionArea(null);
+          deselectAll();
+        }
+      }
       
       if (e.target === stage) {
         deselectAll();
@@ -489,8 +712,66 @@ export default function BoardPage() {
         }
       }
     },
-    [activeTool, objects.length, user, shapeFillColor, shapeStrokeColor, createObject, getPlacementCoordinates, setActiveTool, deselectAll]
+    [activeTool, objects.length, objects, objectsMap, user, shapeFillColor, shapeStrokeColor, createObject, getPlacementCoordinates, setActiveTool, deselectAll, getConnectedObjectIds, getObjectBounds, selectObject, selectionArea]
   );
+
+  // Show frame boundary warning
+  const showFrameWarning = useCallback(() => {
+    setFrameWarningVisible(true);
+    if (frameWarningTimeoutRef.current) {
+      clearTimeout(frameWarningTimeoutRef.current);
+    }
+    frameWarningTimeoutRef.current = setTimeout(() => {
+      setFrameWarningVisible(false);
+    }, 3000);
+  }, []);
+
+  // Find which frame contains an object (if any)
+  const findContainingFrame = useCallback((objectId: string): FrameType | null => {
+    if (!objects || objects.length === 0) return null;
+    for (const obj of objects) {
+      if (obj && obj.type === 'frame') {
+        const frame = obj as FrameType;
+        if (frame.containedObjectIds?.includes(objectId)) {
+          return frame;
+        }
+      }
+    }
+    return null;
+  }, [objects]);
+
+  // Check if object bounds are within frame bounds
+  const isObjectWithinFrame = useCallback((
+    obj: WhiteboardObject,
+    frame: FrameType,
+    objX?: number,
+    objY?: number,
+    objPoints?: number[],
+    map?: Map<string, WhiteboardObject>
+  ): boolean => {
+    const testObj = { ...obj };
+    if (typeof objX === 'number') testObj.x = objX;
+    if (typeof objY === 'number') testObj.y = objY;
+    
+    // For line objects, update points if provided
+    if (obj.type === 'line' && objPoints) {
+      (testObj as LineShape).points = objPoints;
+    }
+    
+    // Create map from objects if not provided
+    const objMap = map || new Map(objects.map((o) => [o.id, o]));
+    const objBounds = getObjectBounds(testObj, objMap);
+    const frameBounds = getObjectBounds(frame, objMap);
+    
+    // Check if object is completely within frame (with small padding)
+    const padding = 5;
+    return (
+      objBounds.minX >= frameBounds.minX + padding &&
+      objBounds.minY >= frameBounds.minY + padding &&
+      objBounds.maxX <= frameBounds.maxX - padding &&
+      objBounds.maxY <= frameBounds.maxY - padding
+    );
+  }, [getObjectBounds, objects]);
   
   // Update a shape and reposition any connected lines
   const updateShapeAndConnectors = useCallback(
@@ -499,10 +780,46 @@ export default function BoardPage() {
       liveDragRef.current.delete(shapeId);
       liveTransformRef.current.delete(shapeId);
 
-      updateObject(shapeId, updates);
-
       const currentObj = objects.find((o) => o.id === shapeId);
       if (!currentObj) return;
+
+      // Check if object is contained in a frame and if new position would be outside
+      const containingFrame = findContainingFrame(shapeId);
+      if (containingFrame && (typeof updates.x === 'number' || typeof updates.y === 'number')) {
+        const newX = typeof updates.x === 'number' ? updates.x : currentObj.x;
+        const newY = typeof updates.y === 'number' ? updates.y : currentObj.y;
+        const tempMap = new Map(objects.map((o) => [o.id, o]));
+        const isWithin = isObjectWithinFrame(currentObj, containingFrame, newX, newY, undefined, tempMap);
+        
+        if (!isWithin) {
+          // Don't update position if outside frame - revert to current position
+          showFrameWarning();
+          // Only update other properties, not position
+          const { x, y, ...otherUpdates } = updates;
+          if (Object.keys(otherUpdates).length > 0) {
+            updateObject(shapeId, otherUpdates);
+          }
+          
+          const updatedObj = { ...currentObj, ...otherUpdates } as WhiteboardObject;
+          // Still update connected lines with current position
+          for (const obj of objects) {
+            if (obj.type !== 'line') continue;
+            const line = obj as LineShape;
+            const startConnected = line.startAnchor?.objectId === shapeId;
+            const endConnected = line.endAnchor?.objectId === shapeId;
+            if (!startConnected && !endConnected) continue;
+
+            const tempMap = new Map(objects.map((o) => [o.id, o]));
+            tempMap.set(shapeId, updatedObj);
+
+            const [x1, y1, x2, y2] = resolveLinePoints(line, tempMap);
+            updateObject(line.id, { x: 0, y: 0, points: [x1, y1, x2, y2] });
+          }
+          return;
+        }
+      }
+
+      updateObject(shapeId, updates);
 
       const updatedObj = { ...currentObj, ...updates } as WhiteboardObject;
 
@@ -520,17 +837,35 @@ export default function BoardPage() {
         updateObject(line.id, { x: 0, y: 0, points: [x1, y1, x2, y2] });
       }
     },
-    [objects, updateObject]
+    [objects, updateObject, findContainingFrame, isObjectWithinFrame, showFrameWarning]
   );
 
   // Live-update connected lines while a shape is being dragged
   // Uses a ref so we bypass stale React state — just store position and trigger re-render
   const handleShapeDragMove = useCallback(
     (shapeId: string, liveX: number, liveY: number) => {
+      const obj = objectsMap.get(shapeId);
+      if (!obj) {
+        liveDragRef.current.set(shapeId, { x: liveX, y: liveY });
+        setDragTick((t) => t + 1);
+        return;
+      }
+
+      // Check if object is contained in a frame
+      const containingFrame = findContainingFrame(shapeId);
+      if (containingFrame) {
+        // Check if new position would be outside frame
+        const tempMap = new Map(objects.map((o) => [o.id, o]));
+        const isWithin = isObjectWithinFrame(obj, containingFrame, liveX, liveY, undefined, tempMap);
+        if (!isWithin) {
+          showFrameWarning();
+        }
+      }
+
       liveDragRef.current.set(shapeId, { x: liveX, y: liveY });
       setDragTick((t) => t + 1);
     },
-    []
+    [objectsMap, findContainingFrame, isObjectWithinFrame, showFrameWarning]
   );
 
   // Live-update connected lines while a shape is being transformed (rotated/resized)
@@ -541,13 +876,6 @@ export default function BoardPage() {
     },
     []
   );
-
-  // Build an objects map for resolving connector positions
-  const objectsMap = useMemo(() => {
-    const map = new Map<string, WhiteboardObject>();
-    for (const obj of objects) map.set(obj.id, obj);
-    return map;
-  }, [objects]);
 
   // Render frames behind all other objects so inner-object clicks are not stolen.
   const renderObjects = useMemo(() => {
@@ -595,35 +923,141 @@ export default function BoardPage() {
 
       // Clear live drag overlays once final values are persisted.
       liveDragRef.current.delete(frameId);
+      frameDragStartRef.current.delete(frameId);
+      
+      // Clear live drag for contained objects
+      if (frame.containedObjectIds) {
+        for (const containedId of frame.containedObjectIds) {
+          liveDragRef.current.delete(containedId);
+          liveLinePointsRef.current.delete(containedId);
+        }
+      }
 
       updateObject(frameId, updates);
-      // Frame drag should not move contained shapes.
-      void deltaX;
-      void deltaY;
-      void isResizeOrRotate;
+      
+      // Move all contained objects when frame moves
+      if ((deltaX !== 0 || deltaY !== 0) && !isResizeOrRotate && frame.containedObjectIds) {
+        for (const containedId of frame.containedObjectIds) {
+          const containedObj = objectsMap.get(containedId);
+          if (!containedObj) continue;
+          
+          // Clear live drag overlay for contained object
+          liveDragRef.current.delete(containedId);
+          
+          if (containedObj.type === 'line') {
+            // Line objects use points array instead of x/y
+            const line = containedObj as LineShape;
+            const newPoints = [
+              line.points[0] + deltaX,
+              line.points[1] + deltaY,
+              line.points[2] + deltaX,
+              line.points[3] + deltaY,
+            ];
+            updateObject(containedId, { points: newPoints });
+          } else {
+            // Regular objects use x/y
+            updateObject(containedId, {
+              x: containedObj.x + deltaX,
+              y: containedObj.y + deltaY,
+            });
+          }
+        }
+      }
     },
     [objectsMap, updateObject]
   );
 
   const handleFrameDragMove = useCallback(
     (frameId: string, liveX: number, liveY: number) => {
+      const frame = objectsMap.get(frameId);
+      if (!frame || frame.type !== 'frame') {
+        liveDragRef.current.set(frameId, { x: liveX, y: liveY });
+        setDragTick((t) => t + 1);
+        return;
+      }
+
+      // Initialize drag start tracking if this is the first move
+      let dragStart = frameDragStartRef.current.get(frameId);
+      if (!dragStart) {
+        const containedInitialPositions = new Map<string, { x: number; y: number; points?: number[] }>();
+        if (frame.containedObjectIds) {
+          for (const containedId of frame.containedObjectIds) {
+            const containedObj = objectsMap.get(containedId);
+            if (!containedObj) continue;
+            if (containedObj.type === 'line') {
+              containedInitialPositions.set(containedId, { 
+                x: containedObj.x, 
+                y: containedObj.y,
+                points: [...(containedObj as LineShape).points]
+              });
+            } else {
+              containedInitialPositions.set(containedId, { 
+                x: containedObj.x, 
+                y: containedObj.y 
+              });
+            }
+          }
+        }
+        dragStart = {
+          x: frame.x,
+          y: frame.y,
+          containedInitialPositions,
+        };
+        frameDragStartRef.current.set(frameId, dragStart);
+      }
+
+      // Calculate delta from initial frame position
+      const deltaX = liveX - dragStart.x;
+      const deltaY = liveY - dragStart.y;
+
       // Move frame visually during drag (persist on drag end).
       liveDragRef.current.set(frameId, { x: liveX, y: liveY });
 
+      // Move all contained objects during live drag
+      if ((deltaX !== 0 || deltaY !== 0) && frame.containedObjectIds) {
+        for (const containedId of frame.containedObjectIds) {
+          const initialPos = dragStart.containedInitialPositions.get(containedId);
+          if (!initialPos) continue;
+          
+          if (initialPos.points) {
+            // Line object - update points array
+            const newPoints = [
+              initialPos.points[0] + deltaX,
+              initialPos.points[1] + deltaY,
+              initialPos.points[2] + deltaX,
+              initialPos.points[3] + deltaY,
+            ];
+            liveLinePointsRef.current.set(containedId, newPoints);
+          } else {
+            // Regular object - update x/y
+            liveDragRef.current.set(containedId, {
+              x: initialPos.x + deltaX,
+              y: initialPos.y + deltaY,
+            });
+          }
+        }
+      }
+
       setDragTick((t) => t + 1);
     },
-    []
+    [objectsMap]
   );
 
   // Overlay live drag positions on top of objectsMap for smooth line rendering
   // Computed every render (cheap — only iterates liveDragRef entries)
-  const liveObjectsMap: Map<string, WhiteboardObject> = liveDragRef.current.size === 0 && liveTransformRef.current.size === 0
+  const liveObjectsMap: Map<string, WhiteboardObject> = liveDragRef.current.size === 0 && liveTransformRef.current.size === 0 && liveLinePointsRef.current.size === 0
     ? objectsMap
     : (() => {
         const map = new Map(objectsMap);
         liveDragRef.current.forEach((pos, id) => {
           const obj = map.get(id);
           if (obj) map.set(id, { ...obj, x: pos.x, y: pos.y } as WhiteboardObject);
+        });
+        liveLinePointsRef.current.forEach((points, id) => {
+          const obj = map.get(id);
+          if (obj && obj.type === 'line') {
+            map.set(id, { ...obj, points } as WhiteboardObject);
+          }
         });
         liveTransformRef.current.forEach((transform, id) => {
           const obj = map.get(id);
@@ -691,8 +1125,12 @@ export default function BoardPage() {
       const x = (pointerPosition.x - position.x) / scale;
       const y = (pointerPosition.y - position.y) / scale;
       
-      // Send cursor via dedicated WebSocket (ultra-low latency)
-      sendFastCursor(x, y);
+      // Use fast cursor sync if connected, otherwise fall back to Yjs awareness
+      if (cursorSyncConnected) {
+        sendFastCursor(x, y);
+      } else {
+        updateCursor(x, y);
+      }
 
       // While drawing a connector line, update the end point to follow cursor
       if (isDrawingLine && drawingLineId) {
@@ -713,7 +1151,7 @@ export default function BoardPage() {
         }
       }
     },
-    [position, scale, sendFastCursor, isDrawingLine, drawingLineId, objectsMap, objects, updateObject]
+    [position, scale, updateCursor, cursorSyncConnected, sendFastCursor, isDrawingLine, drawingLineId, objectsMap, objects, updateObject]
   );
 
   // Second click on empty canvas finishes the line (free endpoint with arrow)
@@ -816,59 +1254,6 @@ export default function BoardPage() {
     [objectsMap, objects, updateObject]
   );
 
-  const getObjectBounds = useCallback((obj: WhiteboardObject, map: Map<string, WhiteboardObject>) => {
-    const strokePad =
-      'strokeWidth' in obj && typeof obj.strokeWidth === 'number'
-        ? obj.strokeWidth / 2 + 2
-        : 2;
-
-    if (obj.type === 'circle') {
-      return {
-        minX: obj.x - obj.radius - strokePad,
-        minY: obj.y - obj.radius - strokePad,
-        maxX: obj.x + obj.radius + strokePad,
-        maxY: obj.y + obj.radius + strokePad,
-      };
-    }
-
-    if (obj.type === 'line') {
-      const [x1, y1, x2, y2] = resolveLinePoints(obj, map);
-      const pad = (obj.strokeWidth ?? 2) / 2 + 2;
-      return {
-        minX: Math.min(x1, x2) - pad,
-        minY: Math.min(y1, y2) - pad,
-        maxX: Math.max(x1, x2) + pad,
-        maxY: Math.max(y1, y2) + pad,
-      };
-    }
-
-    // Width/height objects rotate around top-left group origin (Konva default).
-    // Use transformed corners so frame bounds include full rotated geometry.
-    const rotation = obj.rotation || 0;
-    const rotRad = (rotation * Math.PI) / 180;
-    const cosR = Math.cos(rotRad);
-    const sinR = Math.sin(rotRad);
-    const localCorners = [
-      { x: 0, y: 0 },
-      { x: obj.width, y: 0 },
-      { x: obj.width, y: obj.height },
-      { x: 0, y: obj.height },
-    ];
-    const worldCorners = localCorners.map((corner) => ({
-      x: obj.x + corner.x * cosR - corner.y * sinR,
-      y: obj.y + corner.x * sinR + corner.y * cosR,
-    }));
-    const xs = worldCorners.map((p) => p.x);
-    const ys = worldCorners.map((p) => p.y);
-
-    return {
-      minX: Math.min(...xs) - strokePad,
-      minY: Math.min(...ys) - strokePad,
-      maxX: Math.max(...xs) + strokePad,
-      maxY: Math.max(...ys) + strokePad,
-    };
-  }, []);
-
   const intersectsRect = useCallback(
     (obj: WhiteboardObject, rect: { x: number; y: number; width: number; height: number }, map: Map<string, WhiteboardObject>) => {
       const bounds = getObjectBounds(obj, map);
@@ -882,132 +1267,40 @@ export default function BoardPage() {
     [getObjectBounds]
   );
 
-  const getConnectedObjectIds = useCallback((seedIds: string[], allObjects: WhiteboardObject[]) => {
-    const result = new Set<string>(seedIds);
-    const allMap = new Map<string, WhiteboardObject>(allObjects.map((obj) => [obj.id, obj]));
-    const lineObjects = allObjects.filter((obj): obj is LineShape => obj.type === 'line');
-
-    const pointInBounds = (
-      x: number,
-      y: number,
-      bounds: { minX: number; minY: number; maxX: number; maxY: number }
-    ) => {
-      const tolerance = 10;
-      return (
-        x >= bounds.minX - tolerance &&
-        x <= bounds.maxX + tolerance &&
-        y >= bounds.minY - tolerance &&
-        y <= bounds.maxY + tolerance
-      );
-    };
-
-    const getClusterBounds = () => {
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-
-      for (const id of result) {
-        const obj = allMap.get(id);
-        if (!obj || obj.type === 'frame') continue;
-        const bounds = getObjectBounds(obj, allMap);
-        minX = Math.min(minX, bounds.minX);
-        minY = Math.min(minY, bounds.minY);
-        maxX = Math.max(maxX, bounds.maxX);
-        maxY = Math.max(maxY, bounds.maxY);
-      }
-
-      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
-        return null;
-      }
-
-      return { minX, minY, maxX, maxY };
-    };
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      const clusterBounds = getClusterBounds();
-
-      for (const line of lineObjects) {
-        const lineId = line.id;
-        const startId = line.startAnchor?.objectId;
-        const endId = line.endAnchor?.objectId;
-
-        const touchesClusterByAnchor =
-          (!!startId && result.has(startId)) ||
-          (!!endId && result.has(endId)) ||
-          result.has(lineId);
-
-        const lineBounds = getObjectBounds(line, allMap);
-        const intersectsCluster = clusterBounds
-          ? !(
-              lineBounds.maxX < clusterBounds.minX ||
-              lineBounds.minX > clusterBounds.maxX ||
-              lineBounds.maxY < clusterBounds.minY ||
-              lineBounds.minY > clusterBounds.maxY
-            )
-          : false;
-
-        if (!touchesClusterByAnchor && !intersectsCluster) continue;
-
-        if (!result.has(lineId)) {
-          result.add(lineId);
-          changed = true;
-        }
-
-        if (startId && !result.has(startId)) {
-          result.add(startId);
-          changed = true;
-        }
-        if (endId && !result.has(endId)) {
-          result.add(endId);
-          changed = true;
-        }
-
-        // If endpoints or line span geometrically touch an object, include that object too.
-        const [x1, y1, x2, y2] = resolveLinePoints(line, allMap);
-        const lineSpanBounds = {
-          minX: Math.min(x1, x2),
-          minY: Math.min(y1, y2),
-          maxX: Math.max(x1, x2),
-          maxY: Math.max(y1, y2),
-        };
-        for (const obj of allObjects) {
-          if (obj.type === 'line' || obj.type === 'frame') continue;
-          const bounds = getObjectBounds(obj, allMap);
-          const lineOverlapsObject = !(
-            lineSpanBounds.maxX < bounds.minX ||
-            lineSpanBounds.minX > bounds.maxX ||
-            lineSpanBounds.maxY < bounds.minY ||
-            lineSpanBounds.minY > bounds.maxY
-          );
-          if (lineOverlapsObject || pointInBounds(x1, y1, bounds) || pointInBounds(x2, y2, bounds)) {
-            if (!result.has(obj.id)) {
-              result.add(obj.id);
-              changed = true;
-            }
-          }
-        }
+  // Handle Selection Area - create persistent selection area when dragging in select mode
+  useEffect(() => {
+    // When selectionRect becomes null after being set, check if we should create a selection area
+    if (!selectionRect && pendingFrameRect.current && activeTool === 'select' && !isCreatingFrame.current) {
+      const rect = pendingFrameRect.current;
+      pendingFrameRect.current = null;
+      
+      // Only create selection area if rectangle is large enough
+      if (rect.width >= 10 && rect.height >= 10) {
+        setSelectionArea(rect);
+        // Select objects within the selection area
+        selectByRect(objects, rect);
       }
     }
+  }, [selectionRect, activeTool, objects, selectByRect]);
 
-    return Array.from(result);
-  }, [getObjectBounds]);
-
-  // Create frame from drag selection (in select mode), expand to connected graph.
+  // Create frame from drag selection (in select mode or frame mode), expand to connected graph.
   useEffect(() => {
     if (selectionRect) {
       pendingFrameRect.current = selectionRect;
       return;
     }
 
-    if (!pendingFrameRect.current || isCreatingFrame.current || activeTool !== 'select' || !user) return;
+    // Only create frame if we have a pending rect and activeTool is 'select' or 'frame'
+    // Skip if we're in select mode (that's handled by selection area above)
+    if (!pendingFrameRect.current || isCreatingFrame.current || activeTool !== 'frame' || !user) return;
 
     const rect = pendingFrameRect.current;
     pendingFrameRect.current = null;
 
-    if (rect.width < 10 || rect.height < 10) return;
+    if (rect.width < 10 || rect.height < 10) {
+      isCreatingFrame.current = false;
+      return;
+    }
 
     isCreatingFrame.current = true;
 
@@ -1022,39 +1315,91 @@ export default function BoardPage() {
       if (intersectsRect(obj, rect, objectsMap)) initialIds.push(obj.id);
     }
 
-    if (hasFrameInSelection || initialIds.length === 0) {
-      isCreatingFrame.current = false;
-      return;
+    // In frame mode, always create a frame. In select mode, only if there are objects selected.
+    if (activeTool === 'frame') {
+      // In frame mode, create frame even if no objects are selected (empty frame)
+      if (hasFrameInSelection) {
+        isCreatingFrame.current = false;
+        return;
+      }
+    } else {
+      // In select mode, require objects to be selected
+      if (hasFrameInSelection || initialIds.length === 0) {
+        isCreatingFrame.current = false;
+        return;
+      }
     }
 
-    const containedObjectIds = getConnectedObjectIds(initialIds, objects);
-    if (containedObjectIds.length === 0) {
-      isCreatingFrame.current = false;
-      return;
-    }
+    // In frame mode, use the drag rectangle directly. In select mode, expand to connected objects.
+    let containedObjectIds: string[];
+    let minX: number, minY: number, maxX: number, maxY: number;
 
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
+    if (activeTool === 'frame') {
+      // In frame mode, use the drag rectangle bounds directly
+      containedObjectIds = initialIds.length > 0 ? getConnectedObjectIds(initialIds, objects) : [];
+      minX = rect.x;
+      minY = rect.y;
+      maxX = rect.x + rect.width;
+      maxY = rect.y + rect.height;
 
-    for (const id of containedObjectIds) {
-      const obj = objectsMap.get(id);
-      if (!obj || obj.type === 'frame') continue;
-      const bounds = getObjectBounds(obj, objectsMap);
-      minX = Math.min(minX, bounds.minX);
-      minY = Math.min(minY, bounds.minY);
-      maxX = Math.max(maxX, bounds.maxX);
-      maxY = Math.max(maxY, bounds.maxY);
-    }
+      // If there are objects, calculate bounds from objects instead
+      if (containedObjectIds.length > 0) {
+        minX = Infinity;
+        minY = Infinity;
+        maxX = -Infinity;
+        maxY = -Infinity;
 
-    if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
-      isCreatingFrame.current = false;
-      return;
+        for (const id of containedObjectIds) {
+          const obj = objectsMap.get(id);
+          if (!obj || obj.type === 'frame') continue;
+          const bounds = getObjectBounds(obj, objectsMap);
+          minX = Math.min(minX, bounds.minX);
+          minY = Math.min(minY, bounds.minY);
+          maxX = Math.max(maxX, bounds.maxX);
+          maxY = Math.max(maxY, bounds.maxY);
+        }
+
+        if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+          isCreatingFrame.current = false;
+          return;
+        }
+      }
+    } else {
+      // In select mode, expand to connected objects
+      containedObjectIds = getConnectedObjectIds(initialIds, objects);
+      if (containedObjectIds.length === 0) {
+        isCreatingFrame.current = false;
+        return;
+      }
+
+      minX = Infinity;
+      minY = Infinity;
+      maxX = -Infinity;
+      maxY = -Infinity;
+
+      for (const id of containedObjectIds) {
+        const obj = objectsMap.get(id);
+        if (!obj || obj.type === 'frame') continue;
+        const bounds = getObjectBounds(obj, objectsMap);
+        minX = Math.min(minX, bounds.minX);
+        minY = Math.min(minY, bounds.minY);
+        maxX = Math.max(maxX, bounds.maxX);
+        maxY = Math.max(maxY, bounds.maxY);
+      }
+
+      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+        isCreatingFrame.current = false;
+        return;
+      }
     }
 
     const padding = 20;
     const now = Date.now();
+    
+    // Generate default frame name (frame1, frame2, etc.)
+    const frameCount = objects.filter(obj => obj.type === 'frame').length + 1;
+    const frameName = `frame${frameCount}`;
+    
     const frame: FrameType = {
       id: generateId(),
       type: 'frame',
@@ -1065,8 +1410,9 @@ export default function BoardPage() {
       rotation: 0,
       stroke: '#3b82f6',
       strokeWidth: 2,
-      fill: 'transparent',
+      fill: '#FFFFFF',
       containedObjectIds,
+      name: frameName,
       zIndex: -1,
       createdBy: user.uid,
       createdAt: now,
@@ -1075,30 +1421,271 @@ export default function BoardPage() {
 
     createObject(frame);
     selectObject(frame.id, false);
+    setActiveTool('select');
     isCreatingFrame.current = false;
-  }, [selectionRect, activeTool, user, objects, objectsMap, createObject, selectObject, intersectsRect, getConnectedObjectIds, getObjectBounds]);
+  }, [selectionRect, activeTool, user, objects, objectsMap, createObject, selectObject, setActiveTool, intersectsRect, getConnectedObjectIds, getObjectBounds]);
 
   const getDeleteIds = useCallback(() => {
     const idsToDelete: string[] = [];
-    const containedObjectIds = new Set<string>();
+    const idsToDeleteSet = new Set<string>();
+    const containedInSelectedFrames = new Set<string>();
 
+    // First pass: identify frames and mark their contained objects
     selectedIds.forEach((id) => {
       const obj = objectsMap.get(id);
       if (obj?.type === 'frame') {
+        // Mark all contained objects as being deleted with their frame
         obj.containedObjectIds.forEach((containedId) => {
-          containedObjectIds.add(containedId);
+          containedInSelectedFrames.add(containedId);
         });
       }
     });
 
+    // Second pass: collect IDs to delete
     selectedIds.forEach((id) => {
-      if (!containedObjectIds.has(id)) {
-        idsToDelete.push(id);
+      const obj = objectsMap.get(id);
+      if (obj?.type === 'frame') {
+        // When deleting a frame, also delete all contained objects
+        idsToDeleteSet.add(id);
+        obj.containedObjectIds.forEach((containedId) => {
+          idsToDeleteSet.add(containedId);
+        });
+      } else {
+        // For non-frame objects, only delete if they're not contained in a selected frame
+        // (if they are, they'll be deleted with the frame above)
+        if (!containedInSelectedFrames.has(id)) {
+          idsToDeleteSet.add(id);
+        }
       }
     });
 
+    // Convert set to array
+    idsToDeleteSet.forEach((id) => idsToDelete.push(id));
+
     return idsToDelete;
   }, [selectedIds, objectsMap]);
+
+  // Helper to check if target is an editable element
+  const isEditableElement = (target: EventTarget | null): boolean => {
+    const element = target as HTMLElement | null;
+    if (!element) return false;
+    const tagName = element.tagName.toLowerCase();
+    return (
+      tagName === 'input' ||
+      tagName === 'textarea' ||
+      element.isContentEditable
+    );
+  };
+
+  // Clipboard refs (must be defined before functions that use them)
+  const clipboardRef = useRef<WhiteboardObject[]>([]);
+  const pasteCountRef = useRef(0);
+
+  // Show copy toast notification
+  const showCopyToast = useCallback(() => {
+    setCopyToastVisible(true);
+    if (copyToastTimerRef.current) {
+      clearTimeout(copyToastTimerRef.current);
+    }
+    copyToastTimerRef.current = setTimeout(() => {
+      setCopyToastVisible(false);
+    }, 1300);
+  }, []);
+
+  // Cleanup toast timer on unmount
+  useEffect(() => {
+    return () => {
+      if (copyToastTimerRef.current) {
+        clearTimeout(copyToastTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Get current canvas cursor position
+  const getCurrentCanvasCursor = useCallback(() => {
+    const viewportCenterX = typeof window !== 'undefined' ? window.innerWidth / 2 : 0;
+    const viewportCenterY = typeof window !== 'undefined' ? window.innerHeight / 2 : 0;
+    return {
+      x: (viewportCenterX - position.x) / scale,
+      y: (viewportCenterY - position.y) / scale,
+    };
+  }, [position, scale]);
+
+  // Clone objects including frames and their contained objects
+  const cloneObjectsAtPoint = useCallback((
+    source: WhiteboardObject[],
+    target: { x: number; y: number },
+    userId: string
+  ): WhiteboardObject[] => {
+    // Calculate bounds of all source objects
+    let minX = Infinity;
+    let minY = Infinity;
+    for (const obj of source) {
+      if (obj.type === 'line') {
+        const line = obj as LineShape;
+        minX = Math.min(minX, line.points[0], line.points[2]);
+        minY = Math.min(minY, line.points[1], line.points[3]);
+      } else {
+        minX = Math.min(minX, obj.x);
+        minY = Math.min(minY, obj.y);
+      }
+    }
+    
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return [];
+    
+    const dx = target.x - minX;
+    const dy = target.y - minY;
+
+    const idMap = new Map<string, string>();
+    const allObjectsToClone: WhiteboardObject[] = [];
+    
+    // First pass: collect all objects including contained objects in frames
+    for (const obj of source) {
+      idMap.set(obj.id, generateId());
+      allObjectsToClone.push(obj);
+      
+      // If it's a frame, also clone contained objects
+      if (obj.type === 'frame') {
+        const frame = obj as FrameType;
+        for (const containedId of frame.containedObjectIds || []) {
+          if (!idMap.has(containedId)) {
+            const containedObj = objectsMap.get(containedId);
+            if (containedObj) {
+              idMap.set(containedId, generateId());
+              allObjectsToClone.push(containedObj);
+            }
+          }
+        }
+      }
+    }
+
+    const now = Date.now();
+    const cloned: WhiteboardObject[] = [];
+    
+    for (const obj of allObjectsToClone) {
+      const newId = idMap.get(obj.id)!;
+      const baseMeta = {
+        ...obj,
+        id: newId,
+        zIndex: obj.zIndex + cloned.length + 1,
+        createdBy: userId,
+        createdAt: now,
+        modifiedAt: now,
+      };
+
+      if (obj.type === 'line') {
+        const line = obj as LineShape;
+        const clonedStart = line.startAnchor && idMap.has(line.startAnchor.objectId)
+          ? { ...line.startAnchor, objectId: idMap.get(line.startAnchor.objectId)! }
+          : undefined;
+        const clonedEnd = line.endAnchor && idMap.has(line.endAnchor.objectId)
+          ? { ...line.endAnchor, objectId: idMap.get(line.endAnchor.objectId)! }
+          : undefined;
+        cloned.push({
+          ...baseMeta,
+          x: line.x + dx,
+          y: line.y + dy,
+          points: [
+            line.points[0] + dx,
+            line.points[1] + dy,
+            line.points[2] + dx,
+            line.points[3] + dy,
+          ],
+          startAnchor: clonedStart,
+          endAnchor: clonedEnd,
+        } as WhiteboardObject);
+      } else if (obj.type === 'frame') {
+        const frame = obj as FrameType;
+        // Update containedObjectIds to use new IDs
+        const newContainedIds = (frame.containedObjectIds || []).map(id => idMap.get(id) || id);
+        // Generate new frame name
+        const frameCount = objects.filter(o => o.type === 'frame').length + cloned.filter(o => o.type === 'frame').length + 1;
+        cloned.push({
+          ...baseMeta,
+          x: frame.x + dx,
+          y: frame.y + dy,
+          containedObjectIds: newContainedIds,
+          name: `frame${frameCount}`,
+        } as WhiteboardObject);
+      } else {
+        cloned.push({
+          ...baseMeta,
+          x: obj.x + dx,
+          y: obj.y + dy,
+        } as WhiteboardObject);
+      }
+    }
+    
+    return cloned;
+  }, [objectsMap, objects]);
+
+  // Copy selected objects to clipboard
+  const copySelectedObjects = useCallback(async () => {
+    const selectedObjects = objects.filter(obj => selectedIds.includes(obj.id));
+    if (selectedObjects.length === 0) return;
+    
+    // Store in memory clipboard for internal paste
+    clipboardRef.current = selectedObjects.map((obj) => ({ ...obj }));
+    pasteCountRef.current = 0;
+    
+    // Copy to system clipboard using Clipboard API
+    try {
+      const clipboardData = JSON.stringify(selectedObjects);
+      await navigator.clipboard.writeText(clipboardData);
+      // Show success toast
+      showCopyToast();
+    } catch (err) {
+      // Fallback: clipboard API might not be available (e.g., non-HTTPS)
+      console.warn('Failed to copy to system clipboard:', err);
+      // Still show toast even if clipboard API failed (memory clipboard worked)
+      showCopyToast();
+    }
+  }, [selectedIds, objects, showCopyToast]);
+
+  // Paste objects from clipboard
+  const pasteClipboardObjects = useCallback(async () => {
+    if (!user) return;
+    
+    // Try to read from system clipboard first
+    let objectsToPaste: WhiteboardObject[] = [];
+    try {
+      const clipboardText = await navigator.clipboard.readText();
+      if (clipboardText) {
+        try {
+          const parsed = JSON.parse(clipboardText);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            objectsToPaste = parsed;
+          }
+        } catch {
+          // Not valid JSON, fall back to memory clipboard
+        }
+      }
+    } catch (err) {
+      // Clipboard API might not be available, fall back to memory clipboard
+    }
+    
+    // Fall back to memory clipboard if system clipboard didn't work
+    if (objectsToPaste.length === 0 && clipboardRef.current.length > 0) {
+      objectsToPaste = clipboardRef.current;
+    }
+    
+    if (objectsToPaste.length === 0) return;
+    
+    // Clone objects at current cursor position
+    const cloned = cloneObjectsAtPoint(objectsToPaste, getCurrentCanvasCursor(), user.uid);
+    if (cloned.length === 0) return;
+    
+    // Create cloned objects
+    cloned.forEach((obj) => createObject(obj));
+    
+    // Select the last pasted object
+    if (cloned.length > 0) {
+      deselectAll();
+      selectObject(cloned[cloned.length - 1].id, false);
+    }
+    
+    pasteCountRef.current += 1;
+  }, [user, cloneObjectsAtPoint, getCurrentCanvasCursor, createObject, deselectAll, selectObject]);
 
   // Handle delete key
   useEffect(() => {
@@ -1106,6 +1693,9 @@ export default function BoardPage() {
       if (document.getElementById('inline-shape-editor')) {
         return;
       }
+      
+      // Don't handle shortcuts when editing text in input/textarea
+      if (isEditableElement(e.target)) return;
 
       // Escape cancels line drawing
       if (e.key === 'Escape' && isDrawingLine && drawingLineId) {
@@ -1120,18 +1710,51 @@ export default function BoardPage() {
         if (selectedIds.length > 0) {
           deleteObjects(getDeleteIds());
           deselectAll();
+          setSelectionArea(null); // Clear selection area after deletion
         }
+      }
+
+      // Handle copy (Ctrl+C / Cmd+C)
+      const isMetaOrCtrl = e.metaKey || e.ctrlKey;
+      if (isMetaOrCtrl && e.key.toLowerCase() === 'c') {
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          copySelectedObjects();
+        }
+      }
+
+      // Handle paste (Ctrl+V / Cmd+V)
+      if (isMetaOrCtrl && e.key.toLowerCase() === 'v') {
+        // Always try to paste (will check both system clipboard and memory clipboard)
+        e.preventDefault();
+        pasteClipboardObjects();
       }
     };
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, deleteObjects, deselectAll, isDrawingLine, drawingLineId, getDeleteIds]);
+  }, [selectedIds, deleteObjects, deselectAll, isDrawingLine, drawingLineId, getDeleteIds, copySelectedObjects, pasteClipboardObjects]);
   
+  const duplicateSelectedObjects = useCallback(() => {
+    const selectedObjects = objects.filter(obj => selectedIds.includes(obj.id));
+    if (selectedObjects.length === 0 || !user) return;
+    const cloned = cloneObjectsAtPoint(selectedObjects, getCurrentCanvasCursor(), user.uid);
+    if (cloned.length === 0) return;
+    cloned.forEach((obj) => createObject(obj));
+    clipboardRef.current = selectedObjects.map((obj) => ({ ...obj }));
+    pasteCountRef.current = 1;
+    deselectAll();
+    // Select the last cloned object (usually the frame if frames were cloned)
+    if (cloned.length > 0) {
+      selectObject(cloned[cloned.length - 1].id, false);
+    }
+  }, [selectedIds, objects, user, cloneObjectsAtPoint, getCurrentCanvasCursor, createObject, deselectAll, selectObject]);
+
   const handleDelete = useCallback(() => {
     if (selectedIds.length > 0) {
       deleteObjects(getDeleteIds());
       deselectAll();
+      setSelectionArea(null); // Clear selection area after deletion
     }
   }, [selectedIds, getDeleteIds, deleteObjects, deselectAll]);
 
@@ -1218,7 +1841,34 @@ export default function BoardPage() {
   
   return (
     <div className="w-full h-screen relative bg-white" style={{ touchAction: 'none', overscrollBehavior: 'none' }}>
+      {/* Copy Toast Notification */}
+      {copyToastVisible && (
+        <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full border border-slate-200 bg-white px-4 py-2 shadow-lg">
+          <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M6.173 10.414 3.29 7.53l-.707.707L6.173 11.83l6.414-6.414-.707-.707z" />
+              </svg>
+            </span>
+            Copied to clipboard
+          </div>
+        </div>
+      )}
       <DisconnectBanner status={connectionStatus} />
+      
+      {/* Frame boundary warning popup */}
+      {frameWarningVisible && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg px-4 py-3 shadow-lg flex items-center gap-3">
+            <svg className="w-5 h-5 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <p className="text-sm font-semibold text-yellow-800">
+              You are moving shape outside of the frame.
+            </p>
+          </div>
+        </div>
+      )}
       
       {/* Top Header Bar */}
       <div className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 py-2.5 px-4 flex items-center justify-between z-40">
@@ -1366,19 +2016,18 @@ export default function BoardPage() {
             Objects: <strong>{objects.length}</strong>
           </div>
           <span className="text-gray-300">|</span>
-          <span className={`text-xs px-2 py-1 rounded ${
-            connectionStatus.status === 'connected'
-              ? 'text-green-700 bg-green-100'
-              : connectionStatus.status === 'connecting'
-              ? 'text-blue-700 bg-blue-100'
-              : 'text-red-700 bg-red-100'
-          }`}>
-            {connectionStatus.status === 'connected' ? 'Connected' : connectionStatus.status === 'connecting' ? 'Connecting...' : 'Disconnected'}
-          </span>
+          <LatencyStatusButton
+            connectionStatus={connectionStatus}
+            awareness={awareness}
+            currentUserId={user.uid}
+            getBroadcastRate={getBroadcastRate}
+          />
         </div>
       </div>
 
       <Toolbar onDelete={handleDelete} selectedCount={selectedIds.length} />
+      
+      <ZoomControl />
       
       <Cursors
         awareness={awareness}
@@ -1386,11 +2035,12 @@ export default function BoardPage() {
         scale={scale}
         position={position}
         cursors={fastCursors}
-        useFastCursors={cursorSyncConnected}
+        useFastCursors={cursorSyncConnected}  // Use fast cursors if connected
       />
       
       {/* Properties Sidebar - shows when objects selected */}
-      {selectedIds.length > 0 && (
+      {/* Show selection area properties when selection area is active */}
+      {selectionArea && selectedIds.length > 0 && (
         <PropertiesSidebar
           selectedObjects={objects.filter(obj => selectedIds.includes(obj.id))}
           onStrokeColorChange={handleShapeStrokeColorChange}
@@ -1400,6 +2050,25 @@ export default function BoardPage() {
           onTextSizeChange={handleTextSizeChange}
           onTextFamilyChange={handleTextFamilyChange}
           onDelete={handleDelete}
+          onDuplicate={duplicateSelectedObjects}
+          onCopy={copySelectedObjects}
+          isSelectionArea={true}
+        />
+      )}
+      
+      {/* Show regular properties sidebar when no selection area */}
+      {!selectionArea && selectedIds.length > 0 && (
+        <PropertiesSidebar
+          selectedObjects={objects.filter(obj => selectedIds.includes(obj.id))}
+          onStrokeColorChange={handleShapeStrokeColorChange}
+          onFillColorChange={handleShapeFillColorChange}
+          onStickyColorChange={handleStickyColorChange}
+          onTextChange={handleTextChange}
+          onTextSizeChange={handleTextSizeChange}
+          onTextFamilyChange={handleTextFamilyChange}
+          onDelete={handleDelete}
+          onDuplicate={objects.filter(obj => selectedIds.includes(obj.id)).some(obj => obj.type === 'frame') ? undefined : duplicateSelectedObjects}
+          onCopy={objects.filter(obj => selectedIds.includes(obj.id)).some(obj => obj.type === 'frame') ? undefined : copySelectedObjects}
         />
       )}
 
@@ -1521,6 +2190,21 @@ export default function BoardPage() {
 
         {/* Line tool: no preview — lines are created by dragging from connection dots */}
 
+        {/* Selection Area - persistent selection rectangle */}
+        {selectionArea && (
+          <KonvaRect
+            x={selectionArea.x}
+            y={selectionArea.y}
+            width={selectionArea.width}
+            height={selectionArea.height}
+            fill="rgba(59, 130, 246, 0.15)"
+            stroke="#3b82f6"
+            strokeWidth={2 / scale}
+            dash={[10 / scale, 5 / scale]}
+            listening={false}
+          />
+        )}
+
         {renderObjects.map((obj) => {
           const renderObj = (liveObjectsMap.get(obj.id) ?? obj) as WhiteboardObject;
 
@@ -1529,8 +2213,13 @@ export default function BoardPage() {
               <Frame
                 key={obj.id}
                 data={renderObj as FrameType}
-                isSelected={isSelected(obj.id)}
+                isSelected={isSelected(obj.id) && !selectionArea}
                 onSelect={(e) => {
+                  // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
                   if (e.evt.shiftKey) {
                     selectObject(obj.id, true);
                   } else {
@@ -1550,9 +2239,14 @@ export default function BoardPage() {
               <StickyNote
                 key={obj.id}
                 data={renderObj as StickyNoteType}
-                isSelected={isSelected(obj.id)}
+                isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={!isLocked}
                 onSelect={(e) => {
+                  // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
                   if (e.evt.shiftKey) {
                     selectObject(obj.id, true);
                   } else {
@@ -1572,9 +2266,14 @@ export default function BoardPage() {
               <Rectangle
                 key={obj.id}
                 data={renderObj as RectShape}
-                isSelected={isSelected(obj.id)}
+                isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={!isLocked}
                 onSelect={(e) => {
+                  // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
                   if (e.evt.shiftKey) {
                     selectObject(obj.id, true);
                   } else {
@@ -1594,9 +2293,14 @@ export default function BoardPage() {
               <Circle
                 key={obj.id}
                 data={renderObj as CircleShape}
-                isSelected={isSelected(obj.id)}
+                isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={!isLocked}
                 onSelect={(e) => {
+                  // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
                   if (e.evt.shiftKey) {
                     selectObject(obj.id, true);
                   } else {
@@ -1619,8 +2323,13 @@ export default function BoardPage() {
                 key={obj.id}
                 data={lineData}
                 resolvedPoints={resolved}
-                isSelected={isSelected(obj.id)}
+                isSelected={isSelected(obj.id) && !selectionArea}
                 onSelect={(e) => {
+                  // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
                   if (e.evt.shiftKey) {
                     selectObject(obj.id, true);
                   } else {
@@ -1640,9 +2349,14 @@ export default function BoardPage() {
               <TextBubble
                 key={obj.id}
                 data={renderObj as TextBubbleShape}
-                isSelected={isSelected(obj.id)}
+                isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={!isLocked}
                 onSelect={(e) => {
+                  // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
                   if (e.evt.shiftKey) {
                     selectObject(obj.id, true);
                   } else {
@@ -1662,9 +2376,14 @@ export default function BoardPage() {
               <Triangle
                 key={obj.id}
                 data={renderObj as TriangleShape}
-                isSelected={isSelected(obj.id)}
+                isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={!isLocked}
                 onSelect={(e) => {
+                  // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
                   if (e.evt.shiftKey) {
                     selectObject(obj.id, true);
                   } else {
@@ -1684,9 +2403,14 @@ export default function BoardPage() {
               <Star
                 key={obj.id}
                 data={renderObj as StarShape}
-                isSelected={isSelected(obj.id)}
+                isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={!isLocked}
                 onSelect={(e) => {
+                  // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
                   if (e.evt.shiftKey) {
                     selectObject(obj.id, true);
                   } else {

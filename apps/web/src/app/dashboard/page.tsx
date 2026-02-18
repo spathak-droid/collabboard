@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { signOut } from '@/lib/firebase/auth';
@@ -94,6 +94,9 @@ export default function DashboardPage() {
   const [inviteTarget, setInviteTarget] = useState<{ id: string; title: string } | null>(null);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showNewBoardModal, setShowNewBoardModal] = useState(false);
+  const [openCollaboratorsDropdown, setOpenCollaboratorsDropdown] = useState<string | null>(null);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
+  const collaboratorsDropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Send heartbeat every 60s so other users know we're online
   usePresenceHeartbeat(user?.uid);
@@ -104,6 +107,77 @@ export default function DashboardPage() {
     const interval = setInterval(() => setTick((t) => t + 1), 30_000);
     return () => clearInterval(interval);
   }, []);
+
+  // Calculate dropdown position when it opens or window resizes
+  const calculateDropdownPosition = useCallback(() => {
+    if (openCollaboratorsDropdown) {
+      const ref = collaboratorsDropdownRefs.current[openCollaboratorsDropdown];
+      if (ref) {
+        const rect = ref.getBoundingClientRect();
+        const dropdownWidth = 260; // min-w-[260px]
+        const dropdownMaxHeight = 288; // max-h-72 = 288px
+        const viewportWidth = window.innerWidth;
+        const viewportHeight = window.innerHeight;
+        const padding = 16; // 16px padding from viewport edges
+        
+        let left = rect.left;
+        // If dropdown would overflow on the right, align to right edge of button
+        if (left + dropdownWidth > viewportWidth - padding) {
+          left = rect.right - dropdownWidth;
+        }
+        // Ensure it doesn't go off-screen on the left
+        if (left < padding) {
+          left = padding;
+        }
+        
+        let top = rect.bottom + 8; // mt-2 = 8px
+        // If dropdown would overflow at bottom, show above instead
+        if (top + dropdownMaxHeight > viewportHeight - padding) {
+          top = rect.top - dropdownMaxHeight - 8;
+          // If still doesn't fit, position at top of viewport
+          if (top < padding) {
+            top = padding;
+          }
+        }
+        
+        setDropdownPosition({ top, left });
+      }
+    }
+  }, [openCollaboratorsDropdown]);
+
+  useEffect(() => {
+    calculateDropdownPosition();
+  }, [calculateDropdownPosition]);
+
+  // Recalculate on window resize
+  useEffect(() => {
+    if (openCollaboratorsDropdown) {
+      const handleResize = () => calculateDropdownPosition();
+      window.addEventListener('resize', handleResize);
+      window.addEventListener('scroll', handleResize, true);
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        window.removeEventListener('scroll', handleResize, true);
+      };
+    }
+  }, [openCollaboratorsDropdown, calculateDropdownPosition]);
+
+  // Close collaborators dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (openCollaboratorsDropdown) {
+        const ref = collaboratorsDropdownRefs.current[openCollaboratorsDropdown];
+        const dropdown = document.querySelector('[data-collaborators-dropdown]');
+        if (ref && !ref.contains(e.target as Node) && dropdown && !dropdown.contains(e.target as Node)) {
+          setOpenCollaboratorsDropdown(null);
+        }
+      }
+    };
+    if (openCollaboratorsDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openCollaboratorsDropdown]);
 
   // Redirect to login if not authenticated, or to verify-email if unverified (skip for guests)
   useEffect(() => {
@@ -421,33 +495,89 @@ export default function DashboardPage() {
                       {board.collaborators.length === 0 ? (
                         <span className="text-xs text-slate-400">—</span>
                       ) : (
-                        <div className="flex items-center">
-                          <div className="flex -space-x-2">
-                            {visibleCollabs.map((c, i) => (
-                              <div
-                                key={c.uid}
-                                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-bold text-white shadow-sm"
-                                style={{
-                                  backgroundColor: c.color,
-                                  zIndex: MAX_AVATARS - i,
-                                }}
-                                title={c.name}
-                              >
-                                {c.name.charAt(0).toUpperCase()}
+                        <div 
+                          className="relative"
+                          ref={(el) => {
+                            collaboratorsDropdownRefs.current[board.id] = el;
+                          }}
+                        >
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenCollaboratorsDropdown(
+                                openCollaboratorsDropdown === board.id ? null : board.id
+                              );
+                            }}
+                            className="flex items-center hover:opacity-80 transition-opacity"
+                          >
+                            <div className="flex -space-x-2">
+                              {visibleCollabs.map((c, i) => (
+                                <div
+                                  key={c.uid}
+                                  className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-bold text-white shadow-sm"
+                                  style={{
+                                    backgroundColor: c.color,
+                                    zIndex: MAX_AVATARS - i,
+                                  }}
+                                  title={c.name}
+                                >
+                                  {c.name.charAt(0).toUpperCase()}
+                                </div>
+                              ))}
+                              {overflow > 0 && (
+                                <div
+                                  className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-gray-200 text-[11px] font-bold text-gray-600 shadow-sm"
+                                  style={{ zIndex: 0 }}
+                                >
+                                  +{overflow}
+                                </div>
+                              )}
+                            </div>
+                            <span className="ml-2 text-xs text-slate-500">
+                              {board.collaborators.length}
+                            </span>
+                          </button>
+
+                          {/* Collaborators Dropdown */}
+                          {openCollaboratorsDropdown === board.id && dropdownPosition && (
+                            <div 
+                              data-collaborators-dropdown
+                              className="fixed z-[100] bg-white rounded-xl shadow-xl border border-gray-200 py-3 px-1 min-w-[260px] max-w-[calc(100vw-32px)] animate-in fade-in slide-in-from-top-2 duration-150"
+                              style={{
+                                top: `${dropdownPosition.top}px`,
+                                left: `${dropdownPosition.left}px`,
+                              }}
+                            >
+                              <div className="px-3 pb-2 mb-1 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                Collaborators — {board.collaborators.length}
                               </div>
-                            ))}
-                            {overflow > 0 && (
-                              <div
-                                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-gray-200 text-[11px] font-bold text-gray-600 shadow-sm"
-                                style={{ zIndex: 0 }}
-                              >
-                                +{overflow}
+                              <div className="max-h-72 overflow-y-auto">
+                                {board.collaborators.map((c) => (
+                                  <div
+                                    key={c.uid}
+                                    className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+                                  >
+                                    <div
+                                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 text-white"
+                                      style={{
+                                        backgroundColor: c.color,
+                                      }}
+                                    >
+                                      {c.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div className="flex flex-col min-w-0">
+                                      <span className="text-sm text-gray-800 truncate leading-tight">
+                                        {c.name}
+                                        {c.uid === user?.uid && (
+                                          <span className="text-gray-400 ml-1 text-xs">(You)</span>
+                                        )}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
-                            )}
-                          </div>
-                          <span className="ml-2 text-xs text-slate-500">
-                            {board.collaborators.length}
-                          </span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

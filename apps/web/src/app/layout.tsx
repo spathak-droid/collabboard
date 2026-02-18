@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Sora } from "next/font/google";
+import { Manrope } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
 
@@ -9,10 +9,10 @@ const geistMono = localFont({
   weight: "100 900",
   display: "swap",
 });
-const sora = Sora({
+const manrope = Manrope({
   subsets: ["latin"],
-  variable: "--font-sora",
-  weight: ["400", "600", "700"],
+  variable: "--font-manrope",
+  weight: ["200", "300", "400", "500", "600", "700", "800"],
   display: "swap",
 });
 
@@ -32,7 +32,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${sora.variable} ${geistMono.variable} antialiased`}
+        className={`${manrope.variable} ${geistMono.variable} antialiased`}
       >
         {children}
       </body>

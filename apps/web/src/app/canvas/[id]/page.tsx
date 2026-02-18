@@ -6,7 +6,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { Rect as KonvaRect, Circle as KonvaCircle } from 'react-konva';
+import { Rect as KonvaRect, Circle as KonvaCircle, Line as KonvaLine, Star as KonvaStar } from 'react-konva';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useYjs } from '@/lib/hooks/useYjs';
 import { Canvas } from '@/components/canvas/Canvas';
@@ -14,11 +14,15 @@ import { Toolbar } from '@/components/canvas/Toolbar';
 import { StickyNote } from '@/components/canvas/objects/StickyNote';
 import { Rectangle } from '@/components/canvas/objects/Rectangle';
 import { Circle } from '@/components/canvas/objects/Circle';
+import { Triangle } from '@/components/canvas/objects/Triangle';
+import { Star } from '@/components/canvas/objects/Star';
 import { Line } from '@/components/canvas/objects/Line';
 import { TextBubble } from '@/components/canvas/objects/TextBubble';
 import { Cursors } from '@/components/canvas/Cursors';
 import { DisconnectBanner } from '@/components/canvas/DisconnectBanner';
 import { PropertiesSidebar } from '@/components/canvas/PropertiesSidebar';
+import { ZoomControl } from '@/components/canvas/ZoomControl';
+import { LatencyStatusButton } from '@/components/canvas/LatencyStatusButton';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { useSelection } from '@/lib/hooks/useSelection';
 import { generateId } from '@/lib/utils/geometry';
@@ -28,7 +32,125 @@ import { STICKY_COLORS } from '@/types/canvas';
 import { supabase, updateBoard, fetchBoardMembers, ensureBoardAccess, fetchOnlineUserUids, type BoardMember } from '@/lib/supabase/client';
 import { getUserColor } from '@/lib/utils/colors';
 import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
-import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, LineShape, TextBubbleShape, AnchorPosition } from '@/types/canvas';
+import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextBubbleShape, AnchorPosition } from '@/types/canvas';
+
+const isEditableElement = (target: EventTarget | null): boolean => {
+  const element = target as HTMLElement | null;
+  if (!element) return false;
+  const tagName = element.tagName.toLowerCase();
+  return (
+    tagName === 'input' ||
+    tagName === 'textarea' ||
+    element.isContentEditable
+  );
+};
+
+const getObjectBounds = (obj: WhiteboardObject) => {
+  if (obj.type === 'circle') {
+    return {
+      x: obj.x - obj.radius,
+      y: obj.y - obj.radius,
+      width: obj.radius * 2,
+      height: obj.radius * 2,
+    };
+  }
+
+  if (obj.type === 'line') {
+    const [x1, y1, x2, y2] = obj.points;
+    const minX = Math.min(x1, x2) + obj.x;
+    const minY = Math.min(y1, y2) + obj.y;
+    return {
+      x: minX,
+      y: minY,
+      width: Math.max(24, Math.abs(x2 - x1)),
+      height: Math.max(24, Math.abs(y2 - y1)),
+    };
+  }
+
+  return {
+    x: obj.x,
+    y: obj.y,
+    width: obj.width,
+    height: obj.height,
+  };
+};
+
+const getSelectionBounds = (items: WhiteboardObject[]) => {
+  if (items.length === 0) return null;
+  const first = getObjectBounds(items[0]);
+  let minX = first.x;
+  let minY = first.y;
+  let maxX = first.x + first.width;
+  let maxY = first.y + first.height;
+
+  for (let i = 1; i < items.length; i += 1) {
+    const bounds = getObjectBounds(items[i]);
+    minX = Math.min(minX, bounds.x);
+    minY = Math.min(minY, bounds.y);
+    maxX = Math.max(maxX, bounds.x + bounds.width);
+    maxY = Math.max(maxY, bounds.y + bounds.height);
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+};
+
+const cloneObjectsAtPoint = (
+  source: WhiteboardObject[],
+  target: { x: number; y: number },
+  userId: string
+): WhiteboardObject[] => {
+  const sourceBounds = getSelectionBounds(source);
+  if (!sourceBounds) return [];
+  const dx = target.x - sourceBounds.x;
+  const dy = target.y - sourceBounds.y;
+
+  const idMap = new Map<string, string>();
+  source.forEach((obj) => {
+    idMap.set(obj.id, generateId());
+  });
+
+  const now = Date.now();
+  return source.map((obj, index) => {
+    const newId = idMap.get(obj.id) || generateId();
+    const baseMeta = {
+      ...obj,
+      id: newId,
+      zIndex: obj.zIndex + index + 1,
+      createdBy: userId,
+      createdAt: now,
+      modifiedBy: userId,
+      modifiedAt: now,
+    };
+
+    if (obj.type === 'line') {
+      const clonedStart = obj.startAnchor && idMap.has(obj.startAnchor.objectId)
+        ? { ...obj.startAnchor, objectId: idMap.get(obj.startAnchor.objectId)! }
+        : undefined;
+      const clonedEnd = obj.endAnchor && idMap.has(obj.endAnchor.objectId)
+        ? { ...obj.endAnchor, objectId: idMap.get(obj.endAnchor.objectId)! }
+        : undefined;
+      return {
+        ...baseMeta,
+        x: obj.x + dx,
+        y: obj.y + dy,
+        points: [obj.points[0] + dx, obj.points[1] + dy, obj.points[2] + dx, obj.points[3] + dy],
+        startAnchor: clonedStart,
+        endAnchor: clonedEnd,
+      } as WhiteboardObject;
+    }
+
+    return {
+      ...baseMeta,
+      x: obj.x + dx,
+      y: obj.y + dy,
+    } as WhiteboardObject;
+  });
+};
 
 export default function BoardPage() {
   const params = useParams();
@@ -56,12 +178,16 @@ export default function BoardPage() {
   const [boardMembers, setBoardMembers] = useState<BoardMember[]>([]);
   const [globalOnlineUids, setGlobalOnlineUids] = useState<Set<string>>(new Set());
   const usersDropdownRef = useRef<HTMLDivElement>(null);
+  const [copyToastVisible, setCopyToastVisible] = useState(false);
+  const copyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clipboardRef = useRef<WhiteboardObject[]>([]);
+  const pasteCountRef = useRef(0);
+  const cursorCanvasPosRef = useRef<{ x: number; y: number } | null>(null);
 
   // Send heartbeat every 60s so other users know we're online
   usePresenceHeartbeat(user?.uid);
 
-  // Track every user ever seen online in this session so they persist as
-  // "offline" after they disconnect (Yjs awareness only has live users).
+  // Track users currently viewing (cleaned up when they leave)
   const seenUsersRef = useRef<Map<string, { name: string; color: string }>>(new Map());
 
   // ── Real-time Yjs collaboration ───────────────────────────
@@ -76,6 +202,7 @@ export default function BoardPage() {
     updateObject: yjsUpdate,
     deleteObjects: yjsDeleteMany,
     updateCursor,
+    getBroadcastRate,
     setBoardTitle: yjsSetBoardTitle,
   } = useYjs({
     boardId,
@@ -216,7 +343,7 @@ export default function BoardPage() {
   const handleTextChange = (text: string) => {
     selectedIds.forEach((id) => {
       const obj = objects.find((o) => o.id === id);
-      if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'textBubble')) {
+      if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star' || obj.type === 'sticky' || obj.type === 'textBubble')) {
         yjsUpdate(id, { text });
       }
     });
@@ -226,7 +353,7 @@ export default function BoardPage() {
     const clamped = Math.max(12, Math.min(48, size));
     selectedIds.forEach((id) => {
       const obj = objects.find((o) => o.id === id);
-      if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'textBubble')) {
+      if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star' || obj.type === 'sticky' || obj.type === 'textBubble')) {
         yjsUpdate(id, { textSize: clamped });
       }
     });
@@ -235,7 +362,7 @@ export default function BoardPage() {
   const handleTextFamilyChange = (family: 'Inter' | 'Poppins' | 'Merriweather') => {
     selectedIds.forEach((id) => {
       const obj = objects.find((o) => o.id === id);
-      if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'textBubble')) {
+      if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star' || obj.type === 'sticky' || obj.type === 'textBubble')) {
         yjsUpdate(id, { textFamily: family });
       }
     });
@@ -244,6 +371,65 @@ export default function BoardPage() {
   const handleObjectSelect = (id: string) => {
     selectObject(id);
   };
+
+  const selectedObjects = useMemo(
+    () => objects.filter((obj) => selectedIds.includes(obj.id)),
+    [objects, selectedIds]
+  );
+
+  const showCopyToast = useCallback(() => {
+    setCopyToastVisible(true);
+    if (copyToastTimerRef.current) {
+      clearTimeout(copyToastTimerRef.current);
+    }
+    copyToastTimerRef.current = setTimeout(() => {
+      setCopyToastVisible(false);
+    }, 1300);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (copyToastTimerRef.current) {
+        clearTimeout(copyToastTimerRef.current);
+      }
+    };
+  }, []);
+
+  const getCurrentCanvasCursor = useCallback(() => {
+    if (cursorCanvasPosRef.current) return cursorCanvasPosRef.current;
+    const viewportCenterX = typeof window !== 'undefined' ? window.innerWidth / 2 : 0;
+    const viewportCenterY = typeof window !== 'undefined' ? window.innerHeight / 2 : 0;
+    return {
+      x: (viewportCenterX - position.x) / scale,
+      y: (viewportCenterY - position.y) / scale,
+    };
+  }, [position, scale]);
+
+  const copySelectedObjects = useCallback(() => {
+    if (selectedObjects.length === 0) return;
+    clipboardRef.current = selectedObjects.map((obj) => ({ ...obj }));
+    pasteCountRef.current = 0;
+    showCopyToast();
+  }, [selectedObjects, showCopyToast]);
+
+  const pasteClipboardObjects = useCallback(() => {
+    if (!user || clipboardRef.current.length === 0) return;
+    const cloned = cloneObjectsAtPoint(clipboardRef.current, getCurrentCanvasCursor(), user.uid);
+    if (cloned.length === 0) return;
+    cloned.forEach((obj) => yjsCreate(obj));
+    selectObject(cloned[cloned.length - 1].id);
+    pasteCountRef.current += 1;
+  }, [user, yjsCreate, selectObject, getCurrentCanvasCursor]);
+
+  const duplicateSelectedObjects = useCallback(() => {
+    if (selectedObjects.length === 0 || !user) return;
+    const cloned = cloneObjectsAtPoint(selectedObjects, getCurrentCanvasCursor(), user.uid);
+    if (cloned.length === 0) return;
+    cloned.forEach((obj) => yjsCreate(obj));
+    clipboardRef.current = selectedObjects.map((obj) => ({ ...obj }));
+    pasteCountRef.current = 1;
+    selectObject(cloned[cloned.length - 1].id);
+  }, [selectedObjects, user, yjsCreate, selectObject, getCurrentCanvasCursor]);
 
   const getPlacementCoordinates = useCallback(
     (pointerX: number, pointerY: number) => {
@@ -351,6 +537,44 @@ export default function BoardPage() {
           
           createObject(circle);
           setActiveTool('select');
+        } else if (activeTool === 'triangle') {
+          const triangle: TriangleShape = {
+            id: generateId(),
+            type: 'triangle',
+            x,
+            y,
+            width: 240,
+            height: 180,
+            fill: shapeFillColor,
+            stroke: shapeStrokeColor,
+            strokeWidth: 2,
+            rotation: 0,
+            zIndex: objects.length,
+            createdBy: user?.uid || 'unknown',
+            createdAt: Date.now(),
+          };
+
+          createObject(triangle);
+          setActiveTool('select');
+        } else if (activeTool === 'star') {
+          const star: StarShape = {
+            id: generateId(),
+            type: 'star',
+            x,
+            y,
+            width: 180,
+            height: 180,
+            fill: shapeFillColor,
+            stroke: shapeStrokeColor,
+            strokeWidth: 2,
+            rotation: 0,
+            zIndex: objects.length,
+            createdBy: user?.uid || 'unknown',
+            createdAt: Date.now(),
+          };
+
+          createObject(star);
+          setActiveTool('select');
         } else if (activeTool === 'textBubble') {
           const textBubble: TextBubbleShape = {
             id: generateId(),
@@ -381,7 +605,7 @@ export default function BoardPage() {
       deleteObjectsByIds(selectedIds);
       deselectAll();
     }
-  }, [selectedIds, deselectAll]);
+  }, [selectedIds, deselectAll, deleteObjectsByIds]);
 
   // ── Connector logic ──
   const objectsMap = useMemo(() => {
@@ -611,6 +835,7 @@ export default function BoardPage() {
       if (document.getElementById('inline-shape-editor')) {
         return;
       }
+      if (isEditableElement(e.target)) return;
 
       // Escape cancels line drawing
       if (e.key === 'Escape' && isDrawingLine && drawingLineId) {
@@ -623,18 +848,48 @@ export default function BoardPage() {
       
       if (e.key === 'Delete') {
         if (selectedIds.length > 0) {
-          deleteObjectsByIds(selectedIds);
-          deselectAll();
+          e.preventDefault();
+          handleDelete();
+        }
+      }
+
+      const isMetaOrCtrl = e.metaKey || e.ctrlKey;
+      if (isMetaOrCtrl && e.key.toLowerCase() === 'c') {
+        if (selectedIds.length > 0) {
+          e.preventDefault();
+          copySelectedObjects();
+        }
+      }
+
+      if (isMetaOrCtrl && e.key.toLowerCase() === 'v') {
+        if (clipboardRef.current.length > 0) {
+          e.preventDefault();
+          pasteClipboardObjects();
         }
       }
     };
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, deselectAll, isDrawingLine, drawingLineId, deleteObjectsByIds]);
+  }, [
+    selectedIds,
+    isDrawingLine,
+    drawingLineId,
+    deleteObjectsByIds,
+    handleDelete,
+    copySelectedObjects,
+    pasteClipboardObjects,
+  ]);
   
-  // ── Build merged collaborator list (viewing → online → offline) ──
-  // Remember every user we've ever seen viewing this board in this session
+  // ── Build collaborator list (only currently viewing + board members) ──
+  // Clean up seenUsersRef: remove users who are no longer viewing
+  const currentViewingIds = new Set(onlineUsers.map((s) => s.user.id));
+  Array.from(seenUsersRef.current.keys()).forEach((uid) => {
+    if (!currentViewingIds.has(uid)) {
+      seenUsersRef.current.delete(uid);
+    }
+  });
+  // Track current users (for potential future use)
   for (const state of onlineUsers) {
     seenUsersRef.current.set(state.user.id, {
       name: state.user.name,
@@ -659,10 +914,9 @@ export default function BoardPage() {
     return 'offline';
   };
 
+  // Only show users currently viewing this board (Yjs awareness)
   const collaborators: CollabUser[] = [];
   const addedUids = new Set<string>();
-
-  // 1) Users currently viewing this board (Yjs awareness)
   for (const state of onlineUsers) {
     if (addedUids.has(state.user.id)) continue;
     addedUids.add(state.user.id);
@@ -675,36 +929,22 @@ export default function BoardPage() {
     });
   }
 
-  // 2) Previously-seen users who left this board
-  Array.from(seenUsersRef.current.entries()).forEach(([uid, info]) => {
-    if (addedUids.has(uid)) return;
-    addedUids.add(uid);
-    collaborators.push({
-      uid,
-      name: info.name,
-      color: info.color,
-      status: getStatus(uid),
-      isYou: uid === user?.uid,
-    });
-  });
-
-  // 3) Board members from Supabase who weren't seen in this session
-  for (const member of boardMembers) {
-    if (addedUids.has(member.uid)) continue;
-    addedUids.add(member.uid);
-    const name = member.displayName || member.email?.split('@')[0] || 'Unknown';
-    collaborators.push({
-      uid: member.uid,
-      name,
-      color: getUserColor(member.uid),
-      status: getStatus(member.uid),
-      isYou: member.uid === user?.uid,
-    });
-  }
-
   const MAX_VISIBLE = 4;
   const visibleCollabs = collaborators.slice(0, MAX_VISIBLE);
   const overflowCount = collaborators.length - MAX_VISIBLE;
+  const selectedBounds = getSelectionBounds(selectedObjects);
+  const popupPosition = selectedBounds
+    ? {
+        x: Math.min(
+          Math.max(position.x + (selectedBounds.x + selectedBounds.width / 2) * scale, 90),
+          typeof window !== 'undefined' ? window.innerWidth - 90 : 1200
+        ),
+        y: Math.max(position.y + selectedBounds.y * scale - 12, 78),
+      }
+    : null;
+  const canShowObjectActions =
+    selectedIds.length > 0 &&
+    (typeof document === 'undefined' || !document.getElementById('inline-shape-editor'));
 
   if (!mounted || authLoading || !user || (!user.emailVerified && !user.isAnonymous)) {
     return (
@@ -716,6 +956,18 @@ export default function BoardPage() {
   
   return (
     <div className="w-full h-screen relative bg-white" style={{ touchAction: 'none', overscrollBehavior: 'none' }}>
+      {copyToastVisible && (
+        <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full border border-slate-200 bg-white px-4 py-2 shadow-lg">
+          <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M6.173 10.414 3.29 7.53l-.707.707L6.173 11.83l6.414-6.414-.707-.707z" />
+              </svg>
+            </span>
+            Copied to clipboard
+          </div>
+        </div>
+      )}
       {/* Top Header Bar */}
       <div className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 py-2.5 px-4 flex items-center justify-between z-40">
         <div className="flex items-center gap-3">
@@ -759,30 +1011,14 @@ export default function BoardPage() {
                 {visibleCollabs.map((c, i) => (
                   <div
                     key={c.uid}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 border-white shadow-sm relative hover:z-20 hover:scale-110 transition-transform ${
-                      c.status === 'offline' ? 'text-gray-400' : 'text-white'
-                    }`}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white border-2 border-white shadow-sm relative hover:z-20 hover:scale-110 transition-transform"
                     style={{
-                      backgroundColor:
-                        c.status === 'viewing' ? c.color
-                        : c.status === 'online' ? c.color
-                        : '#e5e7eb',
+                      backgroundColor: c.color,
                       zIndex: MAX_VISIBLE - i,
-                      opacity: c.status === 'offline' ? 0.7 : c.status === 'online' ? 0.85 : 1,
                     }}
-                    title={
-                      c.name +
-                      (c.isYou ? ' (You)' : '') +
-                      (c.status === 'viewing' ? ' — Viewing' : c.status === 'online' ? ' — Online' : ' — Offline')
-                    }
+                    title={c.name + (c.isYou ? ' (You)' : '')}
                   >
                     {c.name.charAt(0).toUpperCase()}
-                    {c.status === 'online' && (
-                      <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-amber-400 border border-white" />
-                    )}
-                    {c.status === 'viewing' && (
-                      <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-400 border border-white" />
-                    )}
                   </div>
                 ))}
 
@@ -796,7 +1032,7 @@ export default function BoardPage() {
               </div>
             </button>
 
-            {/* Dropdown listing all collaborators with 3-state presence */}
+            {/* Dropdown listing all collaborators */}
             {showAllUsers && (
               <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-200 py-3 px-1 min-w-[260px] z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="px-3 pb-2 mb-1 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -809,15 +1045,9 @@ export default function BoardPage() {
                       className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
                     >
                       <div
-                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                          c.status === 'offline' ? 'text-gray-400' : 'text-white'
-                        }`}
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 text-white"
                         style={{
-                          backgroundColor:
-                            c.status === 'viewing' ? c.color
-                            : c.status === 'online' ? c.color
-                            : '#e5e7eb',
-                          opacity: c.status === 'online' ? 0.85 : 1,
+                          backgroundColor: c.color,
                         }}
                       >
                         {c.name.charAt(0).toUpperCase()}
@@ -829,23 +1059,7 @@ export default function BoardPage() {
                             <span className="text-gray-400 ml-1 text-xs">(You)</span>
                           )}
                         </span>
-                        <span className={`text-[11px] leading-tight ${
-                          c.status === 'viewing' ? 'text-green-600'
-                          : c.status === 'online' ? 'text-amber-500'
-                          : 'text-gray-400'
-                        }`}>
-                          {c.status === 'viewing' ? 'Viewing this board'
-                           : c.status === 'online' ? 'Online'
-                           : 'Offline'}
-                        </span>
                       </div>
-                      <span
-                        className={`ml-auto w-2 h-2 rounded-full shrink-0 ${
-                          c.status === 'viewing' ? 'bg-green-400'
-                          : c.status === 'online' ? 'bg-amber-400'
-                          : 'bg-gray-300'
-                        }`}
-                      />
                     </div>
                   ))}
                 </div>
@@ -862,19 +1076,18 @@ export default function BoardPage() {
             Objects: <strong>{objects.length}</strong>
           </div>
           <span className="text-gray-300">|</span>
-          <span className={`text-xs px-2 py-1 rounded ${
-            connectionStatus.status === 'connected'
-              ? 'text-green-700 bg-green-100'
-              : connectionStatus.status === 'connecting'
-              ? 'text-blue-700 bg-blue-100'
-              : 'text-red-700 bg-red-100'
-          }`}>
-            {connectionStatus.status === 'connected' ? 'Connected' : connectionStatus.status === 'connecting' ? 'Connecting...' : 'Disconnected'}
-          </span>
+          <LatencyStatusButton
+            connectionStatus={connectionStatus}
+            awareness={awareness}
+            currentUserId={user.uid}
+            getBroadcastRate={getBroadcastRate}
+          />
         </div>
       </div>
 
       <Toolbar onDelete={handleDelete} selectedCount={selectedIds.length} />
+      
+      <ZoomControl />
       
       {/* Properties Sidebar - shows when objects selected */}
       {selectedIds.length > 0 && (
@@ -887,6 +1100,8 @@ export default function BoardPage() {
           onTextSizeChange={handleTextSizeChange}
           onTextFamilyChange={handleTextFamilyChange}
           onDelete={handleDelete}
+          onDuplicate={duplicateSelectedObjects}
+          onCopy={copySelectedObjects}
         />
       )}
 
@@ -910,6 +1125,7 @@ export default function BoardPage() {
           if (pos) {
             const canvasX = (pos.x - position.x) / scale;
             const canvasY = (pos.y - position.y) / scale;
+            cursorCanvasPosRef.current = { x: canvasX, y: canvasY };
             updateCursor(canvasX, canvasY);
             handleConnectorMouseMove(pos.x, pos.y);
           }
@@ -950,6 +1166,37 @@ export default function BoardPage() {
             x={previewPosition.x}
             y={previewPosition.y}
             radius={80}
+            fill={shapeFillColor}
+            opacity={0.25}
+            stroke={shapeStrokeColor}
+            strokeWidth={2}
+            dash={[10, 8]}
+            listening={false}
+          />
+        ) : null}
+
+        {previewPosition && activeTool === 'triangle' ? (
+          <KonvaLine
+            x={previewPosition.x}
+            y={previewPosition.y}
+            points={[120, 0, 240, 180, 0, 180]}
+            closed
+            fill={shapeFillColor}
+            opacity={0.25}
+            stroke={shapeStrokeColor}
+            strokeWidth={2}
+            dash={[10, 8]}
+            listening={false}
+          />
+        ) : null}
+
+        {previewPosition && activeTool === 'star' ? (
+          <KonvaStar
+            x={previewPosition.x + 90}
+            y={previewPosition.y + 90}
+            numPoints={5}
+            innerRadius={40}
+            outerRadius={90}
             fill={shapeFillColor}
             opacity={0.25}
             stroke={shapeStrokeColor}
@@ -1009,6 +1256,32 @@ export default function BoardPage() {
               <Circle
                 key={obj.id}
                 data={obj as CircleShape}
+                isSelected={isSelected(obj.id)}
+                onSelect={() => handleObjectSelect(obj.id)}
+                onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
+                onDragMove={handleShapeDragMove}
+              />
+            );
+          }
+
+          if (obj.type === 'triangle') {
+            return (
+              <Triangle
+                key={obj.id}
+                data={obj as TriangleShape}
+                isSelected={isSelected(obj.id)}
+                onSelect={() => handleObjectSelect(obj.id)}
+                onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
+                onDragMove={handleShapeDragMove}
+              />
+            );
+          }
+
+          if (obj.type === 'star') {
+            return (
+              <Star
+                key={obj.id}
+                data={obj as StarShape}
                 isSelected={isSelected(obj.id)}
                 onSelect={() => handleObjectSelect(obj.id)}
                 onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
@@ -1084,6 +1357,8 @@ export default function BoardPage() {
       <div className="fixed bottom-4 right-4 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg p-3 text-xs z-30">
         <div className="font-semibold mb-1 text-gray-900">⌨️ Controls:</div>
         <div className="text-gray-600">Delete key - Delete selected</div>
+        <div className="text-gray-600">Cmd/Ctrl+C - Copy selected</div>
+        <div className="text-gray-600">Cmd/Ctrl+V - Paste copied</div>
         <div className="text-gray-600">Scroll/Swipe - Zoom in/out</div>
         <div className="text-gray-600">Click+Drag - Pan canvas</div>
       </div>

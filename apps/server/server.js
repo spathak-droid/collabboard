@@ -2,12 +2,19 @@
  * Hocuspocus WebSocket Server v3
  * Handles real-time CRDT sync with Yjs
  *
+ * OPTIMIZATIONS:
+ * - WebSocket compression (perMessageDeflate)
+ * - Async snapshot storage (non-blocking)
+ * - Dedicated cursor WebSocket route (bypasses Hocuspocus)
+ * - Connection pooling for Supabase
+ *
  * MVP auth: user info sent as JSON token from @hocuspocus/provider.
  */
 
 import { Server } from '@hocuspocus/server';
 import { Database } from '@hocuspocus/extension-database';
 import { createClient } from '@supabase/supabase-js';
+import { WebSocketServer } from 'ws';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -18,8 +25,21 @@ const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANO
 
 let supabase = null;
 if (supabaseUrl && supabaseKey) {
-  supabase = createClient(supabaseUrl, supabaseKey);
-  console.log('💾 Supabase client initialized');
+  supabase = createClient(supabaseUrl, supabaseKey, {
+    db: {
+      pool: {
+        max: 20,
+        min: 2,
+        idleTimeoutMillis: 30000,
+      },
+    },
+    global: {
+      headers: {
+        'X-Client-Info': 'collab-board-server',
+      },
+    },
+  });
+  console.log('💾 Supabase client initialized with connection pooling');
 } else {
   console.warn('⚠️  No Supabase credentials — running without persistence');
 }
@@ -67,34 +87,118 @@ if (supabase) {
 
       store: async ({ documentName, state }) => {
         const boardId = getBoardId(documentName);
-        console.log(`📤 Storing snapshot for board: ${boardId} (${state.length} bytes)`);
+        
+        // Fire and forget - don't block WebSocket thread
+        setImmediate(async () => {
+          console.log(`📤 [Async] Storing snapshot for board: ${boardId} (${state.length} bytes)`);
+          
+          try {
+            const base64 = btoa(String.fromCharCode(...state));
 
-        try {
-          const base64 = btoa(String.fromCharCode(...state));
+            const { error } = await supabase.from('board_snapshots').insert({
+              board_id: boardId,
+              state: base64,
+              created_by: null,
+            });
 
-          const { error } = await supabase.from('board_snapshots').insert({
-            board_id: boardId,
-            state: base64,
-            created_by: null,
-          });
+            if (error) throw error;
 
-          if (error) throw error;
-
-          await supabase
-            .from('boards')
-            .update({ last_modified: new Date().toISOString() })
-            .eq('id', boardId);
-        } catch (err) {
-          console.error('   Store failed:', err.message);
-        }
+            await supabase
+              .from('boards')
+              .update({ last_modified: new Date().toISOString() })
+              .eq('id', boardId);
+            
+            console.log(`   ✅ Snapshot saved (${state.length} bytes)`);
+          } catch (err) {
+            console.error('   Store failed:', err.message);
+          }
+        });
+        
+        // Return immediately - don't await DB operations
       },
     })
   );
 }
 
-// ── Hocuspocus server (v3 API: new Server) ──────────────────
+// ── Lightweight Cursor WebSocket (bypasses Hocuspocus) ──────
+const cursorPort = parseInt(process.env.CURSOR_PORT || '1235');
+const cursorWss = new WebSocketServer({ port: cursorPort });
+const cursorRooms = new Map(); // boardId -> Set of WebSocket clients
+
+cursorWss.on('connection', (ws, request) => {
+  const url = new URL(request.url, `http://${request.headers.host}`);
+  const boardId = url.pathname.replace('/cursor/', '').replace('/', '');
+  const userId = url.searchParams.get('userId') || 'anonymous';
+  const userName = url.searchParams.get('userName') || 'Anonymous';
+
+  if (!cursorRooms.has(boardId)) {
+    cursorRooms.set(boardId, new Map());
+  }
+  
+  const room = cursorRooms.get(boardId);
+  room.set(userId, { ws, userName });
+  
+  console.log(`🖱️  Cursor: ${userName} joined board ${boardId} (${room.size} users)`);
+
+  ws.on('message', (data) => {
+    const room = cursorRooms.get(boardId);
+    if (!room) return;
+    
+    // Broadcast to all clients in room except sender
+    room.forEach((client, clientUserId) => {
+      if (clientUserId !== userId && client.ws.readyState === 1) {
+        client.ws.send(data);
+      }
+    });
+  });
+
+  ws.on('close', () => {
+    const room = cursorRooms.get(boardId);
+    if (room) {
+      room.delete(userId);
+      console.log(`🖱️  Cursor: ${userName} left board ${boardId} (${room.size} users)`);
+      
+      // Notify others of user leaving
+      const leaveMsg = JSON.stringify({ type: 'leave', userId });
+      room.forEach((client) => {
+        if (client.ws.readyState === 1) {
+          client.ws.send(leaveMsg);
+        }
+      });
+      
+      if (room.size === 0) cursorRooms.delete(boardId);
+    }
+  });
+  
+  ws.on('error', (err) => {
+    console.error(`🖱️  Cursor error for ${userName}:`, err.message);
+  });
+});
+
+console.log(`🖱️  Cursor WebSocket listening on port ${cursorPort}`);
+
+// ── Hocuspocus server with optimizations ────────────────────
 const server = new Server({
   extensions,
+  
+  // WebSocket compression for bandwidth reduction
+  webSocketOptions: {
+    perMessageDeflate: {
+      zlibDeflateOptions: {
+        chunkSize: 1024,
+        memLevel: 7,
+        level: 3,
+      },
+      zlibInflateOptions: {
+        chunkSize: 10 * 1024,
+      },
+      threshold: 1024,
+    },
+  },
+  
+  timeout: 30000,
+  debounce: 2000,
+  maxDebounce: 10000,
 
   // Parse user info from the JSON token sent by @hocuspocus/provider
   async onAuthenticate(data) {
@@ -149,17 +253,17 @@ process.on('unhandledRejection', (reason) => {
   console.error('⚠️  Unhandled rejection (non-fatal):', reason);
 });
 
-// ── Start ───────────────────────────────────────────────────
+// ── Start Hocuspocus server ─────────────────────────────────
 const port = parseInt(process.env.PORT || '1234');
-server.listen(port).then(() => {
+
+server.listen(port, () => {
   console.log('========================================');
-  console.log('🚀 Hocuspocus WebSocket Server Running');
-  console.log(`📡 Port: ${port}`);
+  console.log('🚀 CollabBoard WebSocket Server Running');
+  console.log(`📦 CRDT (Hocuspocus): ws://localhost:${port}/`);
+  console.log(`🖱️  Cursors: ws://localhost:${cursorPort}/cursor/{boardId}`);
   console.log(`💾 Supabase: ${supabase ? 'connected' : 'disabled'}`);
+  console.log(`🗜️  Compression: enabled`);
   console.log('========================================');
-}).catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
 });
 
 process.on('SIGINT', () => {

@@ -20,6 +20,7 @@ interface PropertiesSidebarProps {
   onDelete: () => void;
   onDuplicate?: () => void;
   onCopy?: () => void;
+  onMove?: (dx: number, dy: number) => void;
   isSelectionArea?: boolean;
 }
 
@@ -34,6 +35,7 @@ export const PropertiesSidebar = ({
   onDelete,
   onDuplicate,
   onCopy,
+  onMove,
   isSelectionArea = false
 }: PropertiesSidebarProps) => {
   const [showStrokePicker, setShowStrokePicker] = useState(false);
@@ -92,10 +94,11 @@ export const PropertiesSidebar = ({
       
       {/* Properties */}
     <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
-        {/* For selection area, only show copy/duplicate actions */}
+        {/* For selection area, show info message */}
         {isSelectionArea ? (
           <div className="text-sm text-slate-600 text-center py-8">
-            <p className="mb-4">Select objects within the area to copy or duplicate them.</p>
+            <p className="mb-2">Drag the selection area to move all selected objects.</p>
+            <p className="text-xs text-slate-500">Use Copy, Duplicate, or Delete buttons below.</p>
           </div>
         ) : (
           <>

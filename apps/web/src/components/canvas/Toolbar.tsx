@@ -19,6 +19,7 @@ import ShowChartIcon from '@mui/icons-material/ShowChart';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CropFreeIcon from '@mui/icons-material/CropFree';
+import PanToolIcon from '@mui/icons-material/PanTool';
 
 interface ToolbarProps {
   onDelete?: () => void;
@@ -39,6 +40,11 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
       id: 'select' as const,
       label: 'Select',
       icon: <NearMeIcon sx={{ fontSize: 24 }} />,
+    },
+    {
+      id: 'move' as const,
+      label: 'Move',
+      icon: <PanToolIcon sx={{ fontSize: 24 }} />,
     },
     {
       id: 'sticky' as const,

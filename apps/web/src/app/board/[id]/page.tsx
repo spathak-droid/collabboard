@@ -18,6 +18,7 @@ import { Star } from '@/components/canvas/objects/Star';
 import { Line } from '@/components/canvas/objects/Line';
 import { TextBubble } from '@/components/canvas/objects/TextBubble';
 import { Frame } from '@/components/canvas/objects/Frame';
+import { SelectionArea } from '@/components/canvas/SelectionArea';
 import { Cursors } from '@/components/canvas/Cursors';
 import { DisconnectBanner } from '@/components/canvas/DisconnectBanner';
 import { PropertiesSidebar } from '@/components/canvas/PropertiesSidebar';
@@ -44,6 +45,8 @@ import { useObjectManipulation } from '@/lib/hooks/useObjectManipulation';
 import { useConnectorDrawing } from '@/lib/hooks/useConnectorDrawing';
 import { useClipboardOperations } from '@/lib/hooks/useClipboardOperations';
 import { useBoardMetadata } from '@/lib/hooks/useBoardMetadata';
+import { AIAssistant } from '@/components/canvas/AIAssistant';
+import { useAICommands } from '@/lib/hooks/useAICommands';
 
 export default function BoardPage() {
   const params = useParams();
@@ -105,6 +108,15 @@ export default function BoardPage() {
     selectByRect,
   } = useSelection();
   
+  const aiCommands = useAICommands({
+    boardId,
+    createObject,
+    updateObject,
+    deleteObjects,
+    objects,
+    userId: user?.uid || '',
+  });
+
   const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode, setScale, setPosition, selectionRect } = useCanvasStore();
   const [previewPosition, setPreviewPosition] = useState<{ x: number; y: number } | null>(null);
   const isCreatingFrame = useRef(false);
@@ -1123,6 +1135,182 @@ export default function BoardPage() {
     }
   }, [selectedIds, getDeleteIds, deleteObjects, deselectAll]);
 
+  // Move selected objects by delta (used for selection area drag)
+  const handleMoveSelection = useCallback((dx: number, dy: number) => {
+    if (selectedIds.length === 0) return;
+    
+    const selectedObjects = objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id));
+    
+    // Update each selected object's position
+    selectedObjects.forEach((obj: WhiteboardObject) => {
+      if (obj.type === 'line') {
+        // For lines, update points array
+        const line = obj as LineShape;
+        const newPoints = [
+          line.points[0] + dx,
+          line.points[1] + dy,
+          line.points[2] + dx,
+          line.points[3] + dy,
+        ];
+        updateObject(obj.id, { points: newPoints });
+      } else {
+        // For other objects, update x and y
+        updateObject(obj.id, { 
+          x: obj.x + dx, 
+          y: obj.y + dy,
+          modifiedAt: Date.now()
+        });
+      }
+    });
+  }, [selectedIds, objects, updateObject]);
+
+  // Track initial object positions when selection area drag starts
+  const selectionAreaDragStartRef = useRef<Map<string, { x: number; y: number; points?: number[] }>>(new Map());
+  const selectionAreaInitialPosRef = useRef<{ x: number; y: number } | null>(null);
+  const selectionAreaLivePosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Handle selection area drag start - store initial positions
+  useEffect(() => {
+    const handleDragStart = () => {
+      if (!selectionArea || selectedIds.length === 0) return;
+      
+      selectionAreaInitialPosRef.current = { x: selectionArea.x, y: selectionArea.y };
+      selectionAreaDragStartRef.current.clear();
+      
+      const selectedObjects = objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id));
+      selectedObjects.forEach((obj) => {
+        if (obj.type === 'line') {
+          const line = obj as LineShape;
+          selectionAreaDragStartRef.current.set(obj.id, {
+            x: obj.x,
+            y: obj.y,
+            points: [...line.points],
+          });
+        } else {
+          selectionAreaDragStartRef.current.set(obj.id, {
+            x: obj.x,
+            y: obj.y,
+          });
+        }
+      });
+    };
+
+    window.addEventListener('object-drag-start', handleDragStart);
+    return () => window.removeEventListener('object-drag-start', handleDragStart);
+  }, [selectionArea, selectedIds, objects]);
+
+  // Handle selection area drag move - update objects using live drag refs (like frames)
+  const handleSelectionAreaDragMove = useCallback((dx: number, dy: number) => {
+    if (!selectionArea || selectedIds.length === 0 || !selectionAreaInitialPosRef.current) return;
+    
+    // Calculate new selection area position based on initial position
+    const newX = selectionAreaInitialPosRef.current.x + dx;
+    const newY = selectionAreaInitialPosRef.current.y + dy;
+    
+    // Store live position in ref (don't update state during drag to avoid glitches)
+    selectionAreaLivePosRef.current = { x: newX, y: newY };
+    
+    // Update selection area state for visual feedback (but SelectionArea component won't reset during drag)
+    setSelectionArea({
+      ...selectionArea,
+      x: newX,
+      y: newY,
+    });
+    
+    // Move all selected objects based on their initial positions using live drag refs
+    const selectedObjects = objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id));
+    selectedObjects.forEach((obj) => {
+      const initialPos = selectionAreaDragStartRef.current.get(obj.id);
+      if (!initialPos) return;
+
+      if (obj.type === 'line') {
+        // For lines, update points array based on initial points
+        const line = obj as LineShape;
+        const newPoints = [
+          initialPos.points![0] + dx,
+          initialPos.points![1] + dy,
+          initialPos.points![2] + dx,
+          initialPos.points![3] + dy,
+        ];
+        // Use live drag ref for smooth rendering during drag
+        manipulation.liveDragRef.current.set(obj.id, { 
+          x: 0, 
+          y: 0,
+          points: newPoints 
+        } as any);
+      } else {
+        // For other objects, update x and y based on initial position
+        const newX = initialPos.x + dx;
+        const newY = initialPos.y + dy;
+        manipulation.liveDragRef.current.set(obj.id, { x: newX, y: newY });
+      }
+    });
+    
+    // Trigger re-render
+    manipulation.setDragTick((t) => t + 1);
+  }, [selectionArea, selectedIds, objects, manipulation]);
+
+  // Handle selection area drag end - finalize positions
+  const handleSelectionAreaDragEnd = useCallback(() => {
+    if (!selectionArea || selectedIds.length === 0 || !selectionAreaInitialPosRef.current) {
+      selectionAreaDragStartRef.current.clear();
+      selectionAreaInitialPosRef.current = null;
+      selectionAreaLivePosRef.current = null;
+      return;
+    }
+    
+    // Get final delta from the live position ref (or fallback to state)
+    const finalPos = selectionAreaLivePosRef.current || selectionArea;
+    const finalDx = finalPos.x - selectionAreaInitialPosRef.current.x;
+    const finalDy = finalPos.y - selectionAreaInitialPosRef.current.y;
+    
+    // Finalize all selected objects positions
+    const selectedObjects = objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id));
+    selectedObjects.forEach((obj) => {
+      const initialPos = selectionAreaDragStartRef.current.get(obj.id);
+      if (!initialPos) return;
+
+      // Clear live drag
+      manipulation.liveDragRef.current.delete(obj.id);
+
+      if (obj.type === 'line') {
+        // For lines, update points array
+        const line = obj as LineShape;
+        const newPoints = [
+          initialPos.points![0] + finalDx,
+          initialPos.points![1] + finalDy,
+          initialPos.points![2] + finalDx,
+          initialPos.points![3] + finalDy,
+        ];
+        updateObject(obj.id, { points: newPoints });
+      } else {
+        // For other objects, update x and y
+        updateObject(obj.id, { 
+          x: initialPos.x + finalDx, 
+          y: initialPos.y + finalDy,
+          modifiedAt: Date.now()
+        });
+      }
+    });
+    
+    // Update selection area state to final position
+    if (selectionAreaLivePosRef.current) {
+      setSelectionArea({
+        ...selectionArea,
+        x: selectionAreaLivePosRef.current.x,
+        y: selectionAreaLivePosRef.current.y,
+      });
+    }
+    
+    // Trigger re-render to clear live drag
+    manipulation.setDragTick((t) => t + 1);
+    
+    // Clear drag tracking
+    selectionAreaDragStartRef.current.clear();
+    selectionAreaInitialPosRef.current = null;
+    selectionAreaLivePosRef.current = null;
+  }, [selectionArea, selectedIds, objects, updateObject, manipulation]);
+
   // ── Build merged collaborator list (viewing → online → offline) ──
   // Remember every user we've ever seen viewing this board in this session
   for (const state of onlineUsers) {
@@ -1417,6 +1605,7 @@ export default function BoardPage() {
           onDelete={handleDelete}
           onDuplicate={clipboard.duplicateSelectedObjects}
           onCopy={clipboard.copySelectedObjects}
+          onMove={handleMoveSelection}
           isSelectionArea={true}
         />
       )}
@@ -1561,18 +1750,17 @@ export default function BoardPage() {
 
         {/* Line tool: no preview — lines are created by dragging from connection dots */}
 
-        {/* Selection Area - persistent selection rectangle */}
-        {selectionArea && (
-          <KonvaRect
+        {/* Selection Area - draggable selection rectangle */}
+        {selectionArea && selectedIds.length > 0 && (
+          <SelectionArea
             x={selectionArea.x}
             y={selectionArea.y}
             width={selectionArea.width}
             height={selectionArea.height}
-            fill="rgba(59, 130, 246, 0.15)"
-            stroke="#3b82f6"
-            strokeWidth={2 / scale}
-            dash={[10 / scale, 5 / scale]}
-            listening={false}
+            scale={scale}
+            selectedObjects={objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id))}
+            onDragMove={handleSelectionAreaDragMove}
+            onDragEnd={handleSelectionAreaDragEnd}
           />
         )}
 
@@ -1585,6 +1773,7 @@ export default function BoardPage() {
                 key={obj.id}
                 data={renderObj as FrameType}
                 isSelected={isSelected(obj.id) && !selectionArea}
+                isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -1611,7 +1800,7 @@ export default function BoardPage() {
                 key={obj.id}
                 data={renderObj as StickyNoteType}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked}
+                isDraggable={!isLocked && activeTool !== 'move'}
                 onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -1638,7 +1827,7 @@ export default function BoardPage() {
                 key={obj.id}
                 data={renderObj as RectShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked}
+                isDraggable={!isLocked && activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -1665,7 +1854,7 @@ export default function BoardPage() {
                 key={obj.id}
                 data={renderObj as CircleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked}
+                isDraggable={!isLocked && activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -1721,7 +1910,7 @@ export default function BoardPage() {
                 key={obj.id}
                 data={renderObj as TextBubbleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked}
+                isDraggable={!isLocked && activeTool !== 'move'}
                 onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -1748,7 +1937,7 @@ export default function BoardPage() {
                 key={obj.id}
                 data={renderObj as TriangleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked}
+                isDraggable={!isLocked && activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -1775,7 +1964,7 @@ export default function BoardPage() {
                 key={obj.id}
                 data={renderObj as StarShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked}
+                isDraggable={!isLocked && activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -1818,6 +2007,12 @@ export default function BoardPage() {
           );
         })}
       </Canvas>
+
+      <AIAssistant
+        messages={aiCommands.messages}
+        isProcessing={aiCommands.isProcessing}
+        onSendMessage={aiCommands.sendCommand}
+      />
     </div>
   );
 }

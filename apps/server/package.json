@@ -21,6 +21,8 @@
     "@hocuspocus/server": "^3.4.4",
     "@supabase/supabase-js": "^2.45.0",
     "dotenv": "^16.4.7",
+    "langsmith": "^0.5.4",
+    "openai": "^6.22.0",
     "ws": "^8.19.0"
   }
 }

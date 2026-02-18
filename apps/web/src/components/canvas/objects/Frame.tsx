@@ -12,6 +12,7 @@ import type { Frame as FrameType } from '@/types/canvas';
 interface FrameProps {
   data: FrameType;
   isSelected: boolean;
+  isDraggable?: boolean;
   onSelect: (e: Konva.KonvaEventObject<MouseEvent>) => void;
   onUpdate: (updates: Partial<FrameType>) => void;
   onDragMove?: (id: string, x: number, y: number) => void;
@@ -21,6 +22,7 @@ interface FrameProps {
 export const Frame = ({
   data,
   isSelected,
+  isDraggable = true,
   onSelect,
   onUpdate,
   onDragMove,
@@ -224,7 +226,7 @@ export const Frame = ({
         x={data.x}
         y={data.y}
         rotation={data.rotation}
-        draggable={true}
+        draggable={isDraggable}
         onClick={onSelect}
         onTap={onSelect}
         onDragStart={handleDragStart}

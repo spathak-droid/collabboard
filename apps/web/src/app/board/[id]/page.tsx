@@ -480,12 +480,13 @@ export default function BoardPage() {
     };
 
     const getClusterBounds = () => {
+      const clusterIds = Array.from(result);
       let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
       let maxY = -Infinity;
 
-      for (const id of result) {
+      for (const id of clusterIds) {
         const obj = allMap.get(id);
         if (!obj || obj.type === 'frame') continue;
         const bounds = getObjectBounds(obj, allMap);

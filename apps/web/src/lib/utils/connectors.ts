@@ -80,10 +80,12 @@ export const getAnchorPoints = (obj: WhiteboardObject): AnchorPoint[] => {
     const centerY = obj.height / 2;
     const outerRadius = Math.max(20, Math.min(obj.width, obj.height) / 2);
     // Konva star starts from top point (-90 deg), then every 72 deg.
-    const localAnchors = Array.from({ length: 5 }, (_, i) => {
+    const starAnchors: AnchorPosition[] = ['p1', 'p2', 'p3', 'p4', 'p5'];
+
+    const localAnchors = starAnchors.map((anchor, i) => {
       const angle = (-90 + i * 72) * (Math.PI / 180);
       return {
-        anchor: (`p${i + 1}` as const),
+        anchor,
         x: centerX + outerRadius * Math.cos(angle),
         y: centerY + outerRadius * Math.sin(angle),
       };

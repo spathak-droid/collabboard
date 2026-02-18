@@ -108,11 +108,12 @@ export default function BoardPage() {
   });
 
   // Initialize dedicated cursor sync (bypasses Yjs for ultra-low latency)
+  // Uses same port as Hocuspocus, different path: /cursor/{boardId}
   const { cursors: fastCursors, isConnected: cursorSyncConnected, sendCursor: sendFastCursor } = useCursorSync({
     boardId,
     userId: user?.uid || '',
     userName: user?.displayName || user?.email || 'Anonymous',
-    enabled: !!user && !!boardId,
+    enabled: !!user && !!boardId, // Re-enabled with single-port mode
   });
 
   // Re-fetch board members & global presence whenever someone disconnects

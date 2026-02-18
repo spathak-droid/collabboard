@@ -39,11 +39,9 @@ export class CursorSyncClient {
   }
 
   connect(): void {
-    // Cursor sync runs on separate port (1235)
-    const baseUrl = new URL(this.config.serverUrl);
-    const cursorPort = baseUrl.port === '1234' ? '1235' : '1235';
+    // Single-port mode: Use same URL/port, different path
+    // Path: /cursor/{boardId} on same port as Hocuspocus
     const url = new URL(`/cursor/${this.config.boardId}`, this.config.serverUrl);
-    url.port = cursorPort;
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.searchParams.set('userId', this.config.userId);
     url.searchParams.set('userName', this.config.userName);

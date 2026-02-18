@@ -5,16 +5,17 @@
  * OPTIMIZATIONS:
  * - WebSocket compression (perMessageDeflate)
  * - Async snapshot storage (non-blocking)
- * - Dedicated cursor WebSocket route (bypasses Hocuspocus)
+ * - Path-based cursor routing on SAME PORT (Railway single-port compatible)
  * - Connection pooling for Supabase
  *
  * MVP auth: user info sent as JSON token from @hocuspocus/provider.
  */
 
-import { Server } from '@hocuspocus/server';
+import { Hocuspocus } from '@hocuspocus/server';
 import { Database } from '@hocuspocus/extension-database';
 import { createClient } from '@supabase/supabase-js';
 import { WebSocketServer } from 'ws';
+import { createServer } from 'http';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -62,7 +63,7 @@ if (supabase) {
             .from('board_snapshots')
             .select('state')
             .eq('board_id', boardId)
-            .order('created_at', { ascending: false })
+            .order('created_at', { ascending: false})
             .limit(1)
             .single();
 
@@ -120,17 +121,11 @@ if (supabase) {
   );
 }
 
-// ── Lightweight Cursor WebSocket (bypasses Hocuspocus) ──────
-const cursorPort = parseInt(process.env.CURSOR_PORT || '1235');
-const cursorWss = new WebSocketServer({ port: cursorPort });
-const cursorRooms = new Map(); // boardId -> Set of WebSocket clients
+// ── Lightweight Cursor WebSocket (path-based, SAME PORT) ────
+const cursorWss = new WebSocketServer({ noServer: true });
+const cursorRooms = new Map(); // boardId -> Map of WebSocket clients
 
-cursorWss.on('connection', (ws, request) => {
-  const url = new URL(request.url, `http://${request.headers.host}`);
-  const boardId = url.pathname.replace('/cursor/', '').replace('/', '');
-  const userId = url.searchParams.get('userId') || 'anonymous';
-  const userName = url.searchParams.get('userName') || 'Anonymous';
-
+cursorWss.on('connection', (ws, request, boardId, userId, userName) => {
   if (!cursorRooms.has(boardId)) {
     cursorRooms.set(boardId, new Map());
   }
@@ -175,10 +170,8 @@ cursorWss.on('connection', (ws, request) => {
   });
 });
 
-console.log(`🖱️  Cursor WebSocket listening on port ${cursorPort}`);
-
 // ── Hocuspocus server with optimizations ────────────────────
-const server = new Server({
+const hocuspocus = new Hocuspocus({
   extensions,
   
   // WebSocket compression for bandwidth reduction
@@ -237,14 +230,8 @@ const server = new Server({
 });
 
 // ── Catch unhandled errors so they don't crash the server ────
-// The ERR_ENCODING_INVALID_ENCODED_DATA error comes from stale clients
-// (e.g. y-websocket) sending binary auth tokens that Hocuspocus v3
-// tries to decode as UTF-8 inside _readVarStringNative. These are
-// harmless — the connection will fail and the client will retry or
-// give up. Suppress the spam but log other real errors.
 process.on('uncaughtException', (err) => {
   if (err.code === 'ERR_ENCODING_INVALID_ENCODED_DATA') {
-    // Silently ignore — stale client sending incompatible binary data
     return;
   }
   console.error('⚠️  Uncaught exception (non-fatal):', err.message);
@@ -253,24 +240,59 @@ process.on('unhandledRejection', (reason) => {
   console.error('⚠️  Unhandled rejection (non-fatal):', reason);
 });
 
-// ── Start Hocuspocus server ─────────────────────────────────
+// ── HTTP server with path-based WebSocket routing ───────────
+const httpServer = createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('CollabBoard WebSocket Server\n\nRoutes:\n- /cursor/{boardId} - Ultra-fast cursor sync\n- / - CRDT object sync (Hocuspocus)');
+});
+
+// Create WebSocket server for routing
+const wss = new WebSocketServer({ noServer: true });
+
+httpServer.on('upgrade', (request, socket, head) => {
+  const url = new URL(request.url, `http://${request.headers.host}`);
+  
+  // Route: /cursor/{boardId}?userId={userId}&userName={userName}
+  if (url.pathname.startsWith('/cursor/')) {
+    const boardId = url.pathname.replace('/cursor/', '').replace('/', '');
+    const userId = url.searchParams.get('userId') || 'anonymous';
+    const userName = url.searchParams.get('userName') || 'Anonymous';
+    
+    cursorWss.handleUpgrade(request, socket, head, (ws) => {
+      cursorWss.emit('connection', ws, request, boardId, userId, userName);
+    });
+  } else {
+    // All other routes go to Hocuspocus
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      hocuspocus.handleConnection(ws, request);
+    });
+  }
+});
+
+// ── Start HTTP server on SINGLE PORT ────────────────────────
 const port = parseInt(process.env.PORT || '1234');
 
-server.listen(port, () => {
+httpServer.listen(port, () => {
   console.log('========================================');
   console.log('🚀 CollabBoard WebSocket Server Running');
-  console.log(`📦 CRDT (Hocuspocus): ws://localhost:${port}/`);
-  console.log(`🖱️  Cursors: ws://localhost:${cursorPort}/cursor/{boardId}`);
+  console.log(`📦 CRDT (Hocuspocus): ws://0.0.0.0:${port}/`);
+  console.log(`🖱️  Cursors: ws://0.0.0.0:${port}/cursor/{boardId}`);
   console.log(`💾 Supabase: ${supabase ? 'connected' : 'disabled'}`);
   console.log(`🗜️  Compression: enabled`);
+  console.log(`✅ Single-port mode (Railway compatible)`);
   console.log('========================================');
+});
+
+httpServer.on('error', (err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });
 
 process.on('SIGINT', () => {
-  server.destroy();
+  httpServer.close();
   process.exit(0);
 });
 process.on('SIGTERM', () => {
-  server.destroy();
+  httpServer.close();
   process.exit(0);
 });

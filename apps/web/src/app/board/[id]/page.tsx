@@ -36,6 +36,13 @@ import { findNearestAnchor, resolveLinePoints } from '@/lib/utils/connectors';
 import { calculateAutoFit } from '@/lib/utils/autoFit';
 import { STICKY_COLORS } from '@/types/canvas';
 import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextBubbleShape, Frame as FrameType, AnchorPosition } from '@/types/canvas';
+// Refactored hooks
+import { useObjectBounds } from '@/lib/hooks/useObjectBounds';
+import { useFrameManagement } from '@/lib/hooks/useFrameManagement';
+import { useObjectManipulation } from '@/lib/hooks/useObjectManipulation';
+import { useConnectorDrawing } from '@/lib/hooks/useConnectorDrawing';
+import { useClipboardOperations } from '@/lib/hooks/useClipboardOperations';
+import { useBoardMetadata } from '@/lib/hooks/useBoardMetadata';
 
 export default function BoardPage() {
   const params = useParams();
@@ -45,19 +52,6 @@ export default function BoardPage() {
   const { user, loading: authLoading } = useAuth();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  const [boardTitle, setBoardTitle] = useState('Untitled Board');
-  const [ownerUid, setOwnerUid] = useState<string | null>(null);
-  const [boardMembers, setBoardMembers] = useState<BoardMember[]>([]);
-  const [shapeStrokeColor, setShapeStrokeColor] = useState('#000000');
-  const [shapeFillColor, setShapeFillColor] = useState('#E5E7EB');
-  const [showAllUsers, setShowAllUsers] = useState(false);
-  const [globalOnlineUids, setGlobalOnlineUids] = useState<Set<string>>(new Set());
-  const [frameWarningVisible, setFrameWarningVisible] = useState(false);
-  const frameWarningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const titleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const usersDropdownRef = useRef<HTMLDivElement>(null);
-  const [copyToastVisible, setCopyToastVisible] = useState(false);
-  const copyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Send heartbeat every 60s so other users know we're online
   usePresenceHeartbeat(user?.uid);
@@ -66,35 +60,11 @@ export default function BoardPage() {
   // "offline" after they disconnect (Yjs awareness only has live users).
   const seenUsersRef = useRef<Map<string, { name: string; color: string }>>(new Map());
   
-  // Load board metadata from Supabase (non-blocking)
-  const boardMetaLoaded = useRef(false);
-  useEffect(() => {
-    if (!boardId || !user || boardMetaLoaded.current) return;
-    boardMetaLoaded.current = true;
-
-    supabase
-      .from('boards')
-      .select('title, owner_uid')
-      .eq('id', boardId)
-      .single()
-      .then(({ data, error }) => {
-        if (error) { console.error('Error loading board meta:', error); return; }
-        if (data?.title) setBoardTitle(data.title);
-        if (data?.owner_uid) setOwnerUid(data.owner_uid);
-      });
-
-    // Register this user as a collaborator, then fetch all known members
-    ensureBoardAccess(boardId, user.uid)
-      .then(() => fetchBoardMembers(boardId))
-      .then((members) => {
-        setBoardMembers(members);
-        const uids = members.map((m) => m.uid);
-        fetchOnlineUserUids(uids).then(setGlobalOnlineUids).catch(() => {});
-      })
-      .catch(console.error);
-  }, [boardId, user]);
-
-  const isOwner = ownerUid !== null && user?.uid === ownerUid;
+  const [shapeStrokeColor, setShapeStrokeColor] = useState('#000000');
+  const [shapeFillColor, setShapeFillColor] = useState('#E5E7EB');
+  const [showAllUsers, setShowAllUsers] = useState(false);
+  const titleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usersDropdownRef = useRef<HTMLDivElement>(null);
   
   // Initialize Yjs connection
   const {
@@ -122,31 +92,9 @@ export default function BoardPage() {
     enabled: !!user && !!boardId, // Enable if user and board are loaded
   });
 
-  // Re-fetch board members & global presence whenever someone disconnects
-  const prevOnlineCountRef = useRef(0);
-  useEffect(() => {
-    const currentCount = onlineUsers.length;
-    if (prevOnlineCountRef.current > currentCount && boardId) {
-      fetchBoardMembers(boardId).then((members) => {
-        setBoardMembers(members);
-        const uids = members.map((m) => m.uid);
-        fetchOnlineUserUids(uids).then(setGlobalOnlineUids).catch(() => {});
-      }).catch(console.error);
-    }
-    prevOnlineCountRef.current = currentCount;
-  }, [onlineUsers.length, boardId]);
-
-  // Poll global presence every 30s so we detect when users go online/offline
-  useEffect(() => {
-    if (boardMembers.length === 0) return;
-    const poll = () => {
-      const uids = boardMembers.map((m) => m.uid);
-      fetchOnlineUserUids(uids).then(setGlobalOnlineUids).catch(() => {});
-    };
-    poll(); // immediate
-    const interval = setInterval(poll, 30_000);
-    return () => clearInterval(interval);
-  }, [boardMembers]);
+  // Use refactored hooks
+  const boardMetadata = useBoardMetadata(boardId, user, onlineUsers.length);
+  const { boardTitle, setBoardTitle, ownerUid, boardMembers, globalOnlineUids, isOwner } = boardMetadata;
   
   const {
     selectedIds,
@@ -164,21 +112,12 @@ export default function BoardPage() {
   // Selection Area - persistent selection rectangle
   const [selectionArea, setSelectionArea] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  // ── Connector drawing state ──
-  const [isDrawingLine, setIsDrawingLine] = useState(false);
-  const [drawingLineId, setDrawingLineId] = useState<string | null>(null);
-  const [highlightedAnchor, setHighlightedAnchor] = useState<{ objectId: string; anchor: string } | null>(null);
-  const [hoveredShapeId, setHoveredShapeId] = useState<string | null>(null);
-  const drawingStartedAtRef = useRef<number>(0);
-
-  // Track live drag positions for smooth line following during shape drag
-  const liveDragRef = useRef<Map<string, { x: number; y: number }>>(new Map());
-  const liveTransformRef = useRef<Map<string, { x: number; y: number; rotation: number; width?: number; height?: number; radius?: number }>>(new Map());
+  // Connector drawing state moved to useConnectorDrawing hook
+  // Live drag/transform state moved to useObjectManipulation hook
   // Track line points for live drag (for lines contained in frames)
   const liveLinePointsRef = useRef<Map<string, number[]>>(new Map());
   // Track initial frame position when drag starts (for calculating contained object deltas)
   const frameDragStartRef = useRef<Map<string, { x: number; y: number; containedInitialPositions: Map<string, { x: number; y: number; points?: number[] }> }>>(new Map());
-  const [, setDragTick] = useState(0);
   const [isTransforming, setIsTransforming] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -229,14 +168,7 @@ export default function BoardPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showAllUsers]);
 
-  // Cleanup frame warning timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (frameWarningTimeoutRef.current) {
-        clearTimeout(frameWarningTimeoutRef.current);
-      }
-    };
-  }, []);
+  // Frame warning cleanup is handled by useFrameManagement hook
 
   // Auto-fit canvas when objects first load
   const hasAutoFittedRef = useRef(false);
@@ -406,173 +338,137 @@ export default function BoardPage() {
     return map;
   }, [objects]);
 
-  // Get object bounds (needed for frame containment checks and frame creation)
-  const getObjectBounds = useCallback((obj: WhiteboardObject, map: Map<string, WhiteboardObject>) => {
-    const strokePad =
-      'strokeWidth' in obj && typeof obj.strokeWidth === 'number'
-        ? obj.strokeWidth / 2 + 2
-        : 2;
+  // Use refactored hooks
+  const { getObjectBounds, getConnectedObjectIds, intersectsRect } = useObjectBounds();
+  const frameManagement = useFrameManagement(objects);
+  const manipulation = useObjectManipulation(objects, objectsMap, updateObject, frameManagement);
+  
+  // Connector drawing hook
+  const connectorDrawing = useConnectorDrawing(
+    objects,
+    objectsMap,
+    updateObject,
+    createObject,
+    deleteObjects,
+    position,
+    scale,
+    shapeStrokeColor,
+    user,
+    setActiveTool
+  );
 
-    if (obj.type === 'circle') {
+  // Clipboard operations hook
+  const clipboard = useClipboardOperations(
+    objects,
+    selectedIds,
+    createObject,
+    deselectAll,
+    selectObject,
+    user,
+    () => {
+      const viewportCenterX = typeof window !== 'undefined' ? window.innerWidth / 2 : 0;
+      const viewportCenterY = typeof window !== 'undefined' ? window.innerHeight / 2 : 0;
       return {
-        minX: obj.x - obj.radius - strokePad,
-        minY: obj.y - obj.radius - strokePad,
-        maxX: obj.x + obj.radius + strokePad,
-        maxY: obj.y + obj.radius + strokePad,
+        x: (viewportCenterX - position.x) / scale,
+        y: (viewportCenterY - position.y) / scale,
       };
-    }
-
-    if (obj.type === 'line') {
-      const [x1, y1, x2, y2] = resolveLinePoints(obj, map);
-      const pad = (obj.strokeWidth ?? 2) / 2 + 2;
-      return {
-        minX: Math.min(x1, x2) - pad,
-        minY: Math.min(y1, y2) - pad,
-        maxX: Math.max(x1, x2) + pad,
-        maxY: Math.max(y1, y2) + pad,
-      };
-    }
-
-    // Width/height objects rotate around top-left group origin (Konva default).
-    // Use transformed corners so frame bounds include full rotated geometry.
-    const rotation = obj.rotation || 0;
-    const rotRad = (rotation * Math.PI) / 180;
-    const cosR = Math.cos(rotRad);
-    const sinR = Math.sin(rotRad);
-    const localCorners = [
-      { x: 0, y: 0 },
-      { x: obj.width, y: 0 },
-      { x: obj.width, y: obj.height },
-      { x: 0, y: obj.height },
-    ];
-    const worldCorners = localCorners.map((corner) => ({
-      x: obj.x + corner.x * cosR - corner.y * sinR,
-      y: obj.y + corner.x * sinR + corner.y * cosR,
-    }));
-    const xs = worldCorners.map((p) => p.x);
-    const ys = worldCorners.map((p) => p.y);
-
-    return {
-      minX: Math.min(...xs) - strokePad,
-      minY: Math.min(...ys) - strokePad,
-      maxX: Math.max(...xs) + strokePad,
-      maxY: Math.max(...ys) + strokePad,
-    };
-  }, []);
-
-  const getConnectedObjectIds = useCallback((seedIds: string[], allObjects: WhiteboardObject[]) => {
-    const result = new Set<string>(seedIds);
-    const allMap = new Map<string, WhiteboardObject>(allObjects.map((obj) => [obj.id, obj]));
-    const lineObjects = allObjects.filter((obj): obj is LineShape => obj.type === 'line');
-
-    const pointInBounds = (
-      x: number,
-      y: number,
-      bounds: { minX: number; minY: number; maxX: number; maxY: number }
-    ) => {
-      const tolerance = 10;
-      return (
-        x >= bounds.minX - tolerance &&
-        x <= bounds.maxX + tolerance &&
-        y >= bounds.minY - tolerance &&
-        y <= bounds.maxY + tolerance
-      );
-    };
-
-    const getClusterBounds = () => {
-      const clusterIds = Array.from(result);
+    },
+    (source, target, userId) => {
+      // Clone objects including frames and their contained objects
       let minX = Infinity;
       let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-
-      for (const id of clusterIds) {
-        const obj = allMap.get(id);
-        if (!obj || obj.type === 'frame') continue;
-        const bounds = getObjectBounds(obj, allMap);
-        minX = Math.min(minX, bounds.minX);
-        minY = Math.min(minY, bounds.minY);
-        maxX = Math.max(maxX, bounds.maxX);
-        maxY = Math.max(maxY, bounds.maxY);
+      for (const obj of source) {
+        if (obj.type === 'line') {
+          const line = obj as LineShape;
+          minX = Math.min(minX, line.points[0], line.points[2]);
+          minY = Math.min(minY, line.points[1], line.points[3]);
+        } else {
+          minX = Math.min(minX, obj.x);
+          minY = Math.min(minY, obj.y);
+        }
       }
-
-      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
-        return null;
-      }
-
-      return { minX, minY, maxX, maxY };
-    };
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      const clusterBounds = getClusterBounds();
-
-      for (const line of lineObjects) {
-        const lineId = line.id;
-        const startId = line.startAnchor?.objectId;
-        const endId = line.endAnchor?.objectId;
-
-        const touchesClusterByAnchor =
-          (!!startId && result.has(startId)) ||
-          (!!endId && result.has(endId)) ||
-          result.has(lineId);
-
-        const lineBounds = getObjectBounds(line, allMap);
-        const intersectsCluster = clusterBounds
-          ? !(
-              lineBounds.maxX < clusterBounds.minX ||
-              lineBounds.minX > clusterBounds.maxX ||
-              lineBounds.maxY < clusterBounds.minY ||
-              lineBounds.minY > clusterBounds.maxY
-            )
-          : false;
-
-        if (!touchesClusterByAnchor && !intersectsCluster) continue;
-
-        if (!result.has(lineId)) {
-          result.add(lineId);
-          changed = true;
-        }
-
-        if (startId && !result.has(startId)) {
-          result.add(startId);
-          changed = true;
-        }
-        if (endId && !result.has(endId)) {
-          result.add(endId);
-          changed = true;
-        }
-
-        // If endpoints or line span geometrically touch an object, include that object too.
-        const [x1, y1, x2, y2] = resolveLinePoints(line, allMap);
-        const lineSpanBounds = {
-          minX: Math.min(x1, x2),
-          minY: Math.min(y1, y2),
-          maxX: Math.max(x1, x2),
-          maxY: Math.max(y1, y2),
-        };
-        for (const obj of allObjects) {
-          if (obj.type === 'line' || obj.type === 'frame') continue;
-          const bounds = getObjectBounds(obj, allMap);
-          const lineOverlapsObject = !(
-            lineSpanBounds.maxX < bounds.minX ||
-            lineSpanBounds.minX > bounds.maxX ||
-            lineSpanBounds.maxY < bounds.minY ||
-            lineSpanBounds.minY > bounds.maxY
-          );
-          if (lineOverlapsObject || pointInBounds(x1, y1, bounds) || pointInBounds(x2, y2, bounds)) {
-            if (!result.has(obj.id)) {
-              result.add(obj.id);
-              changed = true;
+      if (!Number.isFinite(minX) || !Number.isFinite(minY)) return [];
+      const dx = target.x - minX;
+      const dy = target.y - minY;
+      const idMap = new Map<string, string>();
+      const allObjectsToClone: WhiteboardObject[] = [];
+      for (const obj of source) {
+        idMap.set(obj.id, generateId());
+        allObjectsToClone.push(obj);
+        if (obj.type === 'frame') {
+          const frame = obj as FrameType;
+          for (const containedId of frame.containedObjectIds || []) {
+            if (!idMap.has(containedId)) {
+              const containedObj = objectsMap.get(containedId);
+              if (containedObj) {
+                idMap.set(containedId, generateId());
+                allObjectsToClone.push(containedObj);
+              }
             }
           }
         }
       }
+      const now = Date.now();
+      const cloned: WhiteboardObject[] = [];
+      for (const obj of allObjectsToClone) {
+        const newId = idMap.get(obj.id)!;
+        const baseMeta = {
+          ...obj,
+          id: newId,
+          zIndex: obj.zIndex + cloned.length + 1,
+          createdBy: userId,
+          createdAt: now,
+          modifiedAt: now,
+        };
+        if (obj.type === 'line') {
+          const line = obj as LineShape;
+          const clonedStart = line.startAnchor && idMap.has(line.startAnchor.objectId)
+            ? { ...line.startAnchor, objectId: idMap.get(line.startAnchor.objectId)! }
+            : undefined;
+          const clonedEnd = line.endAnchor && idMap.has(line.endAnchor.objectId)
+            ? { ...line.endAnchor, objectId: idMap.get(line.endAnchor.objectId)! }
+            : undefined;
+          cloned.push({
+            ...baseMeta,
+            x: line.x + dx,
+            y: line.y + dy,
+            points: [
+              line.points[0] + dx,
+              line.points[1] + dy,
+              line.points[2] + dx,
+              line.points[3] + dy,
+            ],
+            startAnchor: clonedStart,
+            endAnchor: clonedEnd,
+          } as WhiteboardObject);
+        } else if (obj.type === 'frame') {
+          const frame = obj as FrameType;
+          const newContainedIds = (frame.containedObjectIds || []).map(id => idMap.get(id) || id);
+          const frameCount = objects.filter(o => o.type === 'frame').length + cloned.filter(o => o.type === 'frame').length + 1;
+          cloned.push({
+            ...baseMeta,
+            x: frame.x + dx,
+            y: frame.y + dy,
+            containedObjectIds: newContainedIds,
+            name: `frame${frameCount}`,
+          } as WhiteboardObject);
+        } else {
+          cloned.push({
+            ...baseMeta,
+            x: obj.x + dx,
+            y: obj.y + dy,
+          } as WhiteboardObject);
+        }
+      }
+      return cloned;
     }
+  );
 
-    return Array.from(result);
-  }, [getObjectBounds]);
+  // getCurrentCanvasCursor and cloneObjectsAtPoint are defined above (passed to clipboard hook)
+
+  // OLD CODE REMOVED - Now using useObjectBounds hook above
+
+  // OLD getConnectedObjectIds removed - now using hook
 
   const handleCanvasClick = useCallback(
     (e: any) => {
@@ -716,167 +612,9 @@ export default function BoardPage() {
     [activeTool, objects.length, objects, objectsMap, user, shapeFillColor, shapeStrokeColor, createObject, getPlacementCoordinates, setActiveTool, deselectAll, getConnectedObjectIds, getObjectBounds, selectObject, selectionArea]
   );
 
-  // Show frame boundary warning
-  const showFrameWarning = useCallback(() => {
-    setFrameWarningVisible(true);
-    if (frameWarningTimeoutRef.current) {
-      clearTimeout(frameWarningTimeoutRef.current);
-    }
-    frameWarningTimeoutRef.current = setTimeout(() => {
-      setFrameWarningVisible(false);
-    }, 3000);
-  }, []);
-
-  // Find which frame contains an object (if any)
-  const findContainingFrame = useCallback((objectId: string): FrameType | null => {
-    if (!objects || objects.length === 0) return null;
-    for (const obj of objects) {
-      if (obj && obj.type === 'frame') {
-        const frame = obj as FrameType;
-        if (frame.containedObjectIds?.includes(objectId)) {
-          return frame;
-        }
-      }
-    }
-    return null;
-  }, [objects]);
-
-  // Check if object bounds are within frame bounds
-  const isObjectWithinFrame = useCallback((
-    obj: WhiteboardObject,
-    frame: FrameType,
-    objX?: number,
-    objY?: number,
-    objPoints?: number[],
-    map?: Map<string, WhiteboardObject>
-  ): boolean => {
-    const testObj = { ...obj };
-    if (typeof objX === 'number') testObj.x = objX;
-    if (typeof objY === 'number') testObj.y = objY;
-    
-    // For line objects, update points if provided
-    if (obj.type === 'line' && objPoints) {
-      (testObj as LineShape).points = objPoints;
-    }
-    
-    // Create map from objects if not provided
-    const objMap = map || new Map(objects.map((o) => [o.id, o]));
-    const objBounds = getObjectBounds(testObj, objMap);
-    const frameBounds = getObjectBounds(frame, objMap);
-    
-    // Check if object is completely within frame (with small padding)
-    const padding = 5;
-    return (
-      objBounds.minX >= frameBounds.minX + padding &&
-      objBounds.minY >= frameBounds.minY + padding &&
-      objBounds.maxX <= frameBounds.maxX - padding &&
-      objBounds.maxY <= frameBounds.maxY - padding
-    );
-  }, [getObjectBounds, objects]);
+  // Frame management functions moved to useFrameManagement hook
   
-  // Update a shape and reposition any connected lines
-  const updateShapeAndConnectors = useCallback(
-    (shapeId: string, updates: Partial<WhiteboardObject>) => {
-      // Clear live drag/transform positions — the real state is now being persisted
-      liveDragRef.current.delete(shapeId);
-      liveTransformRef.current.delete(shapeId);
-
-      const currentObj = objects.find((o) => o.id === shapeId);
-      if (!currentObj) return;
-
-      // Check if object is contained in a frame and if new position would be outside
-      const containingFrame = findContainingFrame(shapeId);
-      if (containingFrame && (typeof updates.x === 'number' || typeof updates.y === 'number')) {
-        const newX = typeof updates.x === 'number' ? updates.x : currentObj.x;
-        const newY = typeof updates.y === 'number' ? updates.y : currentObj.y;
-        const tempMap = new Map(objects.map((o) => [o.id, o]));
-        const isWithin = isObjectWithinFrame(currentObj, containingFrame, newX, newY, undefined, tempMap);
-        
-        if (!isWithin) {
-          // Don't update position if outside frame - revert to current position
-          showFrameWarning();
-          // Only update other properties, not position
-          const { x, y, ...otherUpdates } = updates;
-          if (Object.keys(otherUpdates).length > 0) {
-            updateObject(shapeId, otherUpdates);
-          }
-          
-          const updatedObj = { ...currentObj, ...otherUpdates } as WhiteboardObject;
-          // Still update connected lines with current position
-          for (const obj of objects) {
-            if (obj.type !== 'line') continue;
-            const line = obj as LineShape;
-            const startConnected = line.startAnchor?.objectId === shapeId;
-            const endConnected = line.endAnchor?.objectId === shapeId;
-            if (!startConnected && !endConnected) continue;
-
-            const tempMap = new Map(objects.map((o) => [o.id, o]));
-            tempMap.set(shapeId, updatedObj);
-
-            const [x1, y1, x2, y2] = resolveLinePoints(line, tempMap);
-            updateObject(line.id, { x: 0, y: 0, points: [x1, y1, x2, y2] });
-          }
-          return;
-        }
-      }
-
-      updateObject(shapeId, updates);
-
-      const updatedObj = { ...currentObj, ...updates } as WhiteboardObject;
-
-      for (const obj of objects) {
-        if (obj.type !== 'line') continue;
-        const line = obj as LineShape;
-        const startConnected = line.startAnchor?.objectId === shapeId;
-        const endConnected = line.endAnchor?.objectId === shapeId;
-        if (!startConnected && !endConnected) continue;
-
-        const tempMap = new Map(objects.map((o) => [o.id, o]));
-        tempMap.set(shapeId, updatedObj);
-
-        const [x1, y1, x2, y2] = resolveLinePoints(line, tempMap);
-        updateObject(line.id, { x: 0, y: 0, points: [x1, y1, x2, y2] });
-      }
-    },
-    [objects, updateObject, findContainingFrame, isObjectWithinFrame, showFrameWarning]
-  );
-
-  // Live-update connected lines while a shape is being dragged
-  // Uses a ref so we bypass stale React state — just store position and trigger re-render
-  const handleShapeDragMove = useCallback(
-    (shapeId: string, liveX: number, liveY: number) => {
-      const obj = objectsMap.get(shapeId);
-      if (!obj) {
-        liveDragRef.current.set(shapeId, { x: liveX, y: liveY });
-        setDragTick((t) => t + 1);
-        return;
-      }
-
-      // Check if object is contained in a frame
-      const containingFrame = findContainingFrame(shapeId);
-      if (containingFrame) {
-        // Check if new position would be outside frame
-        const tempMap = new Map(objects.map((o) => [o.id, o]));
-        const isWithin = isObjectWithinFrame(obj, containingFrame, liveX, liveY, undefined, tempMap);
-        if (!isWithin) {
-          showFrameWarning();
-        }
-      }
-
-      liveDragRef.current.set(shapeId, { x: liveX, y: liveY });
-      setDragTick((t) => t + 1);
-    },
-    [objectsMap, findContainingFrame, isObjectWithinFrame, showFrameWarning]
-  );
-
-  // Live-update connected lines while a shape is being transformed (rotated/resized)
-  const handleShapeTransformMove = useCallback(
-    (shapeId: string, liveX: number, liveY: number, liveRotation: number, dimensions?: { width?: number; height?: number; radius?: number }) => {
-      liveTransformRef.current.set(shapeId, { x: liveX, y: liveY, rotation: liveRotation, ...dimensions });
-      setDragTick((t) => t + 1);
-    },
-    []
-  );
+  // Object manipulation functions moved to useObjectManipulation hook
 
   // Render frames behind all other objects so inner-object clicks are not stolen.
   const renderObjects = useMemo(() => {
@@ -923,13 +661,13 @@ export default function BoardPage() {
         typeof updates.rotation === 'number';
 
       // Clear live drag overlays once final values are persisted.
-      liveDragRef.current.delete(frameId);
+      manipulation.liveDragRef.current.delete(frameId);
       frameDragStartRef.current.delete(frameId);
       
       // Clear live drag for contained objects
       if (frame.containedObjectIds) {
         for (const containedId of frame.containedObjectIds) {
-          liveDragRef.current.delete(containedId);
+          manipulation.liveDragRef.current.delete(containedId);
           liveLinePointsRef.current.delete(containedId);
         }
       }
@@ -943,7 +681,7 @@ export default function BoardPage() {
           if (!containedObj) continue;
           
           // Clear live drag overlay for contained object
-          liveDragRef.current.delete(containedId);
+          manipulation.liveDragRef.current.delete(containedId);
           
           if (containedObj.type === 'line') {
             // Line objects use points array instead of x/y
@@ -972,8 +710,8 @@ export default function BoardPage() {
     (frameId: string, liveX: number, liveY: number) => {
       const frame = objectsMap.get(frameId);
       if (!frame || frame.type !== 'frame') {
-        liveDragRef.current.set(frameId, { x: liveX, y: liveY });
-        setDragTick((t) => t + 1);
+        manipulation.liveDragRef.current.set(frameId, { x: liveX, y: liveY });
+        manipulation.setDragTick((t) => t + 1);
         return;
       }
 
@@ -1012,7 +750,7 @@ export default function BoardPage() {
       const deltaY = liveY - dragStart.y;
 
       // Move frame visually during drag (persist on drag end).
-      liveDragRef.current.set(frameId, { x: liveX, y: liveY });
+      manipulation.liveDragRef.current.set(frameId, { x: liveX, y: liveY });
 
       // Move all contained objects during live drag
       if ((deltaX !== 0 || deltaY !== 0) && frame.containedObjectIds) {
@@ -1031,7 +769,7 @@ export default function BoardPage() {
             liveLinePointsRef.current.set(containedId, newPoints);
           } else {
             // Regular object - update x/y
-            liveDragRef.current.set(containedId, {
+            manipulation.liveDragRef.current.set(containedId, {
               x: initialPos.x + deltaX,
               y: initialPos.y + deltaY,
             });
@@ -1039,20 +777,28 @@ export default function BoardPage() {
         }
       }
 
-      setDragTick((t) => t + 1);
+      manipulation.setDragTick((t) => t + 1);
     },
     [objectsMap]
   );
 
   // Overlay live drag positions on top of objectsMap for smooth line rendering
   // Computed every render (cheap — only iterates liveDragRef entries)
-  const liveObjectsMap: Map<string, WhiteboardObject> = liveDragRef.current.size === 0 && liveTransformRef.current.size === 0 && liveLinePointsRef.current.size === 0
+  const liveObjectsMap: Map<string, WhiteboardObject> = manipulation.liveDragRef.current.size === 0 && manipulation.liveTransformRef.current.size === 0 && liveLinePointsRef.current.size === 0
     ? objectsMap
     : (() => {
         const map = new Map(objectsMap);
-        liveDragRef.current.forEach((pos, id) => {
+        manipulation.liveDragRef.current.forEach((pos, id) => {
           const obj = map.get(id);
-          if (obj) map.set(id, { ...obj, x: pos.x, y: pos.y } as WhiteboardObject);
+          if (obj) {
+            if (obj.type === 'line') {
+              const line = obj as LineShape;
+              const points = liveLinePointsRef.current.get(id) || line.points;
+              map.set(id, { ...obj, x: 0, y: 0, points } as WhiteboardObject);
+            } else {
+              map.set(id, { ...obj, x: pos.x, y: pos.y } as WhiteboardObject);
+            }
+          }
         });
         liveLinePointsRef.current.forEach((points, id) => {
           const obj = map.get(id);
@@ -1060,10 +806,14 @@ export default function BoardPage() {
             map.set(id, { ...obj, points } as WhiteboardObject);
           }
         });
-        liveTransformRef.current.forEach((transform, id) => {
+        manipulation.liveTransformRef.current.forEach((transform, id) => {
           const obj = map.get(id);
           if (obj) {
-            const updates: any = { x: transform.x, y: transform.y, rotation: transform.rotation };
+            const updates: Partial<WhiteboardObject> & {
+              width?: number;
+              height?: number;
+              radius?: number;
+            } = { x: transform.x, y: transform.y, rotation: transform.rotation };
             if (transform.width !== undefined) updates.width = transform.width;
             if (transform.height !== undefined) updates.height = transform.height;
             if (transform.radius !== undefined) updates.radius = transform.radius;
@@ -1073,48 +823,7 @@ export default function BoardPage() {
         return map;
       })();
 
-  // Click a dot to start drawing, click again to finish (two-click flow)
-  const handleAnchorMouseDown = useCallback(
-    (objectId: string, anchor: string, anchorX: number, anchorY: number) => {
-      // If already drawing, treat this as finishing on this anchor
-      if (isDrawingLine && drawingLineId) {
-        const line = objectsMap.get(drawingLineId) as LineShape | undefined;
-        if (line && objectId !== line.startAnchor?.objectId) {
-          updateObject(drawingLineId, {
-            endAnchor: { objectId, anchor: anchor as AnchorPosition },
-            points: [line.points[0], line.points[1], anchorX, anchorY],
-          });
-        }
-        setIsDrawingLine(false);
-        setDrawingLineId(null);
-        setHighlightedAnchor(null);
-        return;
-      }
-
-      // Start a new connector line
-      const lineId = generateId();
-      const line: LineShape = {
-        id: lineId,
-        type: 'line',
-        x: 0,
-        y: 0,
-        points: [anchorX, anchorY, anchorX, anchorY],
-        stroke: shapeStrokeColor,
-        strokeWidth: 3,
-        rotation: 0,
-        zIndex: objects.length,
-        createdBy: user?.uid || '',
-        createdAt: Date.now(),
-        startAnchor: { objectId, anchor: anchor as AnchorPosition },
-      };
-      createObject(line);
-      setDrawingLineId(lineId);
-      setIsDrawingLine(true);
-      drawingStartedAtRef.current = Date.now();
-      setActiveTool('select');
-    },
-    [isDrawingLine, drawingLineId, objectsMap, shapeStrokeColor, objects.length, user, createObject, updateObject, setActiveTool]
-  );
+  // Connector drawing functions moved to useConnectorDrawing hook
 
   const handleMouseMove = useCallback(
     (e: any) => {
@@ -1134,139 +843,15 @@ export default function BoardPage() {
       }
 
       // While drawing a connector line, update the end point to follow cursor
-      if (isDrawingLine && drawingLineId) {
-        const line = objectsMap.get(drawingLineId) as LineShape | undefined;
-        if (line) {
-          const nearest = findNearestAnchor(x, y, objects, [drawingLineId, line.startAnchor?.objectId || '']);
-          if (nearest) {
-            setHighlightedAnchor({ objectId: nearest.objectId, anchor: nearest.anchor });
-            updateObject(drawingLineId, {
-              points: [line.points[0], line.points[1], nearest.x, nearest.y],
-            });
-          } else {
-            setHighlightedAnchor(null);
-            updateObject(drawingLineId, {
-              points: [line.points[0], line.points[1], x, y],
-            });
-          }
-        }
+      if (connectorDrawing.isDrawingLine && connectorDrawing.drawingLineId) {
+        connectorDrawing.handleDrawingMouseMove(x, y);
       }
     },
-    [position, scale, updateCursor, cursorSyncConnected, sendFastCursor, isDrawingLine, drawingLineId, objectsMap, objects, updateObject]
+    [position, scale, updateCursor, cursorSyncConnected, sendFastCursor, connectorDrawing, objectsMap, objects]
   );
 
-  // Second click on empty canvas finishes the line (free endpoint with arrow)
-  const handleConnectorClick = useCallback(
-    (e: any) => {
-      if (!isDrawingLine || !drawingLineId) return;
-
-      // Ignore the click that comes from the same mouseDown that started drawing
-      if (Date.now() - drawingStartedAtRef.current < 300) return;
-
-      const stage = e.target.getStage();
-      const pointerPosition = stage?.getPointerPosition();
-      if (!pointerPosition) return;
-
-      const x = (pointerPosition.x - position.x) / scale;
-      const y = (pointerPosition.y - position.y) / scale;
-
-      const line = objectsMap.get(drawingLineId) as LineShape | undefined;
-      if (!line) {
-        setIsDrawingLine(false);
-        setDrawingLineId(null);
-        setHighlightedAnchor(null);
-        return;
-      }
-
-      // Check if near an anchor
-      const nearest = findNearestAnchor(x, y, objects, [drawingLineId, line.startAnchor?.objectId || '']);
-      if (nearest) {
-        updateObject(drawingLineId, {
-          endAnchor: { objectId: nearest.objectId, anchor: nearest.anchor as AnchorPosition },
-          points: [line.points[0], line.points[1], nearest.x, nearest.y],
-        });
-      } else {
-        updateObject(drawingLineId, {
-          points: [line.points[0], line.points[1], x, y],
-        });
-      }
-
-      setIsDrawingLine(false);
-      setDrawingLineId(null);
-      setHighlightedAnchor(null);
-    },
-    [isDrawingLine, drawingLineId, position, scale, objectsMap, objects, updateObject]
-  );
-  
-  // Endpoint drag handler — called while dragging a line's start/end handle
-  const handleEndpointDrag = useCallback(
-    (lineId: string, endpoint: 'start' | 'end', canvasX: number, canvasY: number) => {
-      const line = objectsMap.get(lineId) as LineShape | undefined;
-      const excludeIds = [lineId];
-      if (endpoint === 'start' && line?.endAnchor) excludeIds.push(line.endAnchor.objectId);
-      if (endpoint === 'end' && line?.startAnchor) excludeIds.push(line.startAnchor.objectId);
-
-      const nearest = findNearestAnchor(canvasX, canvasY, objects, excludeIds);
-      if (nearest) {
-        setHighlightedAnchor({ objectId: nearest.objectId, anchor: nearest.anchor });
-        return nearest;
-      }
-      setHighlightedAnchor(null);
-      return null;
-    },
-    [objectsMap, objects]
-  );
-
-  // Endpoint drag end — finalize connection or leave free
-  const handleEndpointDragEnd = useCallback(
-    (lineId: string, endpoint: 'start' | 'end', canvasX: number, canvasY: number) => {
-      const line = objectsMap.get(lineId) as LineShape | undefined;
-      if (!line) { setHighlightedAnchor(null); return; }
-
-      const excludeIds = [lineId];
-      if (endpoint === 'start' && line.endAnchor) excludeIds.push(line.endAnchor.objectId);
-      if (endpoint === 'end' && line.startAnchor) excludeIds.push(line.startAnchor.objectId);
-
-      const nearest = findNearestAnchor(canvasX, canvasY, objects, excludeIds);
-      if (nearest) {
-        if (endpoint === 'start') {
-          updateObject(lineId, {
-            startAnchor: { objectId: nearest.objectId, anchor: nearest.anchor as AnchorPosition },
-            points: [nearest.x, nearest.y, line.points[2], line.points[3]],
-            x: 0, y: 0,
-          });
-        } else {
-          updateObject(lineId, {
-            endAnchor: { objectId: nearest.objectId, anchor: nearest.anchor as AnchorPosition },
-            points: [line.points[0], line.points[1], nearest.x, nearest.y],
-            x: 0, y: 0,
-          });
-        }
-      } else {
-        // Free endpoint — clear anchor
-        if (endpoint === 'start') {
-          updateObject(lineId, { startAnchor: undefined });
-        } else {
-          updateObject(lineId, { endAnchor: undefined });
-        }
-      }
-      setHighlightedAnchor(null);
-    },
-    [objectsMap, objects, updateObject]
-  );
-
-  const intersectsRect = useCallback(
-    (obj: WhiteboardObject, rect: { x: number; y: number; width: number; height: number }, map: Map<string, WhiteboardObject>) => {
-      const bounds = getObjectBounds(obj, map);
-      return !(
-        bounds.maxX < rect.x ||
-        bounds.minX > rect.x + rect.width ||
-        bounds.maxY < rect.y ||
-        bounds.minY > rect.y + rect.height
-      );
-    },
-    [getObjectBounds]
-  );
+  // Connector drawing functions moved to useConnectorDrawing hook
+  // intersectsRect moved to useObjectBounds hook
 
   // Handle Selection Area - create persistent selection area when dragging in select mode
   useEffect(() => {
@@ -1478,215 +1063,7 @@ export default function BoardPage() {
     );
   };
 
-  // Clipboard refs (must be defined before functions that use them)
-  const clipboardRef = useRef<WhiteboardObject[]>([]);
-  const pasteCountRef = useRef(0);
-
-  // Show copy toast notification
-  const showCopyToast = useCallback(() => {
-    setCopyToastVisible(true);
-    if (copyToastTimerRef.current) {
-      clearTimeout(copyToastTimerRef.current);
-    }
-    copyToastTimerRef.current = setTimeout(() => {
-      setCopyToastVisible(false);
-    }, 1300);
-  }, []);
-
-  // Cleanup toast timer on unmount
-  useEffect(() => {
-    return () => {
-      if (copyToastTimerRef.current) {
-        clearTimeout(copyToastTimerRef.current);
-      }
-    };
-  }, []);
-
-  // Get current canvas cursor position
-  const getCurrentCanvasCursor = useCallback(() => {
-    const viewportCenterX = typeof window !== 'undefined' ? window.innerWidth / 2 : 0;
-    const viewportCenterY = typeof window !== 'undefined' ? window.innerHeight / 2 : 0;
-    return {
-      x: (viewportCenterX - position.x) / scale,
-      y: (viewportCenterY - position.y) / scale,
-    };
-  }, [position, scale]);
-
-  // Clone objects including frames and their contained objects
-  const cloneObjectsAtPoint = useCallback((
-    source: WhiteboardObject[],
-    target: { x: number; y: number },
-    userId: string
-  ): WhiteboardObject[] => {
-    // Calculate bounds of all source objects
-    let minX = Infinity;
-    let minY = Infinity;
-    for (const obj of source) {
-      if (obj.type === 'line') {
-        const line = obj as LineShape;
-        minX = Math.min(minX, line.points[0], line.points[2]);
-        minY = Math.min(minY, line.points[1], line.points[3]);
-      } else {
-        minX = Math.min(minX, obj.x);
-        minY = Math.min(minY, obj.y);
-      }
-    }
-    
-    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return [];
-    
-    const dx = target.x - minX;
-    const dy = target.y - minY;
-
-    const idMap = new Map<string, string>();
-    const allObjectsToClone: WhiteboardObject[] = [];
-    
-    // First pass: collect all objects including contained objects in frames
-    for (const obj of source) {
-      idMap.set(obj.id, generateId());
-      allObjectsToClone.push(obj);
-      
-      // If it's a frame, also clone contained objects
-      if (obj.type === 'frame') {
-        const frame = obj as FrameType;
-        for (const containedId of frame.containedObjectIds || []) {
-          if (!idMap.has(containedId)) {
-            const containedObj = objectsMap.get(containedId);
-            if (containedObj) {
-              idMap.set(containedId, generateId());
-              allObjectsToClone.push(containedObj);
-            }
-          }
-        }
-      }
-    }
-
-    const now = Date.now();
-    const cloned: WhiteboardObject[] = [];
-    
-    for (const obj of allObjectsToClone) {
-      const newId = idMap.get(obj.id)!;
-      const baseMeta = {
-        ...obj,
-        id: newId,
-        zIndex: obj.zIndex + cloned.length + 1,
-        createdBy: userId,
-        createdAt: now,
-        modifiedAt: now,
-      };
-
-      if (obj.type === 'line') {
-        const line = obj as LineShape;
-        const clonedStart = line.startAnchor && idMap.has(line.startAnchor.objectId)
-          ? { ...line.startAnchor, objectId: idMap.get(line.startAnchor.objectId)! }
-          : undefined;
-        const clonedEnd = line.endAnchor && idMap.has(line.endAnchor.objectId)
-          ? { ...line.endAnchor, objectId: idMap.get(line.endAnchor.objectId)! }
-          : undefined;
-        cloned.push({
-          ...baseMeta,
-          x: line.x + dx,
-          y: line.y + dy,
-          points: [
-            line.points[0] + dx,
-            line.points[1] + dy,
-            line.points[2] + dx,
-            line.points[3] + dy,
-          ],
-          startAnchor: clonedStart,
-          endAnchor: clonedEnd,
-        } as WhiteboardObject);
-      } else if (obj.type === 'frame') {
-        const frame = obj as FrameType;
-        // Update containedObjectIds to use new IDs
-        const newContainedIds = (frame.containedObjectIds || []).map(id => idMap.get(id) || id);
-        // Generate new frame name
-        const frameCount = objects.filter(o => o.type === 'frame').length + cloned.filter(o => o.type === 'frame').length + 1;
-        cloned.push({
-          ...baseMeta,
-          x: frame.x + dx,
-          y: frame.y + dy,
-          containedObjectIds: newContainedIds,
-          name: `frame${frameCount}`,
-        } as WhiteboardObject);
-      } else {
-        cloned.push({
-          ...baseMeta,
-          x: obj.x + dx,
-          y: obj.y + dy,
-        } as WhiteboardObject);
-      }
-    }
-    
-    return cloned;
-  }, [objectsMap, objects]);
-
-  // Copy selected objects to clipboard
-  const copySelectedObjects = useCallback(async () => {
-    const selectedObjects = objects.filter(obj => selectedIds.includes(obj.id));
-    if (selectedObjects.length === 0) return;
-    
-    // Store in memory clipboard for internal paste
-    clipboardRef.current = selectedObjects.map((obj) => ({ ...obj }));
-    pasteCountRef.current = 0;
-    
-    // Copy to system clipboard using Clipboard API
-    try {
-      const clipboardData = JSON.stringify(selectedObjects);
-      await navigator.clipboard.writeText(clipboardData);
-      // Show success toast
-      showCopyToast();
-    } catch (err) {
-      // Fallback: clipboard API might not be available (e.g., non-HTTPS)
-      console.warn('Failed to copy to system clipboard:', err);
-      // Still show toast even if clipboard API failed (memory clipboard worked)
-      showCopyToast();
-    }
-  }, [selectedIds, objects, showCopyToast]);
-
-  // Paste objects from clipboard
-  const pasteClipboardObjects = useCallback(async () => {
-    if (!user) return;
-    
-    // Try to read from system clipboard first
-    let objectsToPaste: WhiteboardObject[] = [];
-    try {
-      const clipboardText = await navigator.clipboard.readText();
-      if (clipboardText) {
-        try {
-          const parsed = JSON.parse(clipboardText);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            objectsToPaste = parsed;
-          }
-        } catch {
-          // Not valid JSON, fall back to memory clipboard
-        }
-      }
-    } catch (err) {
-      // Clipboard API might not be available, fall back to memory clipboard
-    }
-    
-    // Fall back to memory clipboard if system clipboard didn't work
-    if (objectsToPaste.length === 0 && clipboardRef.current.length > 0) {
-      objectsToPaste = clipboardRef.current;
-    }
-    
-    if (objectsToPaste.length === 0) return;
-    
-    // Clone objects at current cursor position
-    const cloned = cloneObjectsAtPoint(objectsToPaste, getCurrentCanvasCursor(), user.uid);
-    if (cloned.length === 0) return;
-    
-    // Create cloned objects
-    cloned.forEach((obj) => createObject(obj));
-    
-    // Select the last pasted object
-    if (cloned.length > 0) {
-      deselectAll();
-      selectObject(cloned[cloned.length - 1].id, false);
-    }
-    
-    pasteCountRef.current += 1;
-  }, [user, cloneObjectsAtPoint, getCurrentCanvasCursor, createObject, deselectAll, selectObject]);
+  // Clipboard functions moved to useClipboardOperations hook
 
   // Handle delete key
   useEffect(() => {
@@ -1699,11 +1076,8 @@ export default function BoardPage() {
       if (isEditableElement(e.target)) return;
 
       // Escape cancels line drawing
-      if (e.key === 'Escape' && isDrawingLine && drawingLineId) {
-        deleteObjects([drawingLineId]);
-        setIsDrawingLine(false);
-        setDrawingLineId(null);
-        setHighlightedAnchor(null);
+      if (e.key === 'Escape' && connectorDrawing.isDrawingLine && connectorDrawing.drawingLineId) {
+        connectorDrawing.cancelLineDrawing();
         return;
       }
 
@@ -1720,7 +1094,7 @@ export default function BoardPage() {
       if (isMetaOrCtrl && e.key.toLowerCase() === 'c') {
         if (selectedIds.length > 0) {
           e.preventDefault();
-          copySelectedObjects();
+          clipboard.copySelectedObjects();
         }
       }
 
@@ -1728,28 +1102,15 @@ export default function BoardPage() {
       if (isMetaOrCtrl && e.key.toLowerCase() === 'v') {
         // Always try to paste (will check both system clipboard and memory clipboard)
         e.preventDefault();
-        pasteClipboardObjects();
+        clipboard.pasteClipboardObjects();
       }
     };
     
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, deleteObjects, deselectAll, isDrawingLine, drawingLineId, getDeleteIds, copySelectedObjects, pasteClipboardObjects]);
+  }, [selectedIds, deleteObjects, deselectAll, connectorDrawing, getDeleteIds, clipboard]);
   
-  const duplicateSelectedObjects = useCallback(() => {
-    const selectedObjects = objects.filter(obj => selectedIds.includes(obj.id));
-    if (selectedObjects.length === 0 || !user) return;
-    const cloned = cloneObjectsAtPoint(selectedObjects, getCurrentCanvasCursor(), user.uid);
-    if (cloned.length === 0) return;
-    cloned.forEach((obj) => createObject(obj));
-    clipboardRef.current = selectedObjects.map((obj) => ({ ...obj }));
-    pasteCountRef.current = 1;
-    deselectAll();
-    // Select the last cloned object (usually the frame if frames were cloned)
-    if (cloned.length > 0) {
-      selectObject(cloned[cloned.length - 1].id, false);
-    }
-  }, [selectedIds, objects, user, cloneObjectsAtPoint, getCurrentCanvasCursor, createObject, deselectAll, selectObject]);
+  // duplicateSelectedObjects moved to useClipboardOperations hook
 
   const handleDelete = useCallback(() => {
     if (selectedIds.length > 0) {
@@ -1843,7 +1204,7 @@ export default function BoardPage() {
   return (
     <div className="w-full h-screen relative bg-white" style={{ touchAction: 'none', overscrollBehavior: 'none' }}>
       {/* Copy Toast Notification */}
-      {copyToastVisible && (
+      {clipboard.copyToastVisible && (
         <div className="pointer-events-none fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full border border-slate-200 bg-white px-4 py-2 shadow-lg">
           <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
@@ -1858,7 +1219,7 @@ export default function BoardPage() {
       <DisconnectBanner status={connectionStatus} />
       
       {/* Frame boundary warning popup */}
-      {frameWarningVisible && (
+      {frameManagement.frameWarningVisible && (
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
           <div className="bg-yellow-50 border-2 border-yellow-400 rounded-lg px-4 py-3 shadow-lg flex items-center gap-3">
             <svg className="w-5 h-5 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2051,8 +1412,8 @@ export default function BoardPage() {
           onTextSizeChange={handleTextSizeChange}
           onTextFamilyChange={handleTextFamilyChange}
           onDelete={handleDelete}
-          onDuplicate={duplicateSelectedObjects}
-          onCopy={copySelectedObjects}
+          onDuplicate={clipboard.duplicateSelectedObjects}
+          onCopy={clipboard.copySelectedObjects}
           isSelectionArea={true}
         />
       )}
@@ -2068,8 +1429,8 @@ export default function BoardPage() {
           onTextSizeChange={handleTextSizeChange}
           onTextFamilyChange={handleTextFamilyChange}
           onDelete={handleDelete}
-          onDuplicate={objects.filter(obj => selectedIds.includes(obj.id)).some(obj => obj.type === 'frame') ? undefined : duplicateSelectedObjects}
-          onCopy={objects.filter(obj => selectedIds.includes(obj.id)).some(obj => obj.type === 'frame') ? undefined : copySelectedObjects}
+          onDuplicate={objects.filter(obj => selectedIds.includes(obj.id)).some(obj => obj.type === 'frame') ? undefined : clipboard.duplicateSelectedObjects}
+          onCopy={objects.filter(obj => selectedIds.includes(obj.id)).some(obj => obj.type === 'frame') ? undefined : clipboard.copySelectedObjects}
         />
       )}
 
@@ -2087,8 +1448,14 @@ export default function BoardPage() {
         boardId={boardId} 
         objects={objects}
         onClick={(e) => {
-          if (isDrawingLine) {
-            handleConnectorClick(e);
+          if (connectorDrawing.isDrawingLine) {
+            const stage = e.target.getStage();
+            const pointerPosition = stage?.getPointerPosition();
+            if (pointerPosition) {
+              const x = (pointerPosition.x - position.x) / scale;
+              const y = (pointerPosition.y - position.y) / scale;
+              connectorDrawing.handleConnectorClick(x, y);
+            }
           } else {
             handleCanvasClick(e);
           }
@@ -2229,7 +1596,7 @@ export default function BoardPage() {
                 }}
                 onUpdate={(updates) => updateFrameAndContents(obj.id, updates)}
                 onDragMove={handleFrameDragMove}
-                onTransformMove={handleShapeTransformMove}
+                onTransformMove={manipulation.handleShapeTransformMove}
               />
             );
           }
@@ -2254,9 +1621,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={handleShapeDragMove}
-                onTransformMove={handleShapeTransformMove}
+                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
+                onDragMove={manipulation.handleShapeDragMove}
+                onTransformMove={manipulation.handleShapeTransformMove}
               />
             );
           }
@@ -2281,9 +1648,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={handleShapeDragMove}
-                onTransformMove={handleShapeTransformMove}
+                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
+                onDragMove={manipulation.handleShapeDragMove}
+                onTransformMove={manipulation.handleShapeTransformMove}
               />
             );
           }
@@ -2308,9 +1675,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={handleShapeDragMove}
-                onTransformMove={handleShapeTransformMove}
+                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
+                onDragMove={manipulation.handleShapeDragMove}
+                onTransformMove={manipulation.handleShapeTransformMove}
               />
             );
           }
@@ -2338,8 +1705,8 @@ export default function BoardPage() {
                   }
                 }}
                 onUpdate={(updates) => updateObject(obj.id, updates)}
-                onEndpointDrag={handleEndpointDrag}
-                onEndpointDragEnd={handleEndpointDragEnd}
+                onEndpointDrag={connectorDrawing.handleEndpointDrag}
+                onEndpointDragEnd={connectorDrawing.handleEndpointDragEnd}
               />
             );
           }
@@ -2364,9 +1731,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={handleShapeDragMove}
-                onTransformMove={handleShapeTransformMove}
+                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
+                onDragMove={manipulation.handleShapeDragMove}
+                onTransformMove={manipulation.handleShapeTransformMove}
               />
             );
           }
@@ -2391,9 +1758,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={handleShapeDragMove}
-                onTransformMove={handleShapeTransformMove}
+                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
+                onDragMove={manipulation.handleShapeDragMove}
+                onTransformMove={manipulation.handleShapeTransformMove}
               />
             );
           }
@@ -2418,9 +1785,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={handleShapeDragMove}
-                onTransformMove={handleShapeTransformMove}
+                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
+                onDragMove={manipulation.handleShapeDragMove}
+                onTransformMove={manipulation.handleShapeTransformMove}
               />
             );
           }
@@ -2436,14 +1803,14 @@ export default function BoardPage() {
             const o = objectsMap.get(sid);
             return o?.type === 'line';
           });
-          const showDots = !isTransforming && !isDragging && (activeTool === 'line' || isDrawingLine || isSelected(obj.id) || hoveredShapeId === obj.id || anyLineSelected);
+          const showDots = !isTransforming && !isDragging && (activeTool === 'line' || connectorDrawing.isDrawingLine || isSelected(obj.id) || connectorDrawing.hoveredShapeId === obj.id || anyLineSelected);
           if (!showDots) return null;
           return (
             <ConnectionDots
               key={`dots-${obj.id}`}
               object={renderObj}
-              highlightedAnchor={highlightedAnchor}
-              onAnchorMouseDown={handleAnchorMouseDown}
+              highlightedAnchor={connectorDrawing.highlightedAnchor}
+              onAnchorMouseDown={connectorDrawing.handleAnchorMouseDown}
             />
           );
         })}

@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 
-interface CanvasStore {
+export interface CanvasStore {
   // Selection
   selectedIds: string[];
   setSelected: (ids: string[]) => void;
@@ -32,6 +32,8 @@ interface CanvasStore {
   selectionRect: { x: number; y: number; width: number; height: number } | null;
   setSelectionRect: (rect: CanvasStore['selectionRect']) => void;
 }
+
+export type ActiveTool = CanvasStore['activeTool'];
 
 export const useCanvasStore = create<CanvasStore>((set) => ({
   // Selection

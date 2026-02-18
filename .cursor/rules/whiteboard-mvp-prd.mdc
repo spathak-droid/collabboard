@@ -57,17 +57,24 @@ Why: TDD requirement - tests must exist alongside component changes"
 
 ### Documentation Guidelines
 
-**IMPORTANT:** Do NOT create `.md` files for improvements, optimizations, or explanations.
+**CRITICAL RULE - TOKEN CONSERVATION:** Do NOT create `.md` files when making changes. This wastes tokens and is unnecessary.
 
-- ✅ **DO:** Explain improvements, optimizations, and changes directly in the chat
+- ✅ **DO:** Explain improvements, optimizations, and changes directly in the chat conversation
 - ✅ **DO:** Use inline code comments for complex logic explanations
 - ✅ **DO:** Add JSDoc comments for public APIs and functions
-- ❌ **DON'T:** Create separate `.md` documentation files for improvements
-- ❌ **DON'T:** Create `OPTIMIZATIONS.md`, `IMPROVEMENTS.md`, or similar files
+- ❌ **NEVER:** Create separate `.md` documentation files for improvements, changes, or explanations
+- ❌ **NEVER:** Create `OPTIMIZATIONS.md`, `IMPROVEMENTS.md`, `CHANGES.md`, `NOTES.md`, or any similar markdown files
+- ❌ **NEVER:** Create `.md` files to document code changes, feature implementations, or technical decisions
 
-**Rationale:** Keep documentation in code (comments) and explanations in chat. Avoid creating additional markdown files that need maintenance and can become outdated.
+**Rationale:** 
+- Keep documentation in code (comments) and explanations in chat
+- Avoid creating additional markdown files that consume tokens unnecessarily
+- Chat explanations are sufficient and more efficient
+- Markdown files require maintenance and can become outdated
 
-**Exception:** Only create `.md` files if explicitly requested by the user.
+**ONLY Exception:** Create `.md` files ONLY if the user explicitly and directly requests a markdown file (e.g., "create a README.md" or "write this in a markdown file"). Even then, keep it concise.
+
+**Default Behavior:** When making any changes, explain them in chat only. Do not create any `.md` files.
 
 ## Tech Stack (Mandatory)
 
@@ -215,6 +222,281 @@ server/ (separate repo for Hocuspocus)
 - Use Konva.js for all canvas rendering (not raw Canvas API)
 - Handle disconnects gracefully (show banner, auto-reconnect)
 - Never lose data during concurrent edits (Yjs CRDT guarantees this)
+
+## Code Quality & Architecture Rules (Mandatory)
+
+### Structure & Size
+
+**File Size Limits:**
+- A file should not exceed **700 LOC** (excluding generated code)
+- If a file exceeds 700 LOC, split by feature/module
+- One component per file (or one main component + small private helpers)
+- Don't cram multiple big components in one file
+
+**Function Size Limits:**
+- A function should not exceed **~50–80 LOC**
+- If a function grows beyond this, split into smaller functions
+- A function should do one thing (single responsibility principle)
+- If the function name needs "and", split it (e.g., `validateAndSave` → `validate` + `save`)
+
+**Nesting Limits:**
+- Maximum **3 levels of nesting** in a function
+- If deeper nesting is needed, use early-return or extract helper functions
+
+```typescript
+// ✅ GOOD: Early return reduces nesting
+function processUser(user: User | null) {
+  if (!user) return null;
+  if (!user.email) return null;
+  return validateEmail(user.email);
+}
+
+// ❌ BAD: Too many nested levels
+function processUser(user: User | null) {
+  if (user) {
+    if (user.email) {
+      if (isValidEmail(user.email)) {
+        return user.email;
+      }
+    }
+  }
+  return null;
+}
+```
+
+### Naming & Clarity
+
+**Names must reveal intent:**
+- ❌ Avoid: `data`, `item`, `temp`, `foo`, `bar`, `x`, `y` (unless coordinates)
+- ✅ Use descriptive names: `userProfile`, `canvasObject`, `selectedTool`
+
+**Boolean naming:**
+- Must start with `is`/`has`/`can`/`should`
+- ✅ Examples: `isSelected`, `hasPermission`, `canEdit`, `shouldSync`
+
+**Handler and event naming:**
+- Handlers start with `handle`: `handleClick`, `handleSubmit`
+- Event props start with `on`: `onClick`, `onChange`, `onSelect`
+- Mutations start with `set`/`update`: `setPosition`, `updateColor`
+
+**Abbreviations:**
+- ❌ No abbreviations unless widely known (`id`, `url`, `ui`, `api`, `db`)
+- ❌ Avoid: `usr`, `obj`, `cfg`, `mgr`, `util`
+- ✅ Use full words: `user`, `object`, `config`, `manager`, `utility`
+
+### Types & Safety (TypeScript)
+
+**Type Safety Rules:**
+- ❌ **No `any`** (unless you add a comment explaining why + TODO to fix)
+- ✅ Use `unknown` over `any`, then narrow with type guards
+- Define types at boundaries: API responses, DB objects, Yjs messages
+- Prefer enums/union types for states instead of magic strings
+
+```typescript
+// ✅ GOOD: Union type instead of magic string
+type Tool = 'select' | 'sticky' | 'rect' | 'circle';
+
+// ❌ BAD: Magic string
+const tool = 'select'; // What if typo? 'selec'?
+
+// ✅ GOOD: Unknown with narrowing
+function processApiResponse(data: unknown) {
+  if (isValidApiResponse(data)) {
+    return data.value; // Now safely typed
+  }
+  throw new Error('Invalid response');
+}
+
+// ❌ BAD: Any defeats type safety
+function processApiResponse(data: any) {
+  return data.value; // No type checking!
+}
+```
+
+### Error Handling & Control Flow
+
+**Error Handling Rules:**
+- ❌ **Never swallow errors** (`catch {}` is not allowed)
+- ✅ Always log errors or rethrow with context
+- No silent fallbacks unless intentionally designed (and documented)
+
+**Control Flow:**
+- Prefer early return over else-chains for readability
+- Use guard clauses to reduce nesting
+
+```typescript
+// ✅ GOOD: Early return with error handling
+async function saveObject(object: CanvasObject) {
+  if (!object.id) {
+    throw new Error('Object must have an id');
+  }
+  
+  try {
+    await yObjects.set(object.id, object);
+  } catch (error) {
+    console.error('Failed to save object:', error);
+    throw new Error(`Failed to save object ${object.id}`, { cause: error });
+  }
+}
+
+// ❌ BAD: Swallowed error
+async function saveObject(object: CanvasObject) {
+  try {
+    await yObjects.set(object.id, object);
+  } catch {
+    // Silent failure - user has no idea what went wrong!
+  }
+}
+```
+
+### State & Data Flow (Realtime/Cursors)
+
+**Critical Rules for Multiplayer State:**
+
+**Single Source of Truth:**
+- Single source of truth for presence/cursor state
+- Don't duplicate state in multiple stores
+- Normalize state: use maps keyed by `userId` for cursors/presence
+
+**Data Validation:**
+- Never update UI state directly from raw network payloads
+- Always validate/transform network data first
+- Throttle high-frequency events (cursor movement) client-side to avoid flooding
+
+```typescript
+// ✅ GOOD: Normalized cursor state
+const cursors = new Map<string, CursorState>();
+cursors.set(userId, { x, y, name });
+
+// ❌ BAD: Duplicated state
+const cursorPositions = { [userId]: { x, y } };
+const cursorNames = { [userId]: name };
+const cursorStates = { [userId]: { ... } }; // Duplication!
+
+// ✅ GOOD: Throttled cursor updates
+const throttledUpdateCursor = throttle((x: number, y: number) => {
+  yAwareness.setLocalStateField('cursor', { x, y });
+}, 50); // Update max every 50ms
+
+// ❌ BAD: Every mouse move floods network
+onMouseMove((e) => {
+  yAwareness.setLocalStateField('cursor', { x: e.x, y: e.y });
+});
+```
+
+### Performance
+
+**Render Performance:**
+- No work in render that can be memoized
+- Heavy computations → use `useMemo`/selectors
+- Avoid re-render storms: stable callbacks (`useCallback`), stable derived state
+
+**Network & Updates:**
+- Batch network updates when possible
+- Avoid deep cloning large objects repeatedly
+- Use object references when possible (Yjs handles immutability)
+
+```typescript
+// ✅ GOOD: Memoized expensive computation
+const visibleObjects = useMemo(() => {
+  return objects.filter(obj => isInViewport(obj, viewport));
+}, [objects, viewport]);
+
+// ❌ BAD: Recomputes on every render
+const visibleObjects = objects.filter(obj => isInViewport(obj, viewport));
+
+// ✅ GOOD: Stable callback
+const handleSelect = useCallback((id: string) => {
+  setSelectedId(id);
+}, []);
+
+// ❌ BAD: New function on every render
+const handleSelect = (id: string) => {
+  setSelectedId(id);
+};
+```
+
+### Code Quality
+
+**Code Cleanliness:**
+- ❌ No commented-out code in PRs (remove it or explain why it's needed)
+- ❌ No TODOs without an owner or issue link (or at least a clear reason)
+- Every exported function/component must have a doc comment if it's non-obvious
+
+**Testing:**
+- Write the smallest test for critical logic (presence merge, conflict resolution, permissions)
+- Tests must be fast and focused
+
+```typescript
+// ✅ GOOD: Documented public API
+/**
+ * Merges cursor states from multiple users, handling conflicts.
+ * @param cursors - Map of userId to cursor state
+ * @returns Normalized cursor array sorted by userId
+ */
+export function mergeCursors(cursors: Map<string, CursorState>): CursorState[] {
+  // ...
+}
+
+// ❌ BAD: No documentation, unclear purpose
+export function mergeCursors(cursors: Map<string, CursorState>) {
+  // ...
+}
+
+// ✅ GOOD: TODO with context
+// TODO: Optimize for 100+ concurrent users (issue #123)
+function processPresence(users: User[]) {
+  // ...
+}
+
+// ❌ BAD: Vague TODO
+// TODO: fix this
+```
+
+### Architecture Boundaries
+
+**Layer Separation:**
+- UI layer cannot call network directly (go through a service/client module)
+- Networking modules must be framework-agnostic (no React imports)
+- Shared utils must not import app-specific modules (keep dependency direction clean)
+
+```typescript
+// ✅ GOOD: Service layer abstraction
+// lib/services/cursorService.ts (no React imports)
+export async function updateCursor(x: number, y: number) {
+  await yAwareness.setLocalStateField('cursor', { x, y });
+}
+
+// components/Cursor.tsx
+import { updateCursor } from '@/lib/services/cursorService';
+
+// ❌ BAD: UI directly calling network
+// components/Cursor.tsx
+import { yAwareness } from '@/lib/yjs/provider';
+// Direct network access in UI component
+```
+
+**Dependency Direction:**
+```
+UI Components → Services → Network/DB
+     ↓              ↓
+   Utils ←──── Shared Utils (no app-specific imports)
+```
+
+### Git/PR Discipline
+
+**PR Size & Scope:**
+- PRs should be **<400 lines changed** ideally (split if bigger)
+- One PR = one purpose (no drive-by refactors mixed with features)
+- Add screenshots/recordings for UI changes
+
+**PR Checklist:**
+- [ ] PR is <400 lines changed (or justified if larger)
+- [ ] Single purpose (feature OR bugfix OR refactor, not mixed)
+- [ ] Screenshots/recordings added for UI changes
+- [ ] All tests pass
+- [ ] No commented-out code
+- [ ] No vague TODOs without context
 
 ## Testing (TDD - Mandatory)
 

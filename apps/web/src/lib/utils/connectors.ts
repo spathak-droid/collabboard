@@ -14,8 +14,13 @@ export interface AnchorPoint {
 const SNAP_DISTANCE = 20; // px — how close the cursor must be to snap
 
 /**
- * Get the 4 anchor points (top, right, bottom, left) for a shape in canvas coordinates.
- * Accounts for object rotation around the top-left corner (Konva default).
+ * Get anchor points for a shape in canvas coordinates.
+ * - Rect/sticky/text/frame: 4 side anchors
+ * - Triangle: 3 vertex anchors
+ * - Star: 5 outer-corner anchors
+ * - Circle: 4 side anchors
+ *
+ * For non-circle objects, rotation is around top-left corner (Konva Group default).
  */
 export const getAnchorPoints = (obj: WhiteboardObject): AnchorPoint[] => {
   const rotation = obj.rotation || 0;
@@ -23,7 +28,7 @@ export const getAnchorPoints = (obj: WhiteboardObject): AnchorPoint[] => {
   const cosR = Math.cos(rotRad);
   const sinR = Math.sin(rotRad);
   
-  if (obj.type === 'rect' || obj.type === 'sticky' || obj.type === 'textBubble') {
+  if (obj.type === 'rect' || obj.type === 'sticky' || obj.type === 'textBubble' || obj.type === 'frame') {
     // Anchor points in local coordinates (relative to top-left, which is the rotation origin)
     const halfW = obj.width / 2;
     const halfH = obj.height / 2;
@@ -36,6 +41,54 @@ export const getAnchorPoints = (obj: WhiteboardObject): AnchorPoint[] => {
     ];
     
     // Apply rotation around origin (0,0) which is top-left corner
+    return localAnchors.map(({ anchor, x, y }) => {
+      const rotX = x * cosR - y * sinR;
+      const rotY = x * sinR + y * cosR;
+      return {
+        objectId: obj.id,
+        anchor,
+        x: obj.x + rotX,
+        y: obj.y + rotY,
+      };
+    });
+  }
+
+  if (obj.type === 'triangle') {
+    // Triangle local vertices in Triangle.tsx:
+    // [width/2, 0], [width, height], [0, height]
+    const localAnchors = [
+      { anchor: 'p1' as const, x: obj.width / 2, y: 0 },
+      { anchor: 'p2' as const, x: obj.width, y: obj.height },
+      { anchor: 'p3' as const, x: 0, y: obj.height },
+    ];
+
+    return localAnchors.map(({ anchor, x, y }) => {
+      const rotX = x * cosR - y * sinR;
+      const rotY = x * sinR + y * cosR;
+      return {
+        objectId: obj.id,
+        anchor,
+        x: obj.x + rotX,
+        y: obj.y + rotY,
+      };
+    });
+  }
+
+  if (obj.type === 'star') {
+    // Star in Star.tsx is centered at width/2,height/2 with 5 points.
+    const centerX = obj.width / 2;
+    const centerY = obj.height / 2;
+    const outerRadius = Math.max(20, Math.min(obj.width, obj.height) / 2);
+    // Konva star starts from top point (-90 deg), then every 72 deg.
+    const localAnchors = Array.from({ length: 5 }, (_, i) => {
+      const angle = (-90 + i * 72) * (Math.PI / 180);
+      return {
+        anchor: (`p${i + 1}` as const),
+        x: centerX + outerRadius * Math.cos(angle),
+        y: centerY + outerRadius * Math.sin(angle),
+      };
+    });
+
     return localAnchors.map(({ anchor, x, y }) => {
       const rotX = x * cosR - y * sinR;
       const rotY = x * sinR + y * cosR;

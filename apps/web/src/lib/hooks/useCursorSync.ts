@@ -17,25 +17,38 @@ interface UseCursorSyncOptions {
 
 export function useCursorSync(options: UseCursorSyncOptions) {
   const { boardId, userId, userName, enabled = true } = options;
-  const serverUrl = options.serverUrl || process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:1234';
+  
+  // Read the dedicated cursor server URL, fallback to main Hocuspocus server
+  const cursorServerUrl = process.env.NEXT_PUBLIC_CURSOR_WS_URL;
+  const mainServerUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:1234';
+  
+  // Use dedicated cursor server if available, otherwise fall back to main server
+  const serverUrl = options.serverUrl || cursorServerUrl || mainServerUrl;
   
   const clientRef = useRef<CursorSyncClient | null>(null);
   const cursorsRef = useRef<Map<string, CursorPosition>>(new Map());
   const [isConnected, setIsConnected] = useState(false);
-  const [cursors, setCursors] = useState<Map<string, CursorPosition>>(new Map());
   
   // Throttle cursor updates to prevent excessive re-renders
   const lastSentRef = useRef<{ x: number; y: number; time: number }>({ x: 0, y: 0, time: 0 });
   const SEND_INTERVAL = 8; // 8ms = ~120fps
 
   const handleCursorUpdate = useCallback((cursor: CursorPosition) => {
+    // Measure latency (temporary - will remove after testing)
+    const now = Date.now();
+    const latency = now - cursor.timestamp;
+    
+    // Log only once every 100 updates to avoid spam
+    if (Math.random() < 0.01) {
+      console.log(`🖱️  Railway latency: ${latency}ms`);
+    }
+    
+    // Update ref only - no React re-render
     cursorsRef.current.set(cursor.userId, cursor);
-    setCursors(new Map(cursorsRef.current));
   }, []);
 
   const handleUserLeave = useCallback((userId: string) => {
     cursorsRef.current.delete(userId);
-    setCursors(new Map(cursorsRef.current));
   }, []);
 
   const handleConnect = useCallback(() => {
@@ -45,7 +58,6 @@ export function useCursorSync(options: UseCursorSyncOptions) {
   const handleDisconnect = useCallback(() => {
     setIsConnected(false);
     cursorsRef.current.clear();
-    setCursors(new Map());
   }, []);
 
   const handleError = useCallback((error: Error) => {
@@ -108,7 +120,7 @@ export function useCursorSync(options: UseCursorSyncOptions) {
   }, [enabled]);
 
   return {
-    cursors,
+    cursors: cursorsRef, // Return the ref directly (stable reference)
     isConnected,
     sendCursor,
   };

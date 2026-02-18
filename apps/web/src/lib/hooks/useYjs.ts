@@ -139,8 +139,28 @@ export const useYjs = ({ boardId, userId, userName }: UseYjsOptions) => {
     providerRef.current?.updateCursor(x, y);
   }, []);
 
+  const broadcastLiveDrag = useCallback((objectId: string, x: number, y: number, extra?: { rotation?: number; width?: number; height?: number; radius?: number }) => {
+    providerRef.current?.broadcastLiveDrag(objectId, x, y, extra);
+  }, []);
+
+  const clearLiveDrag = useCallback((objectId: string) => {
+    providerRef.current?.clearLiveDrag(objectId);
+  }, []);
+
+  const broadcastLivePosition = useCallback((objectId: string, x: number, y: number, extra?: { rotation?: number; width?: number; height?: number; radius?: number }) => {
+    providerRef.current?.broadcastLivePosition(objectId, x, y, extra);
+  }, []);
+
+  const clearLivePosition = useCallback((objectId: string) => {
+    providerRef.current?.clearLivePosition(objectId);
+  }, []);
+
   const setBoardTitle = useCallback((title: string) => {
     providerRef.current?.setMeta('title', title);
+  }, []);
+  
+  const getBroadcastRate = useCallback(() => {
+    return providerRef.current?.getBroadcastRate() || 0;
   }, []);
 
   return {
@@ -155,6 +175,11 @@ export const useYjs = ({ boardId, userId, userName }: UseYjsOptions) => {
     deleteObject,
     deleteObjects,
     updateCursor,
+    broadcastLiveDrag,
+    clearLiveDrag,
+    broadcastLivePosition,
+    clearLivePosition,
     setBoardTitle,
+    getBroadcastRate,
   };
 };

@@ -51,6 +51,15 @@ export class YjsProvider {
   }
 
   disconnect() {
+    // Cancel any pending cursor updates
+    if (this._cursorRAFId !== null) {
+      cancelAnimationFrame(this._cursorRAFId);
+      this._cursorRAFId = null;
+    }
+    this._pendingCursor = null;
+    this._lastSentCursor = null;
+    this._isFirstCursorUpdate = true;
+
     if (this.hocuspocus) {
       this.hocuspocus.disconnect();
       this.hocuspocus.destroy();
@@ -85,27 +94,91 @@ export class YjsProvider {
 
   // ── Awareness helpers ────────────────────────────────────
 
-  private _cursorThrottleTimer: ReturnType<typeof setTimeout> | null = null;
-  private _pendingCursor: { x: number; y: number } | null = null;
+  /**
+   * Broadcast live drag/transform position for instant visual feedback across users
+   * This creates seamless, same-millisecond sync without persisting to Yjs
+   * 
+   * Used during object dragging/transforming to show real-time updates to other users
+   * before the final state is committed on dragEnd/transformEnd
+   */
+  broadcastLiveDrag(objectId: string, x: number, y: number, extra?: { rotation?: number; width?: number; height?: number; radius?: number }) {
+    if (!this.hocuspocus) return;
+    
+    const livePositions = this.hocuspocus.awareness?.getLocalState()?.livePositions || {};
+    this.hocuspocus.setAwarenessField('livePositions', {
+      ...livePositions,
+      [objectId]: { x, y, ...extra, timestamp: Date.now() },
+    });
+  }
 
+  /**
+   * Clear live drag broadcast when drag ends
+   */
+  clearLiveDrag(objectId: string) {
+    if (!this.hocuspocus) return;
+    
+    const livePositions = this.hocuspocus.awareness?.getLocalState()?.livePositions || {};
+    const { [objectId]: _, ...rest } = livePositions;
+    this.hocuspocus.setAwarenessField('livePositions', rest);
+  }
+
+  private _cursorRAFId: number | null = null;
+  private _pendingCursor: { x: number; y: number } | null = null;
+  private _lastSentCursor: { x: number; y: number; timestamp: number } | null = null;
+  private readonly _CURSOR_SYNC_INTERVAL = 4; // ~240fps - maximum smoothness
+  private _isFirstCursorUpdate = true;
+  
+  // Broadcast tracking for performance monitoring
+  public broadcastCount = 0;
+  private _lastBroadcastReset = Date.now();
+
+  /**
+   * Update cursor position with instant real-time sync
+   * 
+   * Optimized for zero-latency cursor sync.
+   * 
+   * Strategy:
+   * - Send every cursor update immediately (no batching)
+   * - No RAF delays
+   * - No distance thresholds
+   * - WebSocket broadcasts instantly via awareness
+   */
   updateCursor(x: number, y: number) {
     if (!this.hocuspocus) return;
 
-    this._pendingCursor = { x, y };
+    const now = Date.now();
+    
+    // Throttle to max 250fps (4ms interval) to prevent network spam
+    if (this._lastSentCursor && (now - this._lastSentCursor.timestamp) < 4) {
+      return;
+    }
 
-    if (this._cursorThrottleTimer) return;
-
-    this._cursorThrottleTimer = setTimeout(() => {
-      if (this._pendingCursor) {
-        this.hocuspocus?.setAwarenessField('cursor', {
-          x: this._pendingCursor.x,
-          y: this._pendingCursor.y,
-          lastUpdate: Date.now(),
-        });
-        this._pendingCursor = null;
-      }
-      this._cursorThrottleTimer = null;
-    }, 30);
+    // Send immediately - no RAF, no threshold
+    this.hocuspocus.setAwarenessField('cursor', {
+      x,
+      y,
+      lastUpdate: now,
+    });
+    
+    this._lastSentCursor = { x, y, timestamp: now };
+    this.broadcastCount++;
+  }
+  
+  /**
+   * Get broadcast rate (calls per second) for performance monitoring
+   */
+  getBroadcastRate(): number {
+    const now = Date.now();
+    const elapsed = (now - this._lastBroadcastReset) / 1000;
+    const rate = this.broadcastCount / elapsed;
+    
+    // Reset counter every second
+    if (elapsed >= 1) {
+      this.broadcastCount = 0;
+      this._lastBroadcastReset = now;
+    }
+    
+    return Math.round(rate);
   }
 
   getAwarenessStates(): Map<number, AwarenessState> {
@@ -119,6 +192,55 @@ export class YjsProvider {
     return () => {
       this.hocuspocus?.awareness?.off('change', callback);
     };
+  }
+
+  // ── Live Position Broadcasting (60fps) ───────────────────
+  
+  /**
+   * Broadcast live object position for real-time collaboration
+   * Updates awareness immediately for 60fps sync
+   */
+  broadcastLivePosition(objectId: string, x: number, y: number, extra?: {
+    rotation?: number;
+    width?: number;
+    height?: number;
+    radius?: number;
+  }) {
+    if (!this.hocuspocus) return;
+
+    const currentState = this.hocuspocus.awareness!.getLocalState() || {};
+    const livePositions = { ...(currentState.livePositions || {}) };
+    
+    livePositions[objectId] = {
+      x,
+      y,
+      ...extra,
+      lastUpdate: Date.now(),
+    };
+
+    this.hocuspocus.setAwarenessField('livePositions', livePositions);
+  }
+
+  /**
+   * Clear live position for an object (drag/transform ended)
+   */
+  clearLivePosition(objectId: string) {
+    if (!this.hocuspocus) return;
+
+    const currentState = this.hocuspocus.awareness!.getLocalState() || {};
+    const livePositions = { ...(currentState.livePositions || {}) };
+    
+    delete livePositions[objectId];
+
+    this.hocuspocus.setAwarenessField('livePositions', livePositions);
+  }
+
+  /**
+   * Clear all live positions (e.g., on unmount)
+   */
+  clearAllLivePositions() {
+    if (!this.hocuspocus) return;
+    this.hocuspocus.setAwarenessField('livePositions', {});
   }
 
   // ── Y.Map observer ──────────────────────────────────────

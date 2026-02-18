@@ -2,7 +2,7 @@
  * Canvas object types and interfaces
  */
 
-export type ObjectType = 'sticky' | 'rect' | 'circle' | 'line' | 'textBubble';
+export type ObjectType = 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'textBubble' | 'frame';
 
 export interface BaseObject {
   id: string;
@@ -50,7 +50,40 @@ export interface CircleShape extends BaseObject {
   textFamily?: 'Inter' | 'Poppins' | 'Merriweather';
 }
 
-export type AnchorPosition = 'top' | 'right' | 'bottom' | 'left';
+export interface TriangleShape extends BaseObject {
+  type: 'triangle';
+  width: number;
+  height: number;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  text?: string;
+  textSize?: number;
+  textFamily?: 'Inter' | 'Poppins' | 'Merriweather';
+}
+
+export interface StarShape extends BaseObject {
+  type: 'star';
+  width: number;
+  height: number;
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  text?: string;
+  textSize?: number;
+  textFamily?: 'Inter' | 'Poppins' | 'Merriweather';
+}
+
+export type AnchorPosition =
+  | 'top'
+  | 'right'
+  | 'bottom'
+  | 'left'
+  | 'p1'
+  | 'p2'
+  | 'p3'
+  | 'p4'
+  | 'p5';
 
 export interface ConnectorAnchor {
   objectId: string;
@@ -75,7 +108,18 @@ export interface TextBubbleShape extends BaseObject {
   textFamily?: 'Inter' | 'Poppins' | 'Merriweather';
 }
 
-export type WhiteboardObject = StickyNote | RectShape | CircleShape | LineShape | TextBubbleShape;
+export interface Frame extends BaseObject {
+  type: 'frame';
+  width: number;
+  height: number;
+  stroke: string; // Frame border color
+  strokeWidth: number;
+  fill?: string; // Optional background fill (default transparent)
+  containedObjectIds: string[]; // IDs of objects inside this frame
+  name?: string; // Frame name (default: frame1, frame2, etc.)
+}
+
+export type WhiteboardObject = StickyNote | RectShape | CircleShape | TriangleShape | StarShape | LineShape | TextBubbleShape | Frame;
 
 export interface CanvasState {
   objects: Map<string, WhiteboardObject>;

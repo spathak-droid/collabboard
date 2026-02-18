@@ -19,7 +19,7 @@ interface CanvasStore {
   resetView: () => void;
   
   // Active tool
-  activeTool: 'select' | 'sticky' | 'rect' | 'circle' | 'line' | 'textBubble' | null;
+  activeTool: 'select' | 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'textBubble' | 'text' | 'frame' | null;
   setActiveTool: (tool: CanvasStore['activeTool']) => void;
 
   // View settings

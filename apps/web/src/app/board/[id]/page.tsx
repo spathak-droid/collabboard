@@ -16,6 +16,7 @@ import { Circle } from '@/components/canvas/objects/Circle';
 import { Triangle } from '@/components/canvas/objects/Triangle';
 import { Star } from '@/components/canvas/objects/Star';
 import { Line } from '@/components/canvas/objects/Line';
+import { Text } from '@/components/canvas/objects/Text';
 import { TextBubble } from '@/components/canvas/objects/TextBubble';
 import { Frame } from '@/components/canvas/objects/Frame';
 import { SelectionArea } from '@/components/canvas/SelectionArea';
@@ -23,10 +24,10 @@ import { Cursors } from '@/components/canvas/Cursors';
 import { DisconnectBanner } from '@/components/canvas/DisconnectBanner';
 import { PropertiesSidebar } from '@/components/canvas/PropertiesSidebar';
 import { ZoomControl } from '@/components/canvas/ZoomControl';
-import { LatencyStatusButton } from '@/components/canvas/LatencyStatusButton';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useYjs } from '@/lib/hooks/useYjs';
 import { useCursorSync } from '@/lib/hooks/useCursorSync';
+import { useDirectKonvaUpdates } from '@/lib/hooks/useDirectKonvaUpdates';
 import { useSelection } from '@/lib/hooks/useSelection';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { generateId } from '@/lib/utils/geometry';
@@ -37,7 +38,7 @@ import { ConnectionDots } from '@/components/canvas/objects/ConnectionDots';
 import { findNearestAnchor, resolveLinePoints } from '@/lib/utils/connectors';
 import { calculateAutoFit } from '@/lib/utils/autoFit';
 import { STICKY_COLORS } from '@/types/canvas';
-import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextBubbleShape, Frame as FrameType, AnchorPosition } from '@/types/canvas';
+import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextShape, TextBubbleShape, Frame as FrameType, AnchorPosition } from '@/types/canvas';
 // Refactored hooks
 import { useObjectBounds } from '@/lib/hooks/useObjectBounds';
 import { useFrameManagement } from '@/lib/hooks/useFrameManagement';
@@ -80,6 +81,8 @@ export default function BoardPage() {
     updateObject,
     deleteObjects,
     updateCursor,
+    broadcastLiveDrag,
+    clearLiveDrag,
     getBroadcastRate,
     hasUnsavedChanges,
   } = useYjs({
@@ -89,7 +92,14 @@ export default function BoardPage() {
   });
 
   // Initialize dedicated cursor sync (bypasses Yjs for ultra-low latency)
-  const { cursors: fastCursors, isConnected: cursorSyncConnected, sendCursor: sendFastCursor } = useCursorSync({
+  const {
+    cursors: fastCursors,
+    livePositions: cursorServerLivePositions,
+    isConnected: cursorSyncConnected,
+    sendCursor: sendFastCursor,
+    sendLiveDrag: sendCursorServerLiveDrag,
+    clearLiveDrag: clearCursorServerLiveDrag,
+  } = useCursorSync({
     boardId,
     userId: user?.uid || '',
     userName: user?.displayName || user?.email || 'Anonymous',
@@ -107,15 +117,6 @@ export default function BoardPage() {
     isSelected,
     selectByRect,
   } = useSelection();
-  
-  const aiCommands = useAICommands({
-    boardId,
-    createObject,
-    updateObject,
-    deleteObjects,
-    objects,
-    userId: user?.uid || '',
-  });
 
   const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode, setScale, setPosition, selectionRect } = useCanvasStore();
   const [previewPosition, setPreviewPosition] = useState<{ x: number; y: number } | null>(null);
@@ -124,6 +125,51 @@ export default function BoardPage() {
   
   // Selection Area - persistent selection rectangle
   const [selectionArea, setSelectionArea] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  const stageRef = useRef<Konva.Stage>(null);
+
+  // Document-level pointer tracking so cursor updates continue during drag
+  // (Stage's onMouseMove stops when a Konva object captures the pointer)
+  // Only send when pointer is within canvas bounds to avoid wrong positions
+  useEffect(() => {
+    const handlePointerMove = (e: PointerEvent) => {
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      const container = stage.container();
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const inBounds =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+      if (!inBounds) return;
+
+      const clientX = e.clientX - rect.left;
+      const clientY = e.clientY - rect.top;
+      const canvasX = (clientX - position.x) / scale;
+      const canvasY = (clientY - position.y) / scale;
+
+      if (cursorSyncConnected) {
+        sendFastCursor(canvasX, canvasY);
+      } else {
+        updateCursor(canvasX, canvasY);
+      }
+    };
+
+    document.addEventListener('pointermove', handlePointerMove, { passive: true });
+    return () => document.removeEventListener('pointermove', handlePointerMove);
+  }, [position, scale, cursorSyncConnected, sendFastCursor, updateCursor]);
+
+  // Direct Konva updates for remote live drag (Yjs awareness + cursor server)
+  useDirectKonvaUpdates({
+    awareness,
+    currentUserId: user?.uid || '',
+    stageRef,
+    cursorServerLivePositions: cursorServerLivePositions,
+  });
 
   // Connector drawing state moved to useConnectorDrawing hook
   // Live drag/transform state moved to useObjectManipulation hook
@@ -185,7 +231,6 @@ export default function BoardPage() {
 
   // Auto-fit canvas when objects first load
   const hasAutoFittedRef = useRef(false);
-  const [isInitializing, setIsInitializing] = useState(true);
   
   useEffect(() => {
     if (hasAutoFittedRef.current || !mounted) return;
@@ -194,7 +239,7 @@ export default function BoardPage() {
     if (objects.length === 0) {
       const timer = setTimeout(() => {
         // If still no objects after 1 second, show canvas at default zoom
-        setIsInitializing(false);
+        hasAutoFittedRef.current = true;
       }, 1000);
       return () => clearTimeout(timer);
     }
@@ -203,14 +248,17 @@ export default function BoardPage() {
     const viewport = { width: window.innerWidth, height: window.innerHeight };
     const autoFit = calculateAutoFit(objects, viewport.width, viewport.height);
     
-    if (autoFit) {
+    if (autoFit && typeof autoFit.scale === 'number' && !isNaN(autoFit.scale) && isFinite(autoFit.scale)) {
       setScale(autoFit.scale);
       setPosition(autoFit.position);
       hasAutoFittedRef.current = true;
       console.log(`[Auto-fit] ${objects.length} objects, zoom: ${Math.round(autoFit.scale * 100)}%`);
+    } else {
+      // Fallback to default scale if auto-fit fails
+      setScale(0.3);
+      setPosition({ x: 0, y: 0 });
+      hasAutoFittedRef.current = true;
     }
-    
-    setIsInitializing(false);
   }, [objects.length, mounted, setScale, setPosition]);
 
   const handleBackToDashboard = () => {
@@ -266,12 +314,23 @@ export default function BoardPage() {
       });
     }
   };
+
+  const handleTextColorChange = (color: string) => {
+    if (selectedIds.length > 0) {
+      selectedIds.forEach((id: string) => {
+        const obj = objects.find((o: WhiteboardObject) => o.id === id);
+        if (obj && obj.type === 'text') {
+          updateObject(id, { fill: color });
+        }
+      });
+    }
+  };
   
   const handleTextChange = (text: string) => {
     if (selectedIds.length > 0) {
       selectedIds.forEach((id: string) => {
         const obj = objects.find((o: WhiteboardObject) => o.id === id);
-        if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'textBubble' || obj.type === 'triangle' || obj.type === 'star')) {
+        if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'text' || obj.type === 'textBubble' || obj.type === 'triangle' || obj.type === 'star')) {
           updateObject(id, { text });
         }
       });
@@ -283,7 +342,7 @@ export default function BoardPage() {
     if (selectedIds.length > 0) {
       selectedIds.forEach((id: string) => {
         const obj = objects.find((o: WhiteboardObject) => o.id === id);
-        if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'textBubble' || obj.type === 'triangle' || obj.type === 'star')) {
+        if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'text' || obj.type === 'textBubble' || obj.type === 'triangle' || obj.type === 'star')) {
           updateObject(id, { textSize: clamped });
         }
       });
@@ -294,7 +353,7 @@ export default function BoardPage() {
     if (selectedIds.length > 0) {
       selectedIds.forEach((id: string) => {
         const obj = objects.find((o: WhiteboardObject) => o.id === id);
-        if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'textBubble' || obj.type === 'triangle' || obj.type === 'star')) {
+        if (obj && (obj.type === 'rect' || obj.type === 'circle' || obj.type === 'sticky' || obj.type === 'text' || obj.type === 'textBubble' || obj.type === 'triangle' || obj.type === 'star')) {
           updateObject(id, { textFamily: family });
         }
       });
@@ -353,8 +412,123 @@ export default function BoardPage() {
 
   // Use refactored hooks
   const { getObjectBounds, getConnectedObjectIds, intersectsRect } = useObjectBounds();
+
+  // Selection area for AI: use explicit selection box, or compute from selected objects
+  const selectionAreaForAI = useMemo(() => {
+    if (selectionArea) return selectionArea;
+    if (selectedIds.length === 0) return null;
+    const selected = objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id));
+    if (selected.length === 0) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const obj of selected) {
+      const b = getObjectBounds(obj, objectsMap);
+      minX = Math.min(minX, b.minX);
+      minY = Math.min(minY, b.minY);
+      maxX = Math.max(maxX, b.maxX);
+      maxY = Math.max(maxY, b.maxY);
+    }
+    if (!Number.isFinite(minX)) return null;
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }, [selectionArea, selectedIds, objects, objectsMap, getObjectBounds]);
+
+  const aiCommands = useAICommands({
+    boardId,
+    createObject,
+    updateObject,
+    deleteObjects,
+    objects,
+    userId: user?.uid || '',
+    selectedIds,
+    selectionArea: selectionAreaForAI,
+  });
   const frameManagement = useFrameManagement(objects);
   const manipulation = useObjectManipulation(objects, objectsMap, updateObject, frameManagement);
+
+  const handleShapeDragMoveWithBroadcast = useCallback(
+    (shapeId: string, liveX: number, liveY: number) => {
+      manipulation.handleShapeDragMove(shapeId, liveX, liveY);
+      if (cursorSyncConnected) sendCursorServerLiveDrag(shapeId, liveX, liveY);
+      broadcastLiveDrag(shapeId, liveX, liveY);
+
+      // Broadcast connected lines so viewers see them update in real-time
+      const shapeObj = objectsMap.get(shapeId);
+      if (shapeObj) {
+        const tempMap = new Map(objectsMap);
+        tempMap.set(shapeId, { ...shapeObj, x: liveX, y: liveY } as WhiteboardObject);
+        for (const obj of objects) {
+          if (obj.type !== 'line') continue;
+          const line = obj as LineShape;
+          const connected = line.startAnchor?.objectId === shapeId || line.endAnchor?.objectId === shapeId;
+          if (!connected) continue;
+          const [x1, y1, x2, y2] = resolveLinePoints(line, tempMap);
+          const points = [x1, y1, x2, y2];
+          if (cursorSyncConnected) sendCursorServerLiveDrag(line.id, 0, 0, { points });
+          broadcastLiveDrag(line.id, 0, 0, { points } as any);
+        }
+      }
+    },
+    [manipulation.handleShapeDragMove, cursorSyncConnected, sendCursorServerLiveDrag, broadcastLiveDrag, objectsMap, objects]
+  );
+
+  const handleShapeTransformMoveWithBroadcast = useCallback(
+    (
+      shapeId: string,
+      liveX: number,
+      liveY: number,
+      liveRotation: number,
+      dimensions?: { width?: number; height?: number; radius?: number }
+    ) => {
+      manipulation.handleShapeTransformMove(shapeId, liveX, liveY, liveRotation, dimensions);
+      
+      // Broadcast transform updates (rotation, scale, position) to viewers in real-time
+      const extra = {
+        rotation: liveRotation,
+        ...dimensions,
+      };
+      
+      if (cursorSyncConnected) sendCursorServerLiveDrag(shapeId, liveX, liveY, extra);
+      broadcastLiveDrag(shapeId, liveX, liveY, extra);
+
+      // Broadcast connected lines so viewers see them update in real-time during rotation/resize
+      const shapeObj = objectsMap.get(shapeId);
+      if (shapeObj) {
+        const tempMap = new Map(objectsMap);
+        tempMap.set(shapeId, { ...shapeObj, x: liveX, y: liveY, rotation: liveRotation, ...dimensions } as WhiteboardObject);
+        for (const obj of objects) {
+          if (obj.type !== 'line') continue;
+          const line = obj as LineShape;
+          const connected = line.startAnchor?.objectId === shapeId || line.endAnchor?.objectId === shapeId;
+          if (!connected) continue;
+          const [x1, y1, x2, y2] = resolveLinePoints(line, tempMap);
+          const points = [x1, y1, x2, y2];
+          if (cursorSyncConnected) sendCursorServerLiveDrag(line.id, 0, 0, { points });
+          broadcastLiveDrag(line.id, 0, 0, { points } as any);
+        }
+      }
+    },
+    [manipulation.handleShapeTransformMove, cursorSyncConnected, sendCursorServerLiveDrag, broadcastLiveDrag, objectsMap, objects]
+  );
+
+  const handleShapeUpdateWithClear = useCallback(
+    (shapeId: string, updates: Partial<WhiteboardObject>) => {
+      manipulation.updateShapeAndConnectors(shapeId, updates);
+      clearLiveDrag(shapeId);
+      clearCursorServerLiveDrag(shapeId);
+      // Clear live drag for connected lines so viewers stop showing stale positions
+      for (const obj of objects) {
+        if (obj.type !== 'line') continue;
+        const line = obj as LineShape;
+        if (line.startAnchor?.objectId === shapeId || line.endAnchor?.objectId === shapeId) {
+          clearLiveDrag(line.id);
+          clearCursorServerLiveDrag(line.id);
+        }
+      }
+    },
+    [manipulation.updateShapeAndConnectors, clearLiveDrag, clearCursorServerLiveDrag, objects]
+  );
   
   // Connector drawing hook
   const connectorDrawing = useConnectorDrawing(
@@ -603,6 +777,28 @@ export default function BoardPage() {
 
           createObject(star);
           setActiveTool('select');
+        } else if (activeTool === 'text') {
+          // Ensure x and y are valid numbers
+          const safeX = typeof x === 'number' && !isNaN(x) ? x : 0;
+          const safeY = typeof y === 'number' && !isNaN(y) ? y : 0;
+          
+          const text: TextShape = {
+            id: generateId(),
+            type: 'text',
+            x: safeX,
+            y: safeY,
+            text: '',
+            textSize: 16,
+            textFamily: 'Inter',
+            fill: '#000000',
+            rotation: 0,
+            zIndex: objects.length,
+            createdBy: user?.uid || '',
+            createdAt: Date.now(),
+          };
+
+          createObject(text);
+          setActiveTool('select');
         } else if (activeTool === 'textBubble') {
           const textBubble: TextBubbleShape = {
             id: generateId(),
@@ -687,6 +883,16 @@ export default function BoardPage() {
       }
 
       updateObject(frameId, updates);
+
+      // Clear live drag broadcast for frame and contained objects
+      clearLiveDrag(frameId);
+      clearCursorServerLiveDrag(frameId);
+      if (frame.containedObjectIds) {
+        for (const containedId of frame.containedObjectIds) {
+          clearLiveDrag(containedId);
+          clearCursorServerLiveDrag(containedId);
+        }
+      }
       
       // Move all contained objects when frame moves
       if ((deltaX !== 0 || deltaY !== 0) && !isResizeOrRotate && frame.containedObjectIds) {
@@ -717,7 +923,7 @@ export default function BoardPage() {
         }
       }
     },
-    [objectsMap, updateObject]
+    [objectsMap, updateObject, clearLiveDrag, clearCursorServerLiveDrag]
   );
 
   const handleFrameDragMove = useCallback(
@@ -792,8 +998,35 @@ export default function BoardPage() {
       }
 
       manipulation.setDragTick((t: number) => t + 1);
+
+      // Broadcast live drag for remote users: frame + all contained objects
+      if (cursorSyncConnected) sendCursorServerLiveDrag(frameId, liveX, liveY);
+      broadcastLiveDrag(frameId, liveX, liveY);
+      if (frame.containedObjectIds) {
+        for (const containedId of frame.containedObjectIds) {
+          const initialPos = dragStart.containedInitialPositions.get(containedId);
+          if (!initialPos) continue;
+          const containedObj = objectsMap.get(containedId);
+          if (!containedObj) continue;
+          if (initialPos.points) {
+            const newPoints = [
+              initialPos.points[0] + deltaX,
+              initialPos.points[1] + deltaY,
+              initialPos.points[2] + deltaX,
+              initialPos.points[3] + deltaY,
+            ];
+            if (cursorSyncConnected) sendCursorServerLiveDrag(containedId, 0, 0, { points: newPoints });
+            broadcastLiveDrag(containedId, 0, 0, { points: newPoints } as any);
+          } else {
+            const newX = initialPos.x + deltaX;
+            const newY = initialPos.y + deltaY;
+            if (cursorSyncConnected) sendCursorServerLiveDrag(containedId, newX, newY);
+            broadcastLiveDrag(containedId, newX, newY);
+          }
+        }
+      }
     },
-    [objectsMap]
+    [objectsMap, cursorSyncConnected, sendCursorServerLiveDrag, broadcastLiveDrag]
   );
 
   // Overlay live drag positions on top of objectsMap for smooth line rendering
@@ -1217,14 +1450,14 @@ export default function BoardPage() {
       y: newY,
     });
     
-    // Move all selected objects based on their initial positions using live drag refs
+    // Build temp map with live positions for all selected objects
+    const tempMap = new Map(objectsMap);
     const selectedObjects = objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id));
     selectedObjects.forEach((obj) => {
       const initialPos = selectionAreaDragStartRef.current.get(obj.id);
       if (!initialPos) return;
 
       if (obj.type === 'line') {
-        // For lines, update points array based on initial points
         const line = obj as LineShape;
         const newPoints = [
           initialPos.points![0] + dx,
@@ -1232,23 +1465,42 @@ export default function BoardPage() {
           initialPos.points![2] + dx,
           initialPos.points![3] + dy,
         ];
-        // Use live drag ref for smooth rendering during drag
-        manipulation.liveDragRef.current.set(obj.id, { 
-          x: 0, 
+        manipulation.liveDragRef.current.set(obj.id, {
+          x: 0,
           y: 0,
-          points: newPoints 
+          points: newPoints,
         } as any);
+        tempMap.set(obj.id, { ...obj, x: 0, y: 0, points: newPoints } as WhiteboardObject);
+        if (cursorSyncConnected) sendCursorServerLiveDrag(obj.id, 0, 0, { points: newPoints });
+        broadcastLiveDrag(obj.id, 0, 0, { points: newPoints } as any);
       } else {
-        // For other objects, update x and y based on initial position
         const newX = initialPos.x + dx;
         const newY = initialPos.y + dy;
         manipulation.liveDragRef.current.set(obj.id, { x: newX, y: newY });
+        tempMap.set(obj.id, { ...obj, x: newX, y: newY } as WhiteboardObject);
+        if (cursorSyncConnected) sendCursorServerLiveDrag(obj.id, newX, newY);
+        broadcastLiveDrag(obj.id, newX, newY);
       }
     });
-    
-    // Trigger re-render
+
+    // Broadcast connected lines (connect to selected shapes but may not be selected)
+    const selectedIdsSet = new Set(selectedIds);
+    for (const obj of objects) {
+      if (obj.type !== 'line') continue;
+      const line = obj as LineShape;
+      const startId = line.startAnchor?.objectId;
+      const endId = line.endAnchor?.objectId;
+      const connectedToSelection = (startId && selectedIdsSet.has(startId)) || (endId && selectedIdsSet.has(endId));
+      if (!connectedToSelection) continue;
+      if (selectedIdsSet.has(line.id)) continue; // Already broadcast above
+      const [x1, y1, x2, y2] = resolveLinePoints(line, tempMap);
+      const points = [x1, y1, x2, y2];
+      if (cursorSyncConnected) sendCursorServerLiveDrag(line.id, 0, 0, { points });
+      broadcastLiveDrag(line.id, 0, 0, { points } as any);
+    }
+
     manipulation.setDragTick((t) => t + 1);
-  }, [selectionArea, selectedIds, objects, manipulation]);
+  }, [selectionArea, selectedIds, objects, objectsMap, manipulation, cursorSyncConnected, sendCursorServerLiveDrag, broadcastLiveDrag]);
 
   // Handle selection area drag end - finalize positions
   const handleSelectionAreaDragEnd = useCallback(() => {
@@ -1264,14 +1516,16 @@ export default function BoardPage() {
     const finalDx = finalPos.x - selectionAreaInitialPosRef.current.x;
     const finalDy = finalPos.y - selectionAreaInitialPosRef.current.y;
     
-    // Finalize all selected objects positions
+    // Finalize all selected objects and clear live drag for connected lines
     const selectedObjects = objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id));
+    const selectedIdsSet = new Set(selectedIds);
     selectedObjects.forEach((obj) => {
       const initialPos = selectionAreaDragStartRef.current.get(obj.id);
       if (!initialPos) return;
 
-      // Clear live drag
       manipulation.liveDragRef.current.delete(obj.id);
+      clearLiveDrag(obj.id);
+      clearCursorServerLiveDrag(obj.id);
 
       if (obj.type === 'line') {
         // For lines, update points array
@@ -1292,6 +1546,19 @@ export default function BoardPage() {
         });
       }
     });
+
+    // Clear live drag for connected lines (may have been broadcast but not selected)
+    for (const obj of objects) {
+      if (obj.type !== 'line') continue;
+      const line = obj as LineShape;
+      const startId = line.startAnchor?.objectId;
+      const endId = line.endAnchor?.objectId;
+      const connectedToSelection = (startId && selectedIdsSet.has(startId)) || (endId && selectedIdsSet.has(endId));
+      if (connectedToSelection) {
+        clearLiveDrag(line.id);
+        clearCursorServerLiveDrag(line.id);
+      }
+    }
     
     // Update selection area state to final position
     if (selectionAreaLivePosRef.current) {
@@ -1309,7 +1576,7 @@ export default function BoardPage() {
     selectionAreaDragStartRef.current.clear();
     selectionAreaInitialPosRef.current = null;
     selectionAreaLivePosRef.current = null;
-  }, [selectionArea, selectedIds, objects, updateObject, manipulation]);
+  }, [selectionArea, selectedIds, objects, updateObject, manipulation, clearLiveDrag, clearCursorServerLiveDrag]);
 
   // ── Build merged collaborator list (viewing → online → offline) ──
   // Remember every user we've ever seen viewing this board in this session
@@ -1384,13 +1651,8 @@ export default function BoardPage() {
   const visibleCollabs = collaborators.slice(0, MAX_VISIBLE);
   const overflowCount = collaborators.length - MAX_VISIBLE;
   
-  if (!mounted || authLoading || !user || (!user.emailVerified && !user.isAnonymous)) {
-    return (
-      <div className="w-full h-screen flex items-center justify-center">
-        <div className="text-lg text-gray-600">Loading...</div>
-      </div>
-    );
-  }
+  // Render canvas immediately - auth check happens but doesn't block rendering
+  // The redirect logic will handle unauthenticated users
   
   return (
     <div className="w-full h-screen relative bg-white" style={{ touchAction: 'none', overscrollBehavior: 'none' }}>
@@ -1562,19 +1824,8 @@ export default function BoardPage() {
 
           <span className="text-gray-300">|</span>
           <div className="text-xs text-gray-500">
-            Zoom: <strong>{Math.round(scale * 100)}%</strong>
-          </div>
-          <span className="text-gray-300">|</span>
-          <div className="text-xs text-gray-500">
             Objects: <strong>{objects.length}</strong>
           </div>
-          <span className="text-gray-300">|</span>
-          <LatencyStatusButton
-            connectionStatus={connectionStatus}
-            awareness={awareness}
-            currentUserId={user.uid}
-            getBroadcastRate={getBroadcastRate}
-          />
         </div>
       </div>
 
@@ -1599,6 +1850,7 @@ export default function BoardPage() {
           onStrokeColorChange={handleShapeStrokeColorChange}
           onFillColorChange={handleShapeFillColorChange}
           onStickyColorChange={handleStickyColorChange}
+          onTextColorChange={handleTextColorChange}
           onTextChange={handleTextChange}
           onTextSizeChange={handleTextSizeChange}
           onTextFamilyChange={handleTextFamilyChange}
@@ -1617,6 +1869,7 @@ export default function BoardPage() {
           onStrokeColorChange={handleShapeStrokeColorChange}
           onFillColorChange={handleShapeFillColorChange}
           onStickyColorChange={handleStickyColorChange}
+          onTextColorChange={handleTextColorChange}
           onTextChange={handleTextChange}
           onTextSizeChange={handleTextSizeChange}
           onTextFamilyChange={handleTextFamilyChange}
@@ -1626,19 +1879,11 @@ export default function BoardPage() {
         />
       )}
 
-      {/* Loading overlay while initializing zoom */}
-      {isInitializing && (
-        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading board...</p>
-          </div>
-        </div>
-      )}
 
-      <Canvas 
-        boardId={boardId} 
+      <Canvas
+        boardId={boardId}
         objects={objects}
+        stageRef={stageRef}
         onClick={(e: Konva.KonvaEventObject<MouseEvent>) => {
           if (connectorDrawing.isDrawingLine) {
             const stage = e.target.getStage();
@@ -1788,7 +2033,7 @@ export default function BoardPage() {
                 }}
                 onUpdate={(updates: Partial<FrameType>) => updateFrameAndContents(obj.id, updates)}
                 onDragMove={handleFrameDragMove}
-                onTransformMove={manipulation.handleShapeTransformMove}
+                onTransformMove={handleShapeTransformMoveWithBroadcast}
               />
             );
           }
@@ -1813,9 +2058,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates: Partial<StickyNoteType>) => manipulation.updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={manipulation.handleShapeDragMove}
-                onTransformMove={manipulation.handleShapeTransformMove}
+                onUpdate={(updates: Partial<StickyNoteType>) => handleShapeUpdateWithClear(obj.id, updates)}
+                onDragMove={handleShapeDragMoveWithBroadcast}
+                onTransformMove={handleShapeTransformMoveWithBroadcast}
               />
             );
           }
@@ -1840,9 +2085,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={manipulation.handleShapeDragMove}
-                onTransformMove={manipulation.handleShapeTransformMove}
+                onUpdate={(updates) => handleShapeUpdateWithClear(obj.id, updates)}
+                onDragMove={handleShapeDragMoveWithBroadcast}
+                onTransformMove={handleShapeTransformMoveWithBroadcast}
               />
             );
           }
@@ -1867,9 +2112,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={manipulation.handleShapeDragMove}
-                onTransformMove={manipulation.handleShapeTransformMove}
+                onUpdate={(updates) => handleShapeUpdateWithClear(obj.id, updates)}
+                onDragMove={handleShapeDragMoveWithBroadcast}
+                onTransformMove={handleShapeTransformMoveWithBroadcast}
               />
             );
           }
@@ -1903,6 +2148,33 @@ export default function BoardPage() {
             );
           }
 
+          if (renderObj.type === 'text') {
+            const isLocked = isObjectLockedByFrame(obj.id);
+            return (
+              <Text
+                key={obj.id}
+                data={renderObj as TextShape}
+                isSelected={isSelected(obj.id) && !selectionArea}
+                isDraggable={!isLocked && activeTool !== 'move'}
+                onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
+                  // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
+                  if (e.evt.shiftKey) {
+                    selectObject(obj.id, true);
+                  } else {
+                    selectObject(obj.id, false);
+                  }
+                }}
+                onUpdate={(updates: Partial<TextShape>) => handleShapeUpdateWithClear(obj.id, updates)}
+                onDragMove={handleShapeDragMoveWithBroadcast}
+                onTransformMove={handleShapeTransformMoveWithBroadcast}
+              />
+            );
+          }
+
           if (renderObj.type === 'textBubble') {
             const isLocked = isObjectLockedByFrame(obj.id);
             return (
@@ -1923,9 +2195,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates: Partial<TextBubbleShape>) => manipulation.updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={manipulation.handleShapeDragMove}
-                onTransformMove={manipulation.handleShapeTransformMove}
+                onUpdate={(updates: Partial<TextBubbleShape>) => handleShapeUpdateWithClear(obj.id, updates)}
+                onDragMove={handleShapeDragMoveWithBroadcast}
+                onTransformMove={handleShapeTransformMoveWithBroadcast}
               />
             );
           }
@@ -1950,9 +2222,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={manipulation.handleShapeDragMove}
-                onTransformMove={manipulation.handleShapeTransformMove}
+                onUpdate={(updates) => handleShapeUpdateWithClear(obj.id, updates)}
+                onDragMove={handleShapeDragMoveWithBroadcast}
+                onTransformMove={handleShapeTransformMoveWithBroadcast}
               />
             );
           }
@@ -1977,9 +2249,9 @@ export default function BoardPage() {
                     selectObject(obj.id, false);
                   }
                 }}
-                onUpdate={(updates) => manipulation.updateShapeAndConnectors(obj.id, updates)}
-                onDragMove={manipulation.handleShapeDragMove}
-                onTransformMove={manipulation.handleShapeTransformMove}
+                onUpdate={(updates) => handleShapeUpdateWithClear(obj.id, updates)}
+                onDragMove={handleShapeDragMoveWithBroadcast}
+                onTransformMove={handleShapeTransformMoveWithBroadcast}
               />
             );
           }

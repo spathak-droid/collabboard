@@ -13,6 +13,20 @@ export interface CursorPosition {
   timestamp: number;
 }
 
+export interface LiveDragPosition {
+  objectId: string;
+  userId: string;
+  userName: string;
+  x: number;
+  y: number;
+  rotation?: number;
+  width?: number;
+  height?: number;
+  radius?: number;
+  points?: number[];
+  timestamp: number;
+}
+
 export interface CursorSyncConfig {
   boardId: string;
   userId: string;
@@ -20,6 +34,8 @@ export interface CursorSyncConfig {
   serverUrl: string;
   onCursorUpdate: (cursor: CursorPosition) => void;
   onUserLeave: (userId: string) => void;
+  onLiveDragUpdate?: (position: LiveDragPosition) => void;
+  onLiveDragEnd?: (objectId: string, userId: string) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
   onError?: (error: Error) => void;
@@ -150,6 +166,28 @@ export class CursorSyncClient {
           y: data.y,
           timestamp: data.timestamp,
         });
+        return;
+      }
+
+      if (data.type === 'liveDrag') {
+        this.config.onLiveDragUpdate?.({
+          objectId: data.objectId,
+          userId: data.userId,
+          userName: data.userName,
+          x: data.x,
+          y: data.y,
+          rotation: data.rotation,
+          width: data.width,
+          height: data.height,
+          radius: data.radius,
+          points: data.points,
+          timestamp: data.timestamp ?? Date.now(),
+        });
+        return;
+      }
+
+      if (data.type === 'liveDragEnd') {
+        this.config.onLiveDragEnd?.(data.objectId, data.userId);
       }
     } catch (err) {
       console.error('🖱️  Failed to parse cursor message:', err);
@@ -199,6 +237,57 @@ export class CursorSyncClient {
       x,
       y,
       timestamp: Date.now(),
+    });
+
+    this.ws.send(message);
+  }
+
+  /**
+   * Broadcast live drag position for real-time shape/frame movement sync.
+   * Other users see the object move during drag (same ultra-low latency as cursors).
+   */
+  sendLiveDrag(
+    objectId: string,
+    x: number,
+    y: number,
+    extra?: {
+      rotation?: number;
+      width?: number;
+      height?: number;
+      radius?: number;
+      points?: number[];
+    }
+  ): void {
+    if (!this.isConnected || this.ws?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const message = JSON.stringify({
+      type: 'liveDrag',
+      objectId,
+      userId: this.config.userId,
+      userName: this.config.userName,
+      x,
+      y,
+      ...extra,
+      timestamp: Date.now(),
+    });
+
+    this.ws.send(message);
+  }
+
+  /**
+   * Clear live drag broadcast when drag ends.
+   */
+  sendLiveDragEnd(objectId: string): void {
+    if (!this.isConnected || this.ws?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const message = JSON.stringify({
+      type: 'liveDragEnd',
+      objectId,
+      userId: this.config.userId,
     });
 
     this.ws.send(message);

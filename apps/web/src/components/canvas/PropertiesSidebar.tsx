@@ -14,6 +14,7 @@ interface PropertiesSidebarProps {
   onStrokeColorChange: (color: string) => void;
   onFillColorChange: (color: string) => void;
   onStickyColorChange: (color: string) => void;
+  onTextColorChange?: (color: string) => void;
   onTextChange: (text: string) => void;
   onTextSizeChange: (size: number) => void;
   onTextFamilyChange: (family: 'Inter' | 'Poppins' | 'Merriweather') => void;
@@ -29,6 +30,7 @@ export const PropertiesSidebar = ({
   onStrokeColorChange,
   onFillColorChange,
   onStickyColorChange,
+  onTextColorChange,
   onTextChange,
   onTextSizeChange,
   onTextFamilyChange,
@@ -41,6 +43,7 @@ export const PropertiesSidebar = ({
   const [showStrokePicker, setShowStrokePicker] = useState(false);
   const [showFillPicker, setShowFillPicker] = useState(false);
   const [showStickyPicker, setShowStickyPicker] = useState(false);
+  const [showTextColorPicker, setShowTextColorPicker] = useState(false);
   
   if (selectedObjects.length === 0) return null;
   
@@ -49,11 +52,13 @@ export const PropertiesSidebar = ({
   const currentFill = (
     selectedObjects.find(obj => obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star' || obj.type === 'frame') as { fill?: string } | undefined
   )?.fill || '#FFFFFF';
-  const hasShapes = selectedObjects.some(obj => obj.type !== 'sticky' && obj.type !== 'textBubble');
+  const hasShapes = selectedObjects.some(obj => obj.type !== 'sticky' && obj.type !== 'text' && obj.type !== 'textBubble');
+  const hasText = selectedObjects.some(obj => obj.type === 'text');
+  const currentTextColor = selectedObjects.find(obj => obj.type === 'text')?.fill || '#000000';
   const hasSticky = selectedObjects.some(obj => obj.type === 'sticky');
   const currentStickyColor = selectedObjects.find(obj => obj.type === 'sticky')?.color || '#FFF59D';
   const hasTextSupport = selectedObjects.some(
-    obj => obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star' || obj.type === 'sticky' || obj.type === 'textBubble'
+    obj => obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star' || obj.type === 'sticky' || obj.type === 'text' || obj.type === 'textBubble'
   );
   const firstSelected = selectedObjects[0];
   const currentText =
@@ -79,7 +84,7 @@ export const PropertiesSidebar = ({
   
   return (
     <>
-    <div className="fixed right-5 top-1/2 -translate-y-1/2 w-64 max-h-[80vh] bg-white rounded-[16px] shadow-[0_2px_12px_rgba(0,0,0,0.08),0_8px_32px_rgba(0,0,0,0.06)] z-40 flex flex-col overflow-hidden">
+    <div className="fixed right-5 top-1/2 -translate-y-1/2 w-64 max-h-[80vh] bg-white rounded-[16px] shadow-[-6px_0_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] z-40 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="p-4 border-b border-slate-200">
         <h3 className="text-sm font-semibold text-slate-900">
@@ -322,7 +327,82 @@ export const PropertiesSidebar = ({
           </div>
         )}
         
-        {/* Text Section - For rectangles, circles, and sticky notes */}
+        {/* Text Color Section - For plain text objects */}
+        {hasText && onTextColorChange && (
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              Text Color
+            </label>
+            
+            <button
+              onClick={() => {
+                setShowTextColorPicker(!showTextColorPicker);
+                setShowStrokePicker(false);
+                setShowFillPicker(false);
+                setShowStickyPicker(false);
+              }}
+              className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <div 
+                  className="w-6 h-6 rounded border-2 border-slate-300"
+                  style={{ backgroundColor: currentTextColor }}
+                />
+                <span className="text-sm font-mono text-slate-700">
+                  {currentTextColor.toUpperCase()}
+                </span>
+              </div>
+              <svg 
+                className={`w-4 h-4 text-slate-500 transition-transform ${showTextColorPicker ? 'rotate-180' : ''}`}
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            
+            {showTextColorPicker && (
+              <div className="space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="w-full overflow-visible rounded-xl border border-slate-200">
+                  <HexColorPicker
+                    color={currentTextColor}
+                    onChange={onTextColorChange}
+                    style={{ paddingBottom: '18px' }}
+                  />
+                </div>
+                <input
+                  type="text"
+                  value={currentTextColor.toUpperCase()}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (/^#[0-9A-F]{0,6}$/i.test(val)) {
+                      onTextColorChange(val);
+                    }
+                  }}
+                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  placeholder="#000000"
+                />
+                <div className="grid grid-cols-6 gap-1.5">
+                  {presetColors.map((color) => (
+                    <button
+                      key={color}
+                      onClick={() => onTextColorChange(color)}
+                      className={`w-full aspect-square rounded-lg border-2 transition-all hover:scale-110 ${
+                        currentTextColor.toUpperCase() === color.toUpperCase()
+                          ? 'border-slate-900 ring-2 ring-slate-300'
+                          : 'border-slate-200'
+                      }`}
+                      style={{ backgroundColor: color }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Text Section - For rectangles, circles, sticky notes, and text objects */}
         {hasTextSupport && (
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">

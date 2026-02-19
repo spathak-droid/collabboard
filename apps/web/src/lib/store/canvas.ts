@@ -38,24 +38,36 @@ export type ActiveTool = CanvasStore['activeTool'];
 export const useCanvasStore = create<CanvasStore>((set) => ({
   // Selection
   selectedIds: [],
-  setSelected: (ids) => set({ selectedIds: ids }),
+  setSelected: (ids) => {
+    console.log('[Selector] Selected:', ids);
+    set({ selectedIds: ids });
+  },
   toggleSelected: (id) =>
     set((state) => {
       const isSelected = state.selectedIds.includes(id);
-      return {
-        selectedIds: isSelected
-          ? state.selectedIds.filter((selectedId) => selectedId !== id)
-          : [...state.selectedIds, id],
-      };
+      const nextIds = isSelected
+        ? state.selectedIds.filter((selectedId) => selectedId !== id)
+        : [...state.selectedIds, id];
+      console.log('[Selector] Toggle:', id, '→ selected:', nextIds);
+      return { selectedIds: nextIds };
     }),
-  clearSelection: () => set({ selectedIds: [] }),
+  clearSelection: () => {
+    console.log('[Selector] Cleared');
+    set({ selectedIds: [] });
+  },
   
   // Canvas view
-  scale: 0.1,
+  scale: 1,
   position: { x: 0, y: 0 },
-  setScale: (scale) => set({ scale: Math.max(0.1, Math.min(5, scale)) }),
+  setScale: (scale) => {
+    // Validate scale is a valid number
+    const safeScale = typeof scale === 'number' && !isNaN(scale) && isFinite(scale) 
+      ? Math.max(0.1, Math.min(5, scale)) 
+      : 1;
+    set({ scale: safeScale });
+  },
   setPosition: (position) => set({ position }),
-  resetView: () => set({ scale: 0.1, position: { x: 0, y: 0 } }),
+  resetView: () => set({ scale: 1, position: { x: 0, y: 0 } }),
   
   // Active tool
   activeTool: 'select',

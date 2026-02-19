@@ -12,14 +12,16 @@
  */
 
 import { Hocuspocus } from '@hocuspocus/server';
-import { Database } from '@hocuspocus/extension-database';
 import { createClient } from '@supabase/supabase-js';
+import { createDatabaseExtension } from './utils/database-extension.js';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import OpenAI from 'openai';
 import { wrapOpenAI } from 'langsmith/wrappers';
 import { traceable } from 'langsmith/traceable';
 import dotenv from 'dotenv';
+import { AI_SYSTEM_PROMPT, AI_TOOLS, buildAIContext } from './utils/ai-tools.js';
+import { orchestrateAgents, continueOrchestration } from './utils/agent-orchestrator.js';
 
 dotenv.config();
 
@@ -48,80 +50,10 @@ if (supabaseUrl && supabaseKey) {
   console.warn('⚠️  No Supabase credentials — running without persistence');
 }
 
-// ── Helper: extract board ID from document name ─────────────
-const getBoardId = (documentName) => documentName.replace('board-', '');
-
 // ── Build extensions list ───────────────────────────────────
 const extensions = [];
-
 if (supabase) {
-  extensions.push(
-    new Database({
-      fetch: async ({ documentName }) => {
-        const boardId = getBoardId(documentName);
-        console.log(`📥 Fetching snapshot for board: ${boardId}`);
-
-        try {
-          const { data, error } = await supabase
-            .from('board_snapshots')
-            .select('state')
-            .eq('board_id', boardId)
-            .order('created_at', { ascending: false})
-            .limit(1)
-            .single();
-
-          if (error) {
-            if (error.code === 'PGRST116') {
-              console.log(`   No snapshot found (new board)`);
-              return null;
-            }
-            throw error;
-          }
-
-          if (!data?.state) return null;
-
-          const bytes = Uint8Array.from(atob(data.state), (c) => c.charCodeAt(0));
-          console.log(`   Loaded ${bytes.length} bytes`);
-          return bytes;
-        } catch (err) {
-          console.error('   Fetch failed:', err.message);
-          return null;
-        }
-      },
-
-      store: async ({ documentName, state }) => {
-        const boardId = getBoardId(documentName);
-        
-        // Fire and forget - don't block WebSocket thread
-        setImmediate(async () => {
-          console.log(`📤 [Async] Storing snapshot for board: ${boardId} (${state.length} bytes)`);
-          
-          try {
-            const base64 = btoa(String.fromCharCode(...state));
-
-            const { error } = await supabase.from('board_snapshots').insert({
-              board_id: boardId,
-              state: base64,
-              created_by: null,
-            });
-
-            if (error) throw error;
-
-            await supabase
-              .from('boards')
-              .update({ last_modified: new Date().toISOString() })
-              .eq('id', boardId);
-            
-            console.log(`   ✅ Snapshot saved (${state.length} bytes)`);
-          } catch (err) {
-            console.error('   Store failed:', err.message);
-          }
-        });
-        
-        // Return immediately - don't await DB operations
-      },
-    })
-  );
+  extensions.push(createDatabaseExtension(supabase));
 }
 
 // ── Lightweight Cursor WebSocket (path-based, SAME PORT) ────
@@ -187,205 +119,117 @@ if (openaiApiKey) {
   console.warn('⚠️  No OPENAI_API_KEY — AI Assistant disabled');
 }
 
-const AI_SYSTEM_PROMPT = `You are an AI assistant for a collaborative whiteboard application. You help users create, manipulate, and organize objects on their whiteboard by calling the provided tools.
+/**
+ * Execute analyzeObjects tool server-side and return results.
+ * This allows the AI to see the results and generate a proper response.
+ */
+function executeAnalyzeObjectsServerSide(objectIds, boardState) {
+  const objects = boardState?.objects || [];
+  const objectsToAnalyze = objectIds && objectIds.length > 0
+    ? objectIds.map((id) => objects.find((o) => o.id === id)).filter((o) => o != null)
+    : objects;
 
-## Canvas Coordinate System
-- Origin (0, 0) is the top-left of the canvas.
-- Positive X goes right, positive Y goes down.
-- Sticky notes are 200x200 px by default.
-- When placing multiple objects, space them with ~220px gaps (200px object + 20px padding).
+  if (objectsToAnalyze.length === 0) {
+    return { totalObjects: 0, countByType: {}, countByColor: {}, countByTypeAndColor: {} };
+  }
 
-## Color Palette
-Sticky note colors: yellow, pink, blue, green, orange.
-Shape colors: use hex strings like "#3B82F6" (blue), "#EF4444" (red), "#10B981" (green), "#A855F7" (purple), "#F97316" (orange), "#6366F1" (indigo), "#EC4899" (pink).
+  const countByType = {};
+  const countByColor = {};
+  const countByTypeAndColor = {};
 
-## Layout Guidelines
-- For grids: calculate positions as (startX + col * spacingX, startY + row * spacingY).
-- Default grid spacing: 220px horizontal, 220px vertical (for sticky notes).
-- For templates (SWOT, retro, journey maps): create frames first, then place sticky notes inside them.
-- When creating templates, use a starting position of x=100, y=100 unless the user specifies otherwise.
+  const typeMap = {
+    sticky: 'sticky note',
+    rect: 'rectangle',
+    circle: 'circle',
+    triangle: 'triangle',
+    star: 'star',
+    line: 'connector',
+    frame: 'frame',
+  };
 
-## Manipulation Rules
-- When asked to move objects, use the objectId from the board state.
-- When asked to "move all pink sticky notes", find them in the board state and issue moveObject calls for each.
-- When resizing frames to fit contents, calculate the bounding box of contained objects and add 40px padding.
+  for (const obj of objectsToAnalyze) {
+    const type = typeMap[obj.type] || obj.type;
+    let color = 'none';
 
-## Response Style
-- Execute the user's request by calling the appropriate tools.
-- For complex templates, call multiple tools in sequence.
-- If the user's request is ambiguous, make reasonable assumptions and proceed.
-- Always respond with tool calls — do not just describe what you would do.`;
+    // Get color from object - use raw values, let AI interpret
+    if (obj.type === 'sticky' && obj.color) {
+      color = obj.color;
+    } else if (obj.type === 'circle' || obj.type === 'rect' || obj.type === 'triangle' || obj.type === 'star') {
+      // For shapes, check both fill and stroke
+      // Use fill if it's a visible color (not white/transparent), otherwise use stroke
+      const isFillVisible = obj.fill && 
+        obj.fill !== '#FFFFFF' && 
+        obj.fill !== '#ffffff' && 
+        obj.fill !== 'transparent' && 
+        obj.fill !== 'rgba(255,255,255,0)' && 
+        obj.fill !== 'white' &&
+        obj.fill !== '#FFF' &&
+        obj.fill !== '#fff';
+      
+      if (isFillVisible) {
+        color = obj.fill;
+      } else if (obj.stroke) {
+        // Use stroke if fill is white/transparent or missing
+        color = obj.stroke;
+      } else if (obj.fill) {
+        // Fallback to fill even if white
+        color = obj.fill;
+      }
+    } else if (obj.type === 'frame' || obj.type === 'line') {
+      color = 'none';
+    }
 
-const AI_TOOLS = [
-  {
-    type: 'function',
-    function: {
-      name: 'createStickyNote',
-      description: 'Create a sticky note on the whiteboard. Use for brainstorming items, ideas, labels, or any text-based card.',
-      parameters: {
-        type: 'object',
-        properties: {
-          text: { type: 'string', description: 'Text content of the sticky note' },
-          x: { type: 'number', description: 'X position on canvas in pixels. If omitted, auto-placed.' },
-          y: { type: 'number', description: 'Y position on canvas in pixels. If omitted, auto-placed.' },
-          color: { type: 'string', enum: ['yellow', 'pink', 'blue', 'green', 'orange'], description: 'Sticky note color. Defaults to yellow.' },
-        },
-        required: ['text'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'createShape',
-      description: 'Create a geometric shape (rectangle, circle, triangle, or star) on the whiteboard.',
-      parameters: {
-        type: 'object',
-        properties: {
-          type: { type: 'string', enum: ['rect', 'circle', 'triangle', 'star'], description: 'Shape type' },
-          x: { type: 'number', description: 'X position on canvas in pixels' },
-          y: { type: 'number', description: 'Y position on canvas in pixels' },
-          width: { type: 'number', description: 'Width in pixels (default 150)' },
-          height: { type: 'number', description: 'Height in pixels (default 150)' },
-          color: { type: 'string', description: 'Fill color as hex string (e.g. "#3B82F6") or color name' },
-        },
-        required: ['type'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'createFrame',
-      description: 'Create a frame (grouping container) on the whiteboard. Frames visually group objects and have a title label.',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: 'Frame title / label' },
-          x: { type: 'number', description: 'X position on canvas in pixels' },
-          y: { type: 'number', description: 'Y position on canvas in pixels' },
-          width: { type: 'number', description: 'Width in pixels (default 400)' },
-          height: { type: 'number', description: 'Height in pixels (default 400)' },
-        },
-        required: ['title'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'createConnector',
-      description: 'Create a line/connector between two existing objects on the whiteboard.',
-      parameters: {
-        type: 'object',
-        properties: {
-          fromId: { type: 'string', description: 'ID of the source object' },
-          toId: { type: 'string', description: 'ID of the target object' },
-          style: { type: 'string', enum: ['straight', 'curved'], description: 'Connector style (default straight)' },
-        },
-        required: ['fromId', 'toId'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'moveObject',
-      description: 'Move an existing object to a new position on the whiteboard.',
-      parameters: {
-        type: 'object',
-        properties: {
-          objectId: { type: 'string', description: 'ID of the object to move' },
-          x: { type: 'number', description: 'New X position in pixels' },
-          y: { type: 'number', description: 'New Y position in pixels' },
-        },
-        required: ['objectId', 'x', 'y'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'resizeObject',
-      description: 'Resize an existing object on the whiteboard.',
-      parameters: {
-        type: 'object',
-        properties: {
-          objectId: { type: 'string', description: 'ID of the object to resize' },
-          width: { type: 'number', description: 'New width in pixels' },
-          height: { type: 'number', description: 'New height in pixels' },
-        },
-        required: ['objectId', 'width', 'height'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'updateText',
-      description: 'Update the text content of an existing sticky note or text element.',
-      parameters: {
-        type: 'object',
-        properties: {
-          objectId: { type: 'string', description: 'ID of the object to update' },
-          newText: { type: 'string', description: 'New text content' },
-        },
-        required: ['objectId', 'newText'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'changeColor',
-      description: 'Change the color of an existing object. For sticky notes use color names (yellow, pink, blue, green, orange). For shapes use hex colors.',
-      parameters: {
-        type: 'object',
-        properties: {
-          objectId: { type: 'string', description: 'ID of the object to recolor' },
-          color: { type: 'string', description: 'New color — a name for sticky notes, or a hex string for shapes' },
-        },
-        required: ['objectId', 'color'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'getBoardState',
-      description: 'Retrieve the current state of all objects on the whiteboard. Use this when you need to know what already exists before making changes.',
-      parameters: { type: 'object', properties: {}, required: [] },
-    },
-  },
-];
+    console.log(`  📊 Analyzing: ${obj.type} (${type}) with fill=${obj.fill || 'none'}, stroke=${obj.stroke || 'none'}, detected color=${color}`);
+
+    countByType[type] = (countByType[type] || 0) + 1;
+    countByColor[color] = (countByColor[color] || 0) + 1;
+    countByTypeAndColor[`${color}_${type}`] = (countByTypeAndColor[`${color}_${type}`] || 0) + 1;
+  }
+
+  console.log(`  📊 Analysis complete: ${objectsToAnalyze.length} objects`);
+  console.log(`  📊 By type:`, countByType);
+  console.log(`  📊 By color:`, countByColor);
+  console.log(`  📊 By type+color:`, countByTypeAndColor);
+
+  return {
+    totalObjects: objectsToAnalyze.length,
+    countByType,
+    countByColor,
+    countByTypeAndColor,
+  };
+}
 
 /**
- * Core LLM call — extracted so LangSmith can trace inputs/outputs.
- * Returns { assistantMessage, toolCalls } or throws on error.
+ * Core LLM call with two-step tool execution support.
+ * If requiresFollowUp is true, the client should execute tools, send results back,
+ * and we'll make a second LLM call with the updated board state.
+ * 
+ * Returns { assistantMessage, toolCalls, requiresFollowUp } or throws on error.
  */
 const callOpenAI = traceable(
-  async function callOpenAI({ userMessage, boardState, conversationHistory }) {
-    let boardContext = 'The board is currently empty.';
-    if (boardState && boardState.objectCount > 0) {
-      const lines = boardState.objects.map((obj) => {
-        const parts = [`id=${obj.id}`, `type=${obj.type}`, `pos=(${obj.x},${obj.y})`];
-        if (obj.width !== undefined) parts.push(`w=${obj.width}`);
-        if (obj.height !== undefined) parts.push(`h=${obj.height}`);
-        if (obj.radius !== undefined) parts.push(`r=${obj.radius}`);
-        if (obj.color) parts.push(`color=${obj.color}`);
-        if (obj.text) parts.push(`text="${obj.text}"`);
-        if (obj.name) parts.push(`name="${obj.name}"`);
-        return parts.join(' ');
-      });
-      boardContext = `Board has ${boardState.objectCount} object(s):\n${lines.join('\n')}`;
-    }
+  async function callOpenAI({ userMessage, boardState, conversationHistory, selectedIds = [], selectionArea = null, toolExecutionResults = null }) {
+    const context = buildAIContext(boardState, selectedIds, selectionArea);
 
     const messages = [
       { role: 'system', content: AI_SYSTEM_PROMPT },
-      { role: 'system', content: `Current board state:\n${boardContext}` },
+      { role: 'system', content: `Current board state:\n${context}` },
       ...conversationHistory.map((msg) => ({ role: msg.role, content: msg.content })),
-      { role: 'user', content: userMessage },
     ];
+
+    // If this is a follow-up call with tool execution results, add them to the conversation
+    if (toolExecutionResults) {
+      messages.push({ role: 'user', content: userMessage });
+      messages.push({
+        role: 'assistant',
+        content: `I executed the following actions:\n${toolExecutionResults.summary}\n\nCreated object IDs: ${toolExecutionResults.createdIds.join(', ')}\n\nNow I can see the updated board state above. What should I do next?`,
+      });
+      messages.push({
+        role: 'user',
+        content: 'Based on my original request and the actions you just completed, continue with any remaining steps needed.',
+      });
+    } else {
+      messages.push({ role: 'user', content: userMessage });
+    }
 
     const startTime = Date.now();
     const response = await openai.chat.completions.create({
@@ -404,27 +248,129 @@ const callOpenAI = traceable(
       throw new Error('No response from OpenAI');
     }
 
-    const assistantMessage = choice.message.content ?? 'Done! I executed the requested changes.';
+    let assistantMessage = choice.message.content ?? "I've made the changes you requested.";
     const toolCalls = [];
+    let requiresFollowUp = false;
 
     if (choice.message.tool_calls) {
+      // Check if analyzeObjects is being called
+      const analyzeCall = choice.message.tool_calls.find(tc => tc.function.name === 'analyzeObjects');
+      
+      if (analyzeCall) {
+        // Execute analyzeObjects server-side and send results back to AI
+        let args;
+        try { args = JSON.parse(analyzeCall.function.arguments); } catch { args = {}; }
+        
+        const objectIdsToAnalyze = (args.objectIds && args.objectIds.length > 0) 
+          ? args.objectIds 
+          : (selectedIds && selectedIds.length > 0 ? selectedIds : []);
+        
+        const analysisResult = executeAnalyzeObjectsServerSide(objectIdsToAnalyze, boardState);
+        
+        const breakdown = Object.entries(analysisResult.countByTypeAndColor)
+          .sort((a, b) => b[1] - a[1])
+          .map(([key, count]) => {
+            const [color, ...typeParts] = key.split('_');
+            const type = typeParts.join('_');
+            return `${count} ${color} ${type}${count !== 1 ? 's' : ''}`;
+          })
+          .join(', ');
+        
+        const resultString = JSON.stringify({
+          totalObjects: analysisResult.totalObjects,
+          breakdown: breakdown,
+          countByType: analysisResult.countByType,
+          countByColor: analysisResult.countByColor,
+          countByTypeAndColor: analysisResult.countByTypeAndColor,
+        });
+
+        const messages2 = [
+          ...messages,
+          choice.message,
+          {
+            role: 'tool',
+            tool_call_id: analyzeCall.id,
+            content: resultString,
+          },
+        ];
+
+        const response2 = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: messages2,
+          temperature: 0.3,
+        });
+
+        const choice2 = response2.choices[0];
+        if (choice2?.message?.content) {
+          assistantMessage = choice2.message.content;
+        }
+
+        console.log(`🤖 AI follow-up response generated after tool execution`);
+      }
+
+      // Collect all tool calls for client execution
       for (const tc of choice.message.tool_calls) {
         if (tc.type === 'function') {
           let args;
-          try { args = JSON.parse(tc.function.arguments); } catch { args = {}; }
-          toolCalls.push({ id: tc.id, name: tc.function.name, arguments: args });
+          try {
+            args = JSON.parse(tc.function.arguments);
+          } catch {
+            args = {};
+          }
+          toolCalls.push({
+            id: tc.id,
+            name: tc.function.name,
+            arguments: args,
+          });
         }
+      }
+
+      // Check if we need a follow-up call after these tools execute
+      // This happens when the AI needs to see the results before continuing
+      const needsFollowUp = detectNeedsFollowUp(toolCalls, userMessage);
+      if (needsFollowUp && !toolExecutionResults) {
+        requiresFollowUp = true;
+        assistantMessage = "Executing actions..."; // Temporary message
       }
     }
 
-    return { assistantMessage, toolCalls };
+    return { assistantMessage, toolCalls, requiresFollowUp };
   },
-  { name: 'ai-board-command', run_type: 'chain' }
+  { name: 'callOpenAI' }
 );
 
 /**
+ * Detect if the user's request requires a two-step execution.
+ * Examples:
+ * - "delete everything and create 2 stars"
+ * - "clear the board and draw a workflow"  
+ * - "create 2 stars connected by a line" (needs to create shapes first, then connector)
+ */
+function detectNeedsFollowUp(toolCalls, userMessage) {
+  const lowerMessage = userMessage.toLowerCase();
+  
+  // Pattern 1: "delete/clear X and create/add Y"
+  const hasClearAndCreate = 
+    (lowerMessage.includes('delete') || lowerMessage.includes('clear') || lowerMessage.includes('remove')) &&
+    (lowerMessage.includes('and') || lowerMessage.includes('then')) &&
+    (lowerMessage.includes('create') || lowerMessage.includes('add') || lowerMessage.includes('draw'));
+  
+  // Pattern 2: "create X connected by/with Y"
+  const hasConnectedShapes = 
+    (lowerMessage.includes('connected') || lowerMessage.includes('with connector') || lowerMessage.includes('with line')) &&
+    (lowerMessage.includes('create') || lowerMessage.includes('add') || lowerMessage.includes('draw'));
+  
+  // Pattern 3: Multiple create operations followed by operations that need IDs
+  const hasCreateShapes = toolCalls.some(tc => tc.name === 'createShape' || tc.name === 'createStickyNote' || tc.name === 'createFrame');
+  const hasConnector = toolCalls.some(tc => tc.name === 'createConnector');
+  const needsIdsFromCreation = hasCreateShapes && hasConnector;
+  
+  return hasClearAndCreate || hasConnectedShapes || needsIdsFromCreation;
+}
+
+/**
  * Handle a single AI command message from a WebSocket client.
- * Parses the request, calls the traced LLM function, and sends back results.
+ * Uses hierarchical agent system: Supervisor → Worker Agents
  */
 async function handleAIMessage(ws, data) {
   if (!openai) {
@@ -440,7 +386,15 @@ async function handleAIMessage(ws, data) {
     return;
   }
 
-  const { message, boardState, conversationHistory = [] } = parsed;
+  const { 
+    message, 
+    boardState, 
+    conversationHistory = [], 
+    selectedIds = [], 
+    selectionArea,
+    toolExecutionResults = null,
+    remainingTasks = null,
+  } = parsed;
 
   if (!message || typeof message !== 'string') {
     ws.send(JSON.stringify({ type: 'error', error: 'message is required' }));
@@ -450,17 +404,57 @@ async function handleAIMessage(ws, data) {
   try {
     ws.send(JSON.stringify({ type: 'processing' }));
 
-    const result = await callOpenAI({
-      userMessage: message,
-      boardState,
-      conversationHistory,
-    });
+    const context = buildAIContext(boardState, selectedIds, selectionArea);
 
-    ws.send(JSON.stringify({
-      type: 'result',
-      actions: result.toolCalls,
-      assistantMessage: result.assistantMessage,
-    }));
+    let result;
+    
+    // Progress callback to send incremental updates
+    const progressCallback = (progressData) => {
+      ws.send(JSON.stringify(progressData));
+    };
+    
+    // If continuing from a previous task batch
+    if (remainingTasks && toolExecutionResults) {
+      console.log('🔄 Continuing multi-agent orchestration');
+      result = await continueOrchestration(
+        openai,
+        remainingTasks,
+        boardState,
+        context,
+        [toolExecutionResults],
+        executeAnalyzeObjectsServerSide
+      );
+    } else {
+      // Start new orchestration
+      console.log('🎯 Starting multi-agent orchestration');
+      result = await orchestrateAgents(
+        openai,
+        message,
+        boardState,
+        context,
+        executeAnalyzeObjectsServerSide,
+        progressCallback  // Pass the callback
+      );
+    }
+
+    // Send final response only if we didn't send progress updates
+    // (if progress was sent, each step already got its own message)
+    if (!result.progressSent) {
+      ws.send(JSON.stringify({
+        type: 'result',
+        actions: result.toolCalls || [],
+        assistantMessage: result.summary || result.supervisorPlan?.summary || "I've completed the tasks",
+        requiresFollowUp: result.needsFollowUp || false,
+        remainingTasks: result.remainingTasks || null,
+        supervisorPlan: result.supervisorPlan || null,
+      }));
+    } else {
+      // Progress updates were sent, just send completion signal
+      ws.send(JSON.stringify({
+        type: 'complete',
+        message: 'All tasks completed',
+      }));
+    }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Unknown OpenAI error';
     console.error('🤖 AI error:', errorMessage);

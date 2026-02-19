@@ -93,40 +93,35 @@ export const AIAssistant = ({
   return (
     <>
       {/* Floating trigger button */}
-      <motion.button
-        ref={buttonRef}
-        onClick={handleButtonClick}
-        className="fixed bottom-8 right-8 w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-lg hover:shadow-xl transition-shadow flex items-center justify-center z-50"
-        animate={{
-          scale: 1,
-          boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
-        }}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        transition={{ type: 'spring', stiffness: 400, damping: 17 }}
-      >
-        <AutoAwesomeIcon className="w-6 h-6" />
-        <motion.div
-          className="absolute inset-0 rounded-full bg-gradient-to-br from-indigo-400 to-purple-400 opacity-0"
-          animate={{ scale: [1, 1.5, 2], opacity: [0.5, 0.3, 0] }}
-          transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
-        />
-      </motion.button>
+        <motion.button
+          ref={buttonRef}
+          onClick={handleButtonClick}
+          className="fixed bottom-8 left-8 w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-[6px_-6px_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] hover:shadow-[8px_-8px_24px_rgba(0,0,0,0.2),0_6px_16px_rgba(0,0,0,0.12),0_16px_40px_rgba(0,0,0,0.1)] transition-shadow flex items-center justify-center z-50"
+          animate={{
+            scale: 1,
+            boxShadow: '6px -6px 20px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1), 0 12px 32px rgba(0, 0, 0, 0.08)',
+          }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+        >
+          <AutoAwesomeIcon className="w-6 h-6" />
+        </motion.button>
 
       {/* Energy particle animation (preserved from original) */}
       {/* Chat panel */}
       <AnimatePresence>
         {showChat && (
           <motion.div
-            className="fixed bottom-28 right-8 z-[200] pointer-events-auto"
+            className="fixed bottom-28 left-8 z-[200] pointer-events-auto"
             initial={{ opacity: 0, y: 30, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 30, scale: 0.95 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
           >
-            <div className="w-[420px] max-w-[90vw] bg-white rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[600px]">
+            <div className="w-[340px] max-w-[90vw] bg-white rounded-2xl shadow-[6px_-6px_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] overflow-hidden flex flex-col max-h-[480px]">
               {/* Header */}
-              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-3 flex items-center justify-between flex-shrink-0">
+              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-2.5 flex items-center justify-between flex-shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
                     <AutoAwesomeIcon className="w-5 h-5 text-white" />
@@ -161,7 +156,7 @@ export const AIAssistant = ({
               </div>
 
               {/* Messages area */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px] max-h-[380px]">
+              <div className="flex-1 overflow-y-auto p-3 space-y-2.5 min-h-[140px] max-h-[280px]">
                 {/* Welcome message (always shown) */}
                 <div className="flex gap-2.5">
                   <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -222,7 +217,7 @@ export const AIAssistant = ({
               </div>
 
               {/* Input area */}
-              <div className="border-t border-gray-200 p-3 flex-shrink-0">
+              <div className="border-t border-gray-200 p-2.5 flex-shrink-0">
                 <div className="flex gap-2">
                   <input
                     ref={inputRef}
@@ -291,13 +286,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-3.5 py-2.5">
           <p className="text-sm text-gray-800">{message.content}</p>
         </div>
-        {message.actionSummary && (
-          <div className="bg-green-50 border border-green-200 rounded-xl px-3 py-2">
-            <p className="text-xs text-green-700 font-medium">
-              {message.actionSummary}
-            </p>
-          </div>
-        )}
       </div>
     </motion.div>
   );

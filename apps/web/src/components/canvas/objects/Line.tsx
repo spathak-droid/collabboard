@@ -187,6 +187,7 @@ const LineComponent = ({
   };
 
   const commonProps = {
+    id: data.id,
     ref: shapeRef,
     x: renderX,
     y: renderY,

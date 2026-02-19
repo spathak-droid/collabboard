@@ -26,7 +26,13 @@ interface CanvasProps {
 const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove, onObjectDragStart, onObjectDragEnd, theme = 'light', stageRef: externalStageRef }: CanvasProps) => {
   const internalStageRef = useRef<Konva.Stage>(null);
   const stageRef = externalStageRef || internalStageRef;
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  // Initialize dimensions immediately to prevent loading state
+  const [dimensions, setDimensions] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return { width: window.innerWidth, height: window.innerHeight };
+    }
+    return { width: 1920, height: 1080 }; // Fallback for SSR
+  });
   const [isDragging, setIsDragging] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const dragStartPos = useRef({ x: 0, y: 0 });

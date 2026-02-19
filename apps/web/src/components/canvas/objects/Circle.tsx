@@ -7,10 +7,11 @@
 
 'use client';
 
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { Group, Circle as KonvaCircle, Transformer, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { CircleShape } from '@/types/canvas';
+import { getAutoFitFontSize } from '@/lib/utils/autoFitText';
 
 interface CircleProps {
   data: CircleShape;
@@ -143,6 +144,16 @@ const CircleComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpd
     textarea.style.boxShadow = 'none';
     textarea.style.resize = 'none';
     textarea.style.overflow = 'hidden';
+    const updateFontSize = () => {
+      const fontSize = getAutoFitFontSize(
+        textarea.value || ' ',
+        textAreaWidth,
+        textAreaHeight,
+        resolvedTextFamily,
+        { minSize: 12, maxSize: 44 }
+      );
+      textarea.style.fontSize = `${fontSize * stageScale}px`;
+    };
     textarea.style.fontFamily = resolvedTextFamily;
     textarea.style.fontSize = `${resolvedTextSize * stageScale}px`;
     textarea.style.lineHeight = '1.25';
@@ -155,7 +166,11 @@ const CircleComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpd
     const textEnd = textarea.value.length;
     textarea.setSelectionRange(textEnd, textEnd);
 
+    textarea.addEventListener('input', updateFontSize);
+    updateFontSize();
+
     const cleanup = () => {
+      textarea.removeEventListener('input', updateFontSize);
       textarea.removeEventListener('keydown', onKeyDown);
       textarea.removeEventListener('blur', onBlur);
       window.removeEventListener('mousedown', onOutsideClick);
@@ -195,9 +210,17 @@ const CircleComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpd
     }, 0);
   };
 
-  const resolvedTextSize = Math.max(12, Math.min(data.textSize ?? 16, 44, data.radius * 0.9));
+  const textAreaWidth = data.radius * 1.8;
+  const textAreaHeight = data.radius * 1.1;
   const resolvedTextFamily = data.textFamily ?? 'Inter';
   const hasRealText = typeof data.text === 'string' && data.text.trim().length > 0;
+  const resolvedTextSize = useMemo(() => {
+    const text = hasRealText ? data.text! : '';
+    return getAutoFitFontSize(text || ' ', textAreaWidth, textAreaHeight, resolvedTextFamily, {
+      minSize: 12,
+      maxSize: 44,
+    });
+  }, [data.text, textAreaWidth, textAreaHeight, resolvedTextFamily, hasRealText]);
   const displayText = hasRealText ? data.text! : (isSelected ? 'Type text' : '');
 
   return (

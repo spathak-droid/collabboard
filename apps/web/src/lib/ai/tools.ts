@@ -16,6 +16,20 @@ export interface CreateStickyNoteArgs {
   color?: 'yellow' | 'pink' | 'blue' | 'green' | 'orange';
 }
 
+export interface CreateTextArgs {
+  text: string;
+  x?: number;
+  y?: number;
+}
+
+export interface CreateTextBubbleArgs {
+  text: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
 export interface CreateShapeArgs {
   type: 'rect' | 'circle' | 'triangle' | 'star';
   x?: number;
@@ -61,10 +75,24 @@ export interface ChangeColorArgs {
   color: string;
 }
 
-// getBoardState takes no arguments — it's a read-only introspection tool
+export interface DeleteObjectArgs {
+  objectIds: string[];
+}
+
+export interface ArrangeInGridArgs {
+  objectIds: string[];
+}
+
+export interface AnalyzeObjectsArgs {
+  objectIds?: string[];
+}
+
+// getBoardState and analyzeObjects take no/optional arguments — read-only tools
 
 export type ToolName =
   | 'createStickyNote'
+  | 'createText'
+  | 'createTextBubble'
   | 'createShape'
   | 'createFrame'
   | 'createConnector'
@@ -72,10 +100,15 @@ export type ToolName =
   | 'resizeObject'
   | 'updateText'
   | 'changeColor'
-  | 'getBoardState';
+  | 'deleteObject'
+  | 'getBoardState'
+  | 'arrangeInGrid'
+  | 'analyzeObjects';
 
 export type ToolArgs =
   | CreateStickyNoteArgs
+  | CreateTextArgs
+  | CreateTextBubbleArgs
   | CreateShapeArgs
   | CreateFrameArgs
   | CreateConnectorArgs
@@ -83,6 +116,9 @@ export type ToolArgs =
   | ResizeObjectArgs
   | UpdateTextArgs
   | ChangeColorArgs
+  | DeleteObjectArgs
+  | ArrangeInGridArgs
+  | AnalyzeObjectsArgs
   | Record<string, never>; // getBoardState
 
 export interface ParsedToolCall {
@@ -333,6 +369,45 @@ export const AI_TOOLS: ChatCompletionTool[] = [
       parameters: {
         type: 'object',
         properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'arrangeInGrid',
+      description:
+        'Arrange the selected objects into an evenly spaced grid. Use when the user says "arrange in grid", "arrange these in a grid", "organize in a grid", etc. The layout engine computes positions deterministically.',
+      parameters: {
+        type: 'object',
+        properties: {
+          objectIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of object IDs to arrange (the selected objects)',
+          },
+        },
+        required: ['objectIds'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'analyzeObjects',
+      description:
+        'Analyze and count objects by type and color. Use when the user asks "how many", "count", "analyze", "show me statistics", etc. Returns structured counts with human-readable color names (automatically converted from hex by analyzing RGB values).',
+      parameters: {
+        type: 'object',
+        properties: {
+          objectIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description:
+              'Array of object IDs to analyze. If empty or omitted, analyzes all objects on the board.',
+          },
+        },
         required: [],
       },
     },

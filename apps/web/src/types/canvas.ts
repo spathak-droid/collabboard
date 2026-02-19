@@ -2,7 +2,7 @@
  * Canvas object types and interfaces
  */
 
-export type ObjectType = 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'textBubble' | 'frame';
+export type ObjectType = 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'text' | 'textBubble' | 'frame';
 
 export interface BaseObject {
   id: string;
@@ -99,6 +99,14 @@ export interface LineShape extends BaseObject {
   endAnchor?: ConnectorAnchor;   // connected to a shape's anchor point
 }
 
+export interface TextShape extends BaseObject {
+  type: 'text';
+  text: string;
+  textSize?: number;
+  textFamily?: 'Inter' | 'Poppins' | 'Merriweather';
+  fill?: string; // Text color (default black)
+}
+
 export interface TextBubbleShape extends BaseObject {
   type: 'textBubble';
   width: number;
@@ -119,7 +127,7 @@ export interface Frame extends BaseObject {
   name?: string; // Frame name (default: frame1, frame2, etc.)
 }
 
-export type WhiteboardObject = StickyNote | RectShape | CircleShape | TriangleShape | StarShape | LineShape | TextBubbleShape | Frame;
+export type WhiteboardObject = StickyNote | RectShape | CircleShape | TriangleShape | StarShape | LineShape | TextShape | TextBubbleShape | Frame;
 
 export interface CanvasState {
   objects: Map<string, WhiteboardObject>;

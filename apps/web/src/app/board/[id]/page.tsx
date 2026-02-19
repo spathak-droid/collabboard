@@ -60,10 +60,6 @@ export default function BoardPage() {
 
   // Send heartbeat every 60s so other users know we're online
   usePresenceHeartbeat(user?.uid);
-
-  // Track every user ever seen online in this session so they persist as
-  // "offline" after they disconnect (Yjs awareness only has live users).
-  const seenUsersRef = useRef<Map<string, { name: string; color: string }>>(new Map());
   
   const [shapeStrokeColor, setShapeStrokeColor] = useState('#000000');
   const [shapeFillColor, setShapeFillColor] = useState('#E5E7EB');
@@ -108,7 +104,7 @@ export default function BoardPage() {
 
   // Use refactored hooks
   const boardMetadata = useBoardMetadata(boardId, user, onlineUsers.length);
-  const { boardTitle, setBoardTitle, ownerUid, boardMembers, globalOnlineUids, isOwner } = boardMetadata;
+  const { boardTitle, setBoardTitle, ownerUid, isOwner } = boardMetadata;
   
   const {
     selectedIds,
@@ -1578,36 +1574,17 @@ export default function BoardPage() {
     selectionAreaLivePosRef.current = null;
   }, [selectionArea, selectedIds, objects, updateObject, manipulation, clearLiveDrag, clearCursorServerLiveDrag]);
 
-  // ── Build merged collaborator list (viewing → online → offline) ──
-  // Remember every user we've ever seen viewing this board in this session
-  for (const state of onlineUsers) {
-    seenUsersRef.current.set(state.user.id, {
-      name: state.user.name,
-      color: state.user.color,
-    });
-  }
-
-  type PresenceStatus = 'viewing' | 'online' | 'offline';
+  // ── Build collaborator list (only users currently viewing this board) ──
   type CollabUser = {
     uid: string;
     name: string;
     color: string;
-    status: PresenceStatus;
     isYou: boolean;
   };
 
-  const viewingIds = new Set(onlineUsers.map((s: { user: { id: string } }) => s.user.id));
-
-  const getStatus = (uid: string): PresenceStatus => {
-    if (viewingIds.has(uid)) return 'viewing';
-    if (globalOnlineUids.has(uid)) return 'online';
-    return 'offline';
-  };
-
+  // Only show users currently viewing this board (Yjs awareness)
   const collaborators: CollabUser[] = [];
   const addedUids = new Set<string>();
-
-  // 1) Users currently viewing this board (Yjs awareness)
   for (const state of onlineUsers) {
     if (addedUids.has(state.user.id)) continue;
     addedUids.add(state.user.id);
@@ -1615,35 +1592,7 @@ export default function BoardPage() {
       uid: state.user.id,
       name: state.user.name,
       color: state.user.color,
-      status: 'viewing',
       isYou: state.user.id === user?.uid,
-    });
-  }
-
-  // 2) Previously-seen users who left this board
-  (Array.from(seenUsersRef.current.entries()) as Array<[string, { name: string; color: string }]>).forEach(([uid, info]) => {
-    if (addedUids.has(uid)) return;
-    addedUids.add(uid);
-    collaborators.push({
-      uid,
-      name: info.name,
-      color: info.color,
-      status: getStatus(uid),
-      isYou: uid === user?.uid,
-    });
-  });
-
-  // 3) Board members from Supabase who weren't seen in this session
-  for (const member of boardMembers) {
-    if (addedUids.has(member.uid)) continue;
-    addedUids.add(member.uid);
-    const name = member.displayName || member.email?.split('@')[0] || 'Unknown';
-    collaborators.push({
-      uid: member.uid,
-      name,
-      color: getUserColor(member.uid),
-      status: getStatus(member.uid),
-      isYou: member.uid === user?.uid,
     });
   }
 
@@ -1728,30 +1677,14 @@ export default function BoardPage() {
                 {visibleCollabs.map((c, i) => (
                   <div
                     key={c.uid}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border-2 border-white shadow-sm relative hover:z-20 hover:scale-110 transition-transform ${
-                      c.status === 'offline' ? 'text-gray-400' : 'text-white'
-                    }`}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white border-2 border-white shadow-sm relative hover:z-20 hover:scale-110 transition-transform"
                     style={{
-                      backgroundColor:
-                        c.status === 'viewing' ? c.color
-                        : c.status === 'online' ? c.color
-                        : '#e5e7eb',
+                      backgroundColor: c.color,
                       zIndex: MAX_VISIBLE - i,
-                      opacity: c.status === 'offline' ? 0.7 : c.status === 'online' ? 0.85 : 1,
                     }}
-                    title={
-                      c.name +
-                      (c.isYou ? ' (You)' : '') +
-                      (c.status === 'viewing' ? ' — Viewing' : c.status === 'online' ? ' — Online' : ' — Offline')
-                    }
+                    title={c.name + (c.isYou ? ' (You)' : '')}
                   >
                     {c.name.charAt(0).toUpperCase()}
-                    {c.status === 'online' && (
-                      <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-amber-400 border border-white" />
-                    )}
-                    {c.status === 'viewing' && (
-                      <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-400 border border-white" />
-                    )}
                   </div>
                 ))}
 
@@ -1765,7 +1698,7 @@ export default function BoardPage() {
               </div>
             </button>
 
-            {/* Dropdown listing all collaborators with 3-state presence */}
+            {/* Dropdown listing all collaborators */}
             {showAllUsers && (
               <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-200 py-3 px-1 min-w-[260px] z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="px-3 pb-2 mb-1 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
@@ -1778,15 +1711,9 @@ export default function BoardPage() {
                       className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
                     >
                       <div
-                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
-                          c.status === 'offline' ? 'text-gray-400' : 'text-white'
-                        }`}
+                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 text-white"
                         style={{
-                          backgroundColor:
-                            c.status === 'viewing' ? c.color
-                            : c.status === 'online' ? c.color
-                            : '#e5e7eb',
-                          opacity: c.status === 'online' ? 0.85 : 1,
+                          backgroundColor: c.color,
                         }}
                       >
                         {c.name.charAt(0).toUpperCase()}
@@ -1798,23 +1725,7 @@ export default function BoardPage() {
                             <span className="text-gray-400 ml-1 text-xs">(You)</span>
                           )}
                         </span>
-                        <span className={`text-[11px] leading-tight ${
-                          c.status === 'viewing' ? 'text-green-600'
-                          : c.status === 'online' ? 'text-amber-500'
-                          : 'text-gray-400'
-                        }`}>
-                          {c.status === 'viewing' ? 'Viewing this board'
-                           : c.status === 'online' ? 'Online'
-                           : 'Offline'}
-                        </span>
                       </div>
-                      <span
-                        className={`ml-auto w-2 h-2 rounded-full shrink-0 ${
-                          c.status === 'viewing' ? 'bg-green-400'
-                          : c.status === 'online' ? 'bg-amber-400'
-                          : 'bg-gray-300'
-                        }`}
-                      />
                     </div>
                   ))}
                 </div>

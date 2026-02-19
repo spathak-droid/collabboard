@@ -12,11 +12,16 @@
   --accent-3: #00d084;
 }
 
+html {
+  font-size: 16px; /* Base font size - ensures consistent scaling */
+}
+
 body {
   color: var(--foreground);
   background: var(--background);
   font-family: var(--font-manrope), system-ui, sans-serif;
   min-height: 100vh;
+  font-size: 1rem; /* Use rem units for consistent sizing */
 }
 
 ::selection {

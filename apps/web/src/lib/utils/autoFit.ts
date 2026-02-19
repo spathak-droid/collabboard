@@ -44,12 +44,19 @@ export function calculateBoundingBox(objects: WhiteboardObject[]): BoundingBox |
       minY = Math.min(minY, obj.y - obj.radius);
       maxX = Math.max(maxX, obj.x + obj.radius);
       maxY = Math.max(maxY, obj.y + obj.radius);
-    } else {
-      // For rectangles, sticky notes, text bubbles
+    } else if (obj.type === 'text') {
+      // TextShape doesn't have width/height, use default size
       minX = Math.min(minX, obj.x);
       minY = Math.min(minY, obj.y);
-      maxX = Math.max(maxX, obj.x + obj.width);
-      maxY = Math.max(maxY, obj.y + obj.height);
+      maxX = Math.max(maxX, obj.x + 100);
+      maxY = Math.max(maxY, obj.y + 30);
+    } else {
+      // For rectangles, sticky notes, text bubbles, frames - all have width/height
+      const objWithDimensions = obj as WhiteboardObject & { width: number; height: number };
+      minX = Math.min(minX, obj.x);
+      minY = Math.min(minY, obj.y);
+      maxX = Math.max(maxX, obj.x + objWithDimensions.width);
+      maxY = Math.max(maxY, obj.y + objWithDimensions.height);
     }
   }
 

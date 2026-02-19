@@ -67,11 +67,23 @@ const getObjectBounds = (obj: WhiteboardObject) => {
     };
   }
 
+  if (obj.type === 'text') {
+    // TextShape doesn't have width/height, use default size for selection bounds
+    return {
+      x: obj.x,
+      y: obj.y,
+      width: 100, // Default width for text selection
+      height: 30, // Default height for text selection
+    };
+  }
+
+  // All remaining types (sticky, rect, triangle, star, textBubble, frame) have width/height
+  const objWithDimensions = obj as WhiteboardObject & { width: number; height: number };
   return {
     x: obj.x,
     y: obj.y,
-    width: obj.width,
-    height: obj.height,
+    width: objWithDimensions.width,
+    height: objWithDimensions.height,
   };
 };
 

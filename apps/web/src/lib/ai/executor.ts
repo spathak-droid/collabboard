@@ -339,9 +339,6 @@ export function executeToolCalls(
           width,
           height,
           text: args.text,
-          fill: '#000000', // Default black text
-          stroke: '#CCCCCC', // Light gray border
-          strokeWidth: 1,
           rotation: 0,
           zIndex: nextZIndex++,
           createdBy: ops.userId,

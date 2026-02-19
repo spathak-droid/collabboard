@@ -47,15 +47,26 @@ export const getObjectBounds = (
 
   // Width/height objects rotate around top-left group origin (Konva default).
   // Use transformed corners so frame bounds include full rotated geometry.
+  if (obj.type === 'text') {
+    // TextShape doesn't have width/height, use default size
+    return {
+      minX: obj.x - strokePad,
+      minY: obj.y - strokePad,
+      maxX: obj.x + 100 + strokePad,
+      maxY: obj.y + 30 + strokePad,
+    };
+  }
+  
+  const objWithDimensions = obj as WhiteboardObject & { width: number; height: number };
   const rotation = obj.rotation || 0;
   const rotRad = (rotation * Math.PI) / 180;
   const cosR = Math.cos(rotRad);
   const sinR = Math.sin(rotRad);
   const localCorners = [
     { x: 0, y: 0 },
-    { x: obj.width, y: 0 },
-    { x: obj.width, y: obj.height },
-    { x: 0, y: obj.height },
+    { x: objWithDimensions.width, y: 0 },
+    { x: objWithDimensions.width, y: objWithDimensions.height },
+    { x: 0, y: objWithDimensions.height },
   ];
   const worldCorners = localCorners.map((corner) => ({
     x: obj.x + corner.x * cosR - corner.y * sinR,

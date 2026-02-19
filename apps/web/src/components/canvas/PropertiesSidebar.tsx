@@ -48,7 +48,15 @@ export const PropertiesSidebar = ({
   if (selectedObjects.length === 0) return null;
   
   // Get current colors from first selected shape
-  const currentStroke = selectedObjects.find(obj => obj.type !== 'sticky' && obj.type !== 'textBubble')?.stroke || '#000000';
+  const shapeWithStroke = selectedObjects.find(obj => 
+    obj.type === 'rect' || 
+    obj.type === 'circle' || 
+    obj.type === 'triangle' || 
+    obj.type === 'star' || 
+    obj.type === 'line' ||
+    obj.type === 'frame'
+  ) as { stroke?: string } | undefined;
+  const currentStroke = shapeWithStroke?.stroke || '#000000';
   const currentFill = (
     selectedObjects.find(obj => obj.type === 'rect' || obj.type === 'circle' || obj.type === 'triangle' || obj.type === 'star' || obj.type === 'frame') as { fill?: string } | undefined
   )?.fill || '#FFFFFF';

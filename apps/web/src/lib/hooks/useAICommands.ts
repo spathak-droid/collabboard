@@ -116,8 +116,7 @@ export function useAICommands(options: UseAICommandsOptions) {
         
         // Execute the actions for this step
         const executionResult = executeToolCalls(actions, ops, {
-          objectsRef: objectsRef.current,
-          canvasViewportRef: { x: 0, y: 0 },
+          selectionArea: selectionAreaRef.current ?? undefined,
         });
         
         // Generate response for this step

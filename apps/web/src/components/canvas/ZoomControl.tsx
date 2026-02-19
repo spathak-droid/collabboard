@@ -35,7 +35,7 @@ export const ZoomControl = () => {
   return (
     <>
       <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-30">
-        <div className="flex items-center gap-2 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-gray-200 px-3 py-2">
+        <div className="flex items-center gap-2 bg-white/95 backdrop-blur-sm rounded-[16px] shadow-[0_-6px_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] border border-gray-200 px-3 py-2">
           {/* Fit to Screen Button */}
           <button
             onClick={handleFitToScreen}
@@ -66,7 +66,7 @@ export const ZoomControl = () => {
 
           {/* Zoom Percentage Display */}
           <div className="px-3 py-1 text-sm font-medium text-gray-900 min-w-[50px] text-center">
-            {Math.round(scale * 100)}%
+            {typeof scale === 'number' && !isNaN(scale) && isFinite(scale) ? Math.round(scale * 100) : 100}%
           </div>
 
           {/* Zoom In Button */}
@@ -88,14 +88,14 @@ export const ZoomControl = () => {
           <button
             onClick={handleCameraControlsClick}
             className="p-1.5 rounded hover:bg-gray-100 transition-colors"
-            title="Camera controls"
+            title="Canvas controls"
           >
             <ControlCameraIcon className="w-5 h-5 text-gray-700" />
           </button>
         </div>
       </div>
 
-      {/* Camera Controls Modal */}
+      {/* Canvas Controls Modal */}
       {showCameraControls && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/45 p-4" onClick={handleCloseCameraControls}>
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.35)]" onClick={(e) => e.stopPropagation()}>
@@ -104,7 +104,7 @@ export const ZoomControl = () => {
               <div>
                 <h3 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
                   <ControlCameraIcon className="w-5 h-5 text-gray-700" />
-                  Camera Controls
+                  Canvas Controls
                 </h3>
                 <p className="mt-1 text-sm text-slate-500">Learn how to navigate the canvas</p>
               </div>

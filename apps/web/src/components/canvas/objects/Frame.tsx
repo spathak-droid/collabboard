@@ -138,8 +138,8 @@ export const Frame = ({
     // Calculate position accounting for rotation
     const cos = Math.cos((data.rotation * Math.PI) / 180);
     const sin = Math.sin((data.rotation * Math.PI) / 180);
-    const rotatedX = curX + 8 * cos - 4 * sin;
-    const rotatedY = curY + 8 * sin + 4 * cos;
+    const rotatedX = curX + 8 * cos + 18 * sin;
+    const rotatedY = curY + 8 * sin - 18 * cos;
     
     const editorX = containerRect.left + stagePos.x + rotatedX * stageScale;
     const editorY = containerRect.top + stagePos.y + rotatedY * stageScale;
@@ -250,7 +250,7 @@ export const Frame = ({
         <Text
           ref={textRef}
           x={8}
-          y={4}
+          y={-18}
           text={nameText}
           fontSize={14}
           fontFamily="Inter, sans-serif"

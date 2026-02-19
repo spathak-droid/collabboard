@@ -78,15 +78,35 @@ export function calculateAutoFit(
   const bbox = calculateBoundingBox(objects);
   if (!bbox) return null;
 
+  // Validate viewport dimensions
+  if (!viewportWidth || !viewportHeight || viewportWidth <= 0 || viewportHeight <= 0) {
+    return null;
+  }
+  
+  // Validate bounding box dimensions
+  if (!bbox.width || !bbox.height || bbox.width <= 0 || bbox.height <= 0) {
+    return null;
+  }
+  
   // Calculate zoom to fit content with padding
   const scaleX = (viewportWidth - padding * 2) / bbox.width;
   const scaleY = (viewportHeight - padding * 2) / bbox.height;
+  
+  // Validate calculated scales
+  if (!isFinite(scaleX) || !isFinite(scaleY) || isNaN(scaleX) || isNaN(scaleY)) {
+    return null;
+  }
   
   // Use the smaller scale to ensure everything fits
   let scale = Math.min(scaleX, scaleY);
   
   // Clamp between 10% and 100% (reasonable zoom range)
   scale = Math.max(0.1, Math.min(1, scale));
+  
+  // Final validation
+  if (!isFinite(scale) || isNaN(scale)) {
+    return null;
+  }
   
   // If scale is less than 30% and we have few objects, increase it
   if (scale < 0.3 && objects.length <= 3) {

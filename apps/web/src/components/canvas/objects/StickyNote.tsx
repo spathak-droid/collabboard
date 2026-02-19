@@ -7,10 +7,11 @@
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { Circle, Group, Line, Rect, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import type { StickyNote as StickyNoteType } from '@/types/canvas';
+import { getAutoFitFontSize } from '@/lib/utils/autoFitText';
 
 interface StickyNoteProps {
   data: StickyNoteType;
@@ -44,9 +45,17 @@ const StickyNoteComponent = ({
   const noteWidth = data.width;
   const noteHeight = data.height;
   const foldSize = 34;
-  const resolvedTextSize = Math.max(12, Math.min(data.textSize ?? 16, 42, noteHeight * 0.28));
+  const textAreaWidth = noteWidth - 28;
+  const textAreaHeight = noteHeight - 30;
   const resolvedTextFamily = data.textFamily ?? 'Inter';
   const hasRealText = typeof data.text === 'string' && data.text.trim().length > 0;
+  const resolvedTextSize = useMemo(() => {
+    const text = hasRealText ? data.text! : '';
+    return getAutoFitFontSize(text || ' ', textAreaWidth, textAreaHeight, resolvedTextFamily, {
+      minSize: 12,
+      maxSize: 42,
+    });
+  }, [data.text, textAreaWidth, textAreaHeight, resolvedTextFamily, hasRealText]);
   const displayText = hasRealText ? data.text! : (isSelected ? 'Type text' : '');
 
   const getGradientStops = (baseColor: string) => {
@@ -212,8 +221,19 @@ const StickyNoteComponent = ({
     textarea.style.resize = 'none';
     textarea.style.overflow = 'hidden';
     textarea.style.fontFamily = resolvedTextFamily;
+    const updateFontSize = () => {
+      const fontSize = getAutoFitFontSize(
+        textarea.value || ' ',
+        textAreaWidth,
+        textAreaHeight,
+        resolvedTextFamily,
+        { minSize: 12, maxSize: 42 }
+      );
+      textarea.style.fontSize = `${fontSize * stageScale}px`;
+    };
     textarea.style.fontSize = `${resolvedTextSize * stageScale}px`;
     textarea.style.lineHeight = '1.28';
+    textarea.style.textAlign = 'center';
     textarea.style.zIndex = '10000';
 
     document.body.appendChild(textarea);
@@ -222,7 +242,11 @@ const StickyNoteComponent = ({
     const textEnd = textarea.value.length;
     textarea.setSelectionRange(textEnd, textEnd);
 
+    textarea.addEventListener('input', updateFontSize);
+    updateFontSize();
+
     const cleanup = () => {
+      textarea.removeEventListener('input', updateFontSize);
       textarea.removeEventListener('keydown', onKeyDown);
       textarea.removeEventListener('blur', onBlur);
       window.removeEventListener('mousedown', onOutsideClick);
@@ -329,8 +353,8 @@ const StickyNoteComponent = ({
             fontFamily={resolvedTextFamily}
             fill={hasRealText ? '#0f172a' : '#475569'}
             opacity={hasRealText ? 1 : 0.6}
-            align="left"
-            verticalAlign="top"
+            align="center"
+            verticalAlign="middle"
             wrap="word"
             ellipsis={true}
             listening={false}

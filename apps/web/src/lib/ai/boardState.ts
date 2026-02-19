@@ -62,6 +62,9 @@ function summarizeObject(obj: WhiteboardObject): BoardObjectSummary {
 
   if (obj.type === 'sticky') {
     summary.color = HEX_TO_COLOR_NAME[obj.color] ?? obj.color;
+  } else if (obj.type === 'frame' && 'fill' in obj && obj.fill) {
+    // Frames: fill is the background color
+    summary.color = obj.fill;
   } else if ('fill' in obj && obj.fill) {
     summary.color = obj.fill;
   }

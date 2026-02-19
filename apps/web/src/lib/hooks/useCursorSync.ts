@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { CursorSyncClient, CursorPosition } from '../websocket/cursor-sync';
+import { CursorSyncClient, CursorPosition, LiveDragPosition } from '../websocket/cursor-sync';
 
 interface UseCursorSyncOptions {
   boardId: string;
@@ -27,11 +27,15 @@ export function useCursorSync(options: UseCursorSyncOptions) {
   
   const clientRef = useRef<CursorSyncClient | null>(null);
   const cursorsRef = useRef<Map<string, CursorPosition>>(new Map());
+  const livePositionsRef = useRef<Map<string, LiveDragPosition>>(new Map());
   const [isConnected, setIsConnected] = useState(false);
   
   // Throttle cursor updates to prevent excessive re-renders
   const lastSentRef = useRef<{ x: number; y: number; time: number }>({ x: 0, y: 0, time: 0 });
   const SEND_INTERVAL = 8; // 8ms = ~120fps
+
+  // Throttle live drag per object (avoid flooding during drag)
+  const lastLiveDragRef = useRef<Map<string, { x: number; y: number; time: number }>>(new Map());
 
   const handleCursorUpdate = useCallback((cursor: CursorPosition) => {
     // Measure latency (temporary - will remove after testing)
@@ -49,6 +53,20 @@ export function useCursorSync(options: UseCursorSyncOptions) {
 
   const handleUserLeave = useCallback((userId: string) => {
     cursorsRef.current.delete(userId);
+    // Clear live drags from this user
+    livePositionsRef.current.forEach((pos, objectId) => {
+      if (pos.userId === userId) {
+        livePositionsRef.current.delete(objectId);
+      }
+    });
+  }, []);
+
+  const handleLiveDragUpdate = useCallback((position: LiveDragPosition) => {
+    livePositionsRef.current.set(position.objectId, position);
+  }, []);
+
+  const handleLiveDragEnd = useCallback((objectId: string, _userId?: string) => {
+    livePositionsRef.current.delete(objectId);
   }, []);
 
   const handleConnect = useCallback(() => {
@@ -58,6 +76,7 @@ export function useCursorSync(options: UseCursorSyncOptions) {
   const handleDisconnect = useCallback(() => {
     setIsConnected(false);
     cursorsRef.current.clear();
+    livePositionsRef.current.clear();
   }, []);
 
   const handleError = useCallback((error: Error) => {
@@ -76,6 +95,8 @@ export function useCursorSync(options: UseCursorSyncOptions) {
       serverUrl,
       onCursorUpdate: handleCursorUpdate,
       onUserLeave: handleUserLeave,
+      onLiveDragUpdate: handleLiveDragUpdate,
+      onLiveDragEnd: handleLiveDragEnd,
       onConnect: handleConnect,
       onDisconnect: handleDisconnect,
       onError: handleError,
@@ -95,6 +116,8 @@ export function useCursorSync(options: UseCursorSyncOptions) {
     enabled,
     handleCursorUpdate,
     handleUserLeave,
+    handleLiveDragUpdate,
+    handleLiveDragEnd,
     handleConnect,
     handleDisconnect,
     handleError,
@@ -119,9 +142,46 @@ export function useCursorSync(options: UseCursorSyncOptions) {
     }
   }, [enabled]);
 
+  const sendLiveDrag = useCallback(
+    (
+      objectId: string,
+      x: number,
+      y: number,
+      extra?: {
+        rotation?: number;
+        width?: number;
+        height?: number;
+        radius?: number;
+        points?: number[];
+      }
+    ) => {
+      if (!clientRef.current || !enabled) return;
+
+      const last = lastLiveDragRef.current.get(objectId);
+      const now = Date.now();
+      if (last && now - last.time < SEND_INTERVAL) {
+        const dx = Math.abs(x - last.x);
+        const dy = Math.abs(y - last.y);
+        if (dx < 0.5 && dy < 0.5) return;
+      }
+      lastLiveDragRef.current.set(objectId, { x, y, time: now });
+
+      clientRef.current.sendLiveDrag(objectId, x, y, extra);
+    },
+    [enabled]
+  );
+
+  const clearLiveDrag = useCallback((objectId: string) => {
+    lastLiveDragRef.current.delete(objectId);
+    clientRef.current?.sendLiveDragEnd(objectId);
+  }, []);
+
   return {
-    cursors: cursorsRef, // Return the ref directly (stable reference)
+    cursors: cursorsRef,
+    livePositions: livePositionsRef,
     isConnected,
     sendCursor,
+    sendLiveDrag,
+    clearLiveDrag,
   };
 }

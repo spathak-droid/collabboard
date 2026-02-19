@@ -32,8 +32,10 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
   const [hoveredTooltip, setHoveredTooltip] = useState<string | null>(null);
   const [isShapesMenuOpen, setIsShapesMenuOpen] = useState(false);
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  const [isTextMenuOpen, setIsTextMenuOpen] = useState(false);
   const shapesMenuRef = useRef<HTMLDivElement | null>(null);
   const viewMenuRef = useRef<HTMLDivElement | null>(null);
+  const textMenuRef = useRef<HTMLDivElement | null>(null);
 
   const tools = [
     {
@@ -52,8 +54,8 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
       icon: <StickyNote2OutlinedIcon sx={{ fontSize: 24 }} />,
     },
     {
-      id: 'textBubble' as const,
-      label: 'Text Bubble',
+      id: 'text' as const,
+      label: 'Text',
       icon: <TextFieldsIcon sx={{ fontSize: 24 }} />,
     },
     {
@@ -99,6 +101,9 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
       }
       if (viewMenuRef.current && !viewMenuRef.current.contains(event.target as Node)) {
         setIsViewMenuOpen(false);
+      }
+      if (textMenuRef.current && !textMenuRef.current.contains(event.target as Node)) {
+        setIsTextMenuOpen(false);
       }
     };
 
@@ -153,7 +158,7 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
   
   return (
     <div className="fixed left-5 top-1/2 z-30 -translate-y-1/2">
-      <div className="flex w-[60px] flex-col items-center gap-1 rounded-[16px] bg-white p-2 shadow-[0_2px_12px_rgba(0,0,0,0.08),0_8px_32px_rgba(0,0,0,0.06)]">
+      <div className="flex w-[60px] flex-col items-center gap-1 rounded-[16px] bg-white p-2 shadow-[6px_0_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)]">
         {/* View options button */}
         <div ref={viewMenuRef} className="relative">
           {renderToolButton(
@@ -213,7 +218,59 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
         {/* Divider */}
         <div className="my-0.5 h-px w-8 bg-slate-200" />
 
-        {tools.map((tool) => renderToolButton(tool.id, tool.label, tool.icon))}
+        {tools.filter(tool => tool.id !== 'text').map((tool) => renderToolButton(tool.id, tool.label, tool.icon))}
+        
+        {/* Text button with dropdown menu */}
+        <div ref={textMenuRef} className="relative">
+          {renderToolButton(
+            'text',
+            'Text',
+            <TextFieldsIcon sx={{ fontSize: 24 }} />,
+            () => setIsTextMenuOpen(!isTextMenuOpen),
+            isTextMenuOpen || activeTool === 'text' || activeTool === 'textBubble'
+          )}
+          
+          {/* Text dropdown menu */}
+          {isTextMenuOpen && (
+            <div className="absolute left-full top-0 ml-3 w-48 rounded-xl bg-white p-2 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_12px_48px_rgba(0,0,0,0.08)] border border-slate-200">
+              <div className="mb-1 px-2 text-xs font-semibold text-slate-500">Text</div>
+              <div className="space-y-0.5">
+                <button
+                  onClick={() => {
+                    setActiveTool('text' as any);
+                    setIsTextMenuOpen(false);
+                  }}
+                  onMouseEnter={() => setHoveredTooltip('Text')}
+                  onMouseLeave={() => setHoveredTooltip(null)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                    activeTool === 'text'
+                      ? 'bg-slate-200 text-slate-900'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <TextFieldsIcon sx={{ fontSize: 20 }} />
+                  <span>Text</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTool('textBubble' as any);
+                    setIsTextMenuOpen(false);
+                  }}
+                  onMouseEnter={() => setHoveredTooltip('Text Bubble')}
+                  onMouseLeave={() => setHoveredTooltip(null)}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                    activeTool === 'textBubble'
+                      ? 'bg-slate-200 text-slate-900'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <TextFieldsIcon sx={{ fontSize: 20 }} />
+                  <span>Text Bubble</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
         
         {/* Shapes button with dropdown menu */}
         <div ref={shapesMenuRef} className="relative">

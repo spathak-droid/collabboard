@@ -4,10 +4,11 @@
 
 'use client';
 
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { Group, Line, Transformer, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { TriangleShape } from '@/types/canvas';
+import { getAutoFitFontSize } from '@/lib/utils/autoFitText';
 
 interface TriangleProps {
   data: TriangleShape;
@@ -32,9 +33,17 @@ const TriangleComponent = ({ data, isSelected, isDraggable = true, onSelect, onU
     }
   }, [isSelected, data.x, data.y, data.width, data.height, data.rotation]);
 
-  const resolvedTextSize = Math.max(12, Math.min(data.textSize ?? 16, 44, Math.min(data.width, data.height) * 0.35));
+  const textAreaWidth = data.width * 0.6;
+  const textAreaHeight = data.height * 0.35;
   const resolvedTextFamily = data.textFamily ?? 'Inter';
   const hasRealText = typeof data.text === 'string' && data.text.trim().length > 0;
+  const resolvedTextSize = useMemo(() => {
+    const text = hasRealText ? data.text! : '';
+    return getAutoFitFontSize(text || ' ', textAreaWidth, textAreaHeight, resolvedTextFamily, {
+      minSize: 12,
+      maxSize: 44,
+    });
+  }, [data.text, textAreaWidth, textAreaHeight, resolvedTextFamily, hasRealText]);
   const displayText = hasRealText ? data.text! : (isSelected ? 'Type text' : '');
 
   const handleDragStart = () => {
@@ -105,10 +114,10 @@ const TriangleComponent = ({ data, isSelected, isDraggable = true, onSelect, onU
     const curX = groupRef.current?.x() ?? data.x;
     const curY = groupRef.current?.y() ?? data.y;
 
-    const editorX = containerRect.left + stagePos.x + (curX + data.width * 0.1) * stageScale;
-    const editorY = containerRect.top + stagePos.y + (curY + data.height * 0.35) * stageScale;
-    const editorWidth = Math.max(80, data.width * 0.8 * stageScale);
-    const editorHeight = Math.max(36, data.height * 0.45 * stageScale);
+    const editorX = containerRect.left + stagePos.x + (curX + data.width * 0.2) * stageScale;
+    const editorY = containerRect.top + stagePos.y + (curY + data.height * 0.55) * stageScale;
+    const editorWidth = Math.max(80, data.width * 0.6 * stageScale);
+    const editorHeight = Math.max(36, data.height * 0.35 * stageScale);
 
     const textarea = document.createElement('textarea');
     textarea.id = 'inline-shape-editor';
@@ -129,6 +138,16 @@ const TriangleComponent = ({ data, isSelected, isDraggable = true, onSelect, onU
     textarea.style.boxShadow = 'none';
     textarea.style.resize = 'none';
     textarea.style.overflow = 'hidden';
+    const updateFontSize = () => {
+      const fontSize = getAutoFitFontSize(
+        textarea.value || ' ',
+        textAreaWidth,
+        textAreaHeight,
+        resolvedTextFamily,
+        { minSize: 12, maxSize: 44 }
+      );
+      textarea.style.fontSize = `${fontSize * stageScale}px`;
+    };
     textarea.style.fontFamily = resolvedTextFamily;
     textarea.style.fontSize = `${resolvedTextSize * stageScale}px`;
     textarea.style.lineHeight = '1.25';
@@ -141,7 +160,11 @@ const TriangleComponent = ({ data, isSelected, isDraggable = true, onSelect, onU
     const textEnd = textarea.value.length;
     textarea.setSelectionRange(textEnd, textEnd);
 
+    textarea.addEventListener('input', updateFontSize);
+    updateFontSize();
+
     const cleanup = () => {
+      textarea.removeEventListener('input', updateFontSize);
       textarea.removeEventListener('keydown', onKeyDown);
       textarea.removeEventListener('blur', onBlur);
       window.removeEventListener('mousedown', onOutsideClick);
@@ -206,8 +229,8 @@ const TriangleComponent = ({ data, isSelected, isDraggable = true, onSelect, onU
 
         {displayText && !isEditingText ? (
           <Text
-            x={data.width * 0.1}
-            y={data.height * 0.35}
+            x={data.width * 0.2}
+            y={data.height * 0.55}
             text={displayText}
             fontSize={resolvedTextSize}
             fontFamily={resolvedTextFamily}
@@ -217,8 +240,8 @@ const TriangleComponent = ({ data, isSelected, isDraggable = true, onSelect, onU
             verticalAlign="middle"
             listening={false}
             wrap="word"
-            width={data.width * 0.8}
-            height={data.height * 0.5}
+            width={data.width * 0.6}
+            height={data.height * 0.35}
             ellipsis
           />
         ) : null}

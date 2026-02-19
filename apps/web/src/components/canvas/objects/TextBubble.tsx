@@ -7,10 +7,11 @@
 
 'use client';
 
-import { useRef, useEffect, useState, memo } from 'react';
+import { useRef, useEffect, useState, memo, useMemo } from 'react';
 import { Group, Shape, Transformer, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { TextBubbleShape } from '@/types/canvas';
+import { getAutoFitFontSize } from '@/lib/utils/autoFitText';
 
 interface TextBubbleProps {
   data: TextBubbleShape;
@@ -60,12 +61,18 @@ const TextBubbleComponent = ({
   const tailHeight = Math.max(8, Math.min(totalHeight * TAIL_HEIGHT_RATIO, 20));
   const bodyHeight = totalHeight - tailHeight;
 
-  const resolvedTextSize = Math.max(
-    12,
-    Math.min(data.textSize ?? 16, 48, bodyHeight * 0.4)
-  );
+  const textAreaWidth = totalWidth - 24;
+  const textAreaHeight = bodyHeight - 24;
   const resolvedTextFamily = data.textFamily ?? 'Inter';
   const hasRealText = typeof data.text === 'string' && data.text.trim().length > 0;
+  const resolvedTextSize = useMemo(() => {
+    const text = hasRealText ? data.text! : '';
+    return getAutoFitFontSize(text || ' ', textAreaWidth, textAreaHeight, resolvedTextFamily, {
+      minSize: 12,
+      maxSize: 48,
+      lineHeight: 1.35,
+    });
+  }, [data.text, textAreaWidth, textAreaHeight, resolvedTextFamily, hasRealText]);
   const displayText = hasRealText ? data.text! : (isSelected ? 'Type here...' : '');
 
   useEffect(() => {
@@ -205,9 +212,20 @@ const TextBubbleComponent = ({
     textarea.style.boxShadow = 'none';
     textarea.style.resize = 'none';
     textarea.style.overflow = 'hidden';
+    const updateFontSize = () => {
+      const fontSize = getAutoFitFontSize(
+        textarea.value || ' ',
+        textAreaWidth,
+        textAreaHeight,
+        resolvedTextFamily,
+        { minSize: 12, maxSize: 48, lineHeight: 1.35 }
+      );
+      textarea.style.fontSize = `${fontSize * stageScale}px`;
+    };
     textarea.style.fontFamily = resolvedTextFamily;
     textarea.style.fontSize = `${resolvedTextSize * stageScale}px`;
     textarea.style.lineHeight = '1.35';
+    textarea.style.textAlign = 'center';
     textarea.style.zIndex = '10000';
 
     document.body.appendChild(textarea);
@@ -216,7 +234,11 @@ const TextBubbleComponent = ({
     const textEnd = textarea.value.length;
     textarea.setSelectionRange(textEnd, textEnd);
 
+    textarea.addEventListener('input', updateFontSize);
+    updateFontSize();
+
     const cleanup = () => {
+      textarea.removeEventListener('input', updateFontSize);
       textarea.removeEventListener('keydown', onKeyDown);
       textarea.removeEventListener('blur', onBlur);
       window.removeEventListener('mousedown', onOutsideClick);
@@ -321,8 +343,8 @@ const TextBubbleComponent = ({
             fontFamily={resolvedTextFamily}
             fill={hasRealText ? '#1e293b' : '#94a3b8'}
             opacity={hasRealText ? 1 : 0.6}
-            align="left"
-            verticalAlign="top"
+            align="center"
+            verticalAlign="middle"
             listening={false}
             wrap="word"
             width={totalWidth - 24}

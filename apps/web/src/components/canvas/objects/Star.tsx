@@ -4,10 +4,11 @@
 
 'use client';
 
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import { Group, Star as KonvaStar, Transformer, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { StarShape } from '@/types/canvas';
+import { getAutoFitFontSize } from '@/lib/utils/autoFitText';
 
 interface StarProps {
   data: StarShape;
@@ -27,9 +28,17 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
 
   const outerRadius = Math.max(20, Math.min(data.width, data.height) / 2);
   const innerRadius = outerRadius * 0.45;
-  const resolvedTextSize = Math.max(12, Math.min(data.textSize ?? 15, 40, outerRadius * 0.5));
+  const textAreaWidth = data.width * 0.5;
+  const textAreaHeight = data.height * 0.35;
   const resolvedTextFamily = data.textFamily ?? 'Inter';
   const hasRealText = typeof data.text === 'string' && data.text.trim().length > 0;
+  const resolvedTextSize = useMemo(() => {
+    const text = hasRealText ? data.text! : '';
+    return getAutoFitFontSize(text || ' ', textAreaWidth, textAreaHeight, resolvedTextFamily, {
+      minSize: 12,
+      maxSize: 40,
+    });
+  }, [data.text, textAreaWidth, textAreaHeight, resolvedTextFamily, hasRealText]);
   const displayText = hasRealText ? data.text! : (isSelected ? 'Type text' : '');
 
   useEffect(() => {
@@ -90,10 +99,10 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
     const curX = groupRef.current?.x() ?? data.x;
     const curY = groupRef.current?.y() ?? data.y;
 
-    const editorX = containerRect.left + stagePos.x + (curX + data.width * 0.2) * stageScale;
-    const editorY = containerRect.top + stagePos.y + (curY + data.height * 0.3) * stageScale;
-    const editorWidth = Math.max(80, data.width * 0.6 * stageScale);
-    const editorHeight = Math.max(36, data.height * 0.4 * stageScale);
+    const editorX = containerRect.left + stagePos.x + (curX + data.width * 0.25) * stageScale;
+    const editorY = containerRect.top + stagePos.y + (curY + data.height * 0.35) * stageScale;
+    const editorWidth = Math.max(80, data.width * 0.5 * stageScale);
+    const editorHeight = Math.max(36, data.height * 0.35 * stageScale);
 
     const textarea = document.createElement('textarea');
     textarea.id = 'inline-shape-editor';
@@ -114,6 +123,16 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
     textarea.style.boxShadow = 'none';
     textarea.style.resize = 'none';
     textarea.style.overflow = 'hidden';
+    const updateFontSize = () => {
+      const fontSize = getAutoFitFontSize(
+        textarea.value || ' ',
+        textAreaWidth,
+        textAreaHeight,
+        resolvedTextFamily,
+        { minSize: 12, maxSize: 40 }
+      );
+      textarea.style.fontSize = `${fontSize * stageScale}px`;
+    };
     textarea.style.fontFamily = resolvedTextFamily;
     textarea.style.fontSize = `${resolvedTextSize * stageScale}px`;
     textarea.style.lineHeight = '1.25';
@@ -126,7 +145,11 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
     const textEnd = textarea.value.length;
     textarea.setSelectionRange(textEnd, textEnd);
 
+    textarea.addEventListener('input', updateFontSize);
+    updateFontSize();
+
     const cleanup = () => {
+      textarea.removeEventListener('input', updateFontSize);
       textarea.removeEventListener('keydown', onKeyDown);
       textarea.removeEventListener('blur', onBlur);
       window.removeEventListener('mousedown', onOutsideClick);
@@ -194,8 +217,8 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
 
         {displayText && !isEditingText ? (
           <Text
-            x={data.width * 0.2}
-            y={data.height * 0.3}
+            x={data.width * 0.25}
+            y={data.height * 0.35}
             text={displayText}
             fontSize={resolvedTextSize}
             fontFamily={resolvedTextFamily}
@@ -205,8 +228,8 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
             verticalAlign="middle"
             listening={false}
             wrap="word"
-            width={data.width * 0.6}
-            height={data.height * 0.4}
+            width={data.width * 0.5}
+            height={data.height * 0.35}
             ellipsis
           />
         ) : null}

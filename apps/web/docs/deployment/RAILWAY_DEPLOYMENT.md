@@ -28,8 +28,8 @@
    ```
    PORT=1234
    CURSOR_PORT=1235
-   SUPABASE_URL=https://ksnarsfklijkgrovdhgp.supabase.co
-   SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtzbmFyc2ZrbGlqa2dyb3ZkaGdwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyODI0MjksImV4cCI6MjA4Njg1ODQyOX0.uwLMMOH1bwomECVna-NXCfltTghL3KBoAf38iQzEkZg
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_ANON_KEY=your_supabase_anon_key_here
    ```
 
 5. **Configure Networking**
@@ -61,8 +61,8 @@ railway link
 # 5. Add environment variables
 railway variables set PORT=1234
 railway variables set CURSOR_PORT=1235
-railway variables set SUPABASE_URL=https://ksnarsfklijkgrovdhgp.supabase.co
-railway variables set SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtzbmFyc2ZrbGlqa2dyb3ZkaGdwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyODI0MjksImV4cCI6MjA4Njg1ODQyOX0.uwLMMOH1bwomECVna-NXCfltTghL3KBoAf38iQzEkZg
+railway variables set SUPABASE_URL=https://your-project.supabase.co
+railway variables set SUPABASE_ANON_KEY=your_supabase_anon_key_here
 
 # 6. Deploy
 railway up

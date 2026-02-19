@@ -25,24 +25,24 @@ Go to **Settings → Environment Variables** and add:
 
 ```bash
 # Firebase
-NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSyDgTSz5aGILOl-Z01ZI4YG7gEoZYQ65pbQ
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=collabboard-9d2ca.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=collabboard-9d2ca
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=collabboard-9d2ca.firebasestorage.app
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=106192948970
-NEXT_PUBLIC_FIREBASE_APP_ID=1:106192948970:web:b35866c382ab3a6338d193
+NEXT_PUBLIC_FIREBASE_API_KEY=your_firebase_api_key_here
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
 
 # Supabase
-NEXT_PUBLIC_SUPABASE_URL=https://ksnarsfklijkgrovdhgp.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtzbmFyc2ZrbGlqa2dyb3ZkaGdwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyODI0MjksImV4cCI6MjA4Njg1ODQyOX0.uwLMMOH1bwomECVna-NXCfltTghL3KBoAf38iQzEkZg
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
 
 # WebSocket URLs (IMPORTANT: Include port numbers!)
-NEXT_PUBLIC_WS_URL=wss://collabboard-server-production.up.railway.app:1234
-NEXT_PUBLIC_CURSOR_WS_URL=wss://keen-exploration-production.up.railway.app:1235
+NEXT_PUBLIC_WS_URL=wss://your-server.up.railway.app:1234
+NEXT_PUBLIC_CURSOR_WS_URL=wss://your-cursor-server.up.railway.app:1235
 
 # Resend (Email invites)
-RESEND_API_KEY=re_cV36FHqg_CdduyfWtrZE3HvdojWF5Co6M
-RESEND_FROM_EMAIL=Collabry <onboarding@resend.dev>
+RESEND_API_KEY=your_resend_api_key_here
+RESEND_FROM_EMAIL=YourApp <onboarding@resend.dev>
 
 # App URL (update after deployment)
 NEXT_PUBLIC_APP_URL=https://your-app.vercel.app

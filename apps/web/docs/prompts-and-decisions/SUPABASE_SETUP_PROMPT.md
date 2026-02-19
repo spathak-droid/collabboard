@@ -13,8 +13,8 @@ I'm building a collaborative whiteboard app (CollabBoard) using:
 ### ✅ Completed
 1. Created Supabase project
 2. Added credentials to `.env.local`:
-   - `NEXT_PUBLIC_SUPABASE_URL=https://ksnarsfklijkgrovdhgp.supabase.co`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
+   - `NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here`
 3. Ran SQL schema in Supabase SQL Editor (created tables: `users`, `boards`, `board_snapshots`, `board_access`)
 4. Created test script (`test-supabase.js`) that verifies connection
 

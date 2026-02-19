@@ -61,11 +61,23 @@ export const useSelection = () => {
           };
         }
 
+        if (obj.type === 'text') {
+          // TextShape doesn't have width/height, use default size
+          return {
+            x: obj.x,
+            y: obj.y,
+            width: 100,
+            height: 30,
+          };
+        }
+        
+        // All other types have width/height
+        const objWithDimensions = obj as WhiteboardObject & { width: number; height: number };
         return {
           x: obj.x,
           y: obj.y,
-          width: obj.width,
-          height: obj.height,
+          width: objWithDimensions.width,
+          height: objWithDimensions.height,
         };
       };
 

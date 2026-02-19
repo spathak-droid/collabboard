@@ -1833,14 +1833,16 @@ export default function BoardPage() {
       
       <ZoomControl />
       
-      <Cursors
-        awareness={awareness}
-        currentUserId={user.uid}
-        scale={scale}
-        position={position}
-        cursors={fastCursors}
-        useFastCursors={cursorSyncConnected}  // Use fast cursors if connected
-      />
+      {user && (
+        <Cursors
+          awareness={awareness}
+          currentUserId={user.uid}
+          scale={scale}
+          position={position}
+          cursors={fastCursors}
+          useFastCursors={cursorSyncConnected}  // Use fast cursors if connected
+        />
+      )}
       
       {/* Properties Sidebar - shows when objects selected */}
       {/* Show selection area properties when selection area is active */}

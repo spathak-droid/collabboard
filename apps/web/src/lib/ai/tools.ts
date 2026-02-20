@@ -23,6 +23,9 @@ export interface CreateTextArgs {
   text: string;
   x?: number;
   y?: number;
+  quantity?: number; // Optional: create multiple text objects
+  rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)
+  columns?: number; // Optional: explicit grid columns (e.g., "4x2 grid" = columns:2)
 }
 
 export interface CreateTextBubbleArgs {
@@ -31,6 +34,9 @@ export interface CreateTextBubbleArgs {
   y?: number;
   width?: number;
   height?: number;
+  quantity?: number; // Optional: create multiple text bubbles
+  rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)
+  columns?: number; // Optional: explicit grid columns (e.g., "4x2 grid" = columns:2)
 }
 
 export interface CreateShapeArgs {
@@ -52,6 +58,9 @@ export interface CreateFrameArgs {
   y?: number;
   width?: number;
   height?: number;
+  quantity?: number; // Optional: create multiple frames
+  rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)
+  columns?: number; // Optional: explicit grid columns (e.g., "4x2 grid" = columns:2)
 }
 
 export interface CreateConnectorArgs {

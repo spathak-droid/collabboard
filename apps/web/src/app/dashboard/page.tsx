@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { signOut } from '@/lib/firebase/auth';
 import { BrandLogo } from '@/components/brand/BrandLogo';
+import { BoardSnapshotPreview } from '@/components/dashboard/BoardSnapshotPreview';
 import { UserMenu } from '@/components/dashboard/UserMenu';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { NewBoardModal } from '@/components/ui/NewBoardModal';
@@ -27,7 +28,7 @@ import {
 } from '@/lib/supabase/client';
 import { getUserColor } from '@/lib/utils/colors';
 import { getCachedBoards, setCachedBoards } from '@/lib/utils/boardsCache';
-import { preloadSnapshots } from '@/lib/utils/snapshotCache';
+import { getCachedSnapshot, preloadSnapshots } from '@/lib/utils/snapshotCache';
 import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
 
 type BoardVisibilityFilter = 'all' | 'owned' | 'shared';
@@ -83,11 +84,13 @@ const timeAgo = (timestamp: number): string => {
 export default function DashboardPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const [mounted, setMounted] = useState(false);
   const [search, setSearch] = useState('');
   const [visibilityFilter, setVisibilityFilter] = useState<BoardVisibilityFilter>('all');
   const [sortBy, setSortBy] = useState<BoardSort>('last_modified');
   const [boards, setBoards] = useState<BoardWithOwner[]>([]);
   const [boardsLoading, setBoardsLoading] = useState(true);
+  const [membersLoading, setMembersLoading] = useState(true); // Track collaborators loading
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [boardMembersMap, setBoardMembersMap] = useState<Record<string, BoardMember[]>>({});
@@ -99,6 +102,10 @@ export default function DashboardPage() {
   const [openCollaboratorsDropdown, setOpenCollaboratorsDropdown] = useState<string | null>(null);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   const collaboratorsDropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Send heartbeat every 60s so other users know we're online
   usePresenceHeartbeat(user?.uid);
@@ -199,6 +206,7 @@ export default function DashboardPage() {
     if (cachedBoards && cachedBoards.length > 0) {
       setBoards(cachedBoards);
       setBoardsLoading(false);
+      // Keep membersLoading true until we fetch fresh member data
     }
 
     let cancelled = false;
@@ -249,7 +257,13 @@ export default function DashboardPage() {
 
             // Check which of these users are globally online
             const onlineSet = await fetchOnlineUserUids(Array.from(allUids));
-            if (!cancelled) setGlobalOnlineUids(onlineSet);
+            if (!cancelled) {
+              setGlobalOnlineUids(onlineSet);
+              setMembersLoading(false); // Members fully loaded
+            }
+          }).catch((err) => {
+            console.error('Failed to load board members:', err);
+            if (!cancelled) setMembersLoading(false); // Still hide skeleton on error
           });
         }
       } catch (err) {
@@ -310,6 +324,19 @@ export default function DashboardPage() {
 
   const handleOpenBoard = useCallback(
     (boardId: string) => {
+      // Attempt to pass preloaded snapshot indicator to board page for instant loading
+      try {
+        const cachedSnapshot = getCachedSnapshot(boardId);
+        if (cachedSnapshot) {
+          // Store indicator in sessionStorage (temporary, cleared after board reads it)
+          // This signals to the board page that snapshot is already cached
+          sessionStorage.setItem(`board_preload_${boardId}`, 'ready');
+        }
+      } catch (err) {
+        // Ignore errors - board will load normally via network
+        console.warn('Failed to prepare snapshot indicator for instant load:', err);
+      }
+      
       // Navigate immediately — fire-and-forget the timestamp update
       router.push(`/board/${boardId}`);
       updateBoardInDb(boardId, {
@@ -397,19 +424,128 @@ export default function DashboardPage() {
     });
   }, [visibleBoards]);
 
-  if (authLoading || !user || (!user.emailVerified && !user.isAnonymous) || boardsLoading) {
+  if (!mounted || authLoading || !user || (!user.emailVerified && !user.isAnonymous)) {
     return (
-      <div className="relative flex h-screen w-full items-center justify-center overflow-hidden">
+      <div className="relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8 hide-scrollbar overflow-y-auto">
         <div className="neon-orb left-[-3rem] top-6 h-64 w-64 bg-cyan-300/45" />
         <div className="neon-orb right-[-3rem] top-20 h-80 w-80 bg-blue-300/40" />
         <div className="neon-orb bottom-[-5rem] left-[40%] h-72 w-72 bg-emerald-300/35" />
-        <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-5 py-3 text-sm font-medium text-slate-700">Loading workspace...</div>
+
+        {/* Real Header */}
+        <header className="relative z-20 mx-auto flex w-full max-w-[1200px] items-center justify-between rounded-3xl border border-slate-200/70 bg-white/90 px-6 py-4 shadow-[0_25px_80px_-40px_rgba(15,23,42,0.55)] backdrop-blur-3xl">
+          <div className="flex items-center gap-3">
+            <BrandLogo size="md" showText={false} logoClassName="h-14 w-auto drop-shadow-none" />
+            <div>
+              <p className="text-lg font-semibold text-slate-900">Collabry</p>
+              <p className="text-xs text-slate-500">Your workspace</p>
+            </div>
+          </div>
+          <div className="flex flex-1 items-center justify-end gap-3">
+            <div className="relative w-full max-w-xs">
+              <input
+                value=""
+                onChange={() => {}}
+                placeholder="Search boards or collaborators..."
+                disabled
+                className="w-full rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-2.5 pr-10 text-sm text-slate-700 outline-none transition focus:border-cyan-500 focus:bg-white"
+              />
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-4.35-4.35m1.45-5.65a6 6 0 11-12 0 6 6 0 0112 0z"
+                  />
+                </svg>
+              </span>
+            </div>
+            <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 via-cyan-500 to-emerald-500 text-xs font-bold tracking-wide text-white shadow-md shadow-cyan-200">
+              U
+            </div>
+          </div>
+        </header>
+
+        {/* Main Content - Only Board Cards Skeleton */}
+        <main className="relative z-10 mx-auto w-full max-w-[1200px]">
+          <section className="mt-8 space-y-6 rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-[0_35px_120px_-45px_rgba(15,23,42,0.65)]">
+            {/* Real Title and Button */}
+            <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200/70 pb-4">
+              <div>
+                <p className="text-3xl font-semibold text-slate-900">Your Boards</p>
+                <p className="mt-1 max-w-xl text-sm text-slate-500">
+                  Collaborate, brainstorm, and organize your ideas in real-time.
+                </p>
+              </div>
+              <button
+                disabled
+                className="rounded-2xl bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-200 opacity-60 cursor-not-allowed"
+              >
+                + New Board
+              </button>
+            </div>
+
+            {/* Real Filters */}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap gap-3">
+                <div className="flex flex-col gap-1 text-xs text-slate-500">
+                  <span className="font-semibold uppercase tracking-[0.3em] text-slate-400">Filter</span>
+                  <select
+                    disabled
+                    className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-cyan-500 focus:bg-white opacity-60 cursor-not-allowed"
+                  >
+                    <option value="all">All boards</option>
+                  </select>
+                </div>
+                <div className="flex flex-col gap-1 text-xs text-slate-500">
+                  <span className="font-semibold uppercase tracking-[0.3em] text-slate-400">Sort</span>
+                  <select
+                    disabled
+                    className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-cyan-500 focus:bg-white opacity-60 cursor-not-allowed"
+                  >
+                    <option value="last_modified">Last modified</option>
+                  </select>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">
+                Loading boards...
+              </p>
+            </div>
+
+            {/* ONLY Board Cards Skeleton */}
+            <div className="flex flex-col gap-4">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={`skeleton-${index}`}
+                  className="flex animate-pulse flex-col gap-4 rounded-[26px] border border-slate-200/70 bg-white/90 p-4 shadow-[0_20px_80px_-40px_rgba(15,23,42,0.45)] lg:flex-row lg:items-stretch"
+                >
+                  <div className="h-40 w-full flex-shrink-0 rounded-2xl border border-slate-200/70 bg-slate-100/70 lg:h-32 lg:w-52" />
+                  <div className="flex flex-1 flex-col justify-between gap-3">
+                    <div className="flex flex-col gap-2">
+                      <div className="h-5 w-1/2 rounded-full bg-slate-200/70" />
+                      <div className="h-3 w-1/3 rounded-full bg-slate-200/70" />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {/* Collaborator avatars skeleton */}
+                      <div className="flex -space-x-1.5">
+                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
+                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
+                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
+                      </div>
+                      <div className="h-3 w-24 rounded-full bg-slate-200/70" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </main>
       </div>
     );
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
+    <div className="relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8 hide-scrollbar overflow-y-auto">
       <div className="neon-orb left-[-3rem] top-6 h-64 w-64 bg-cyan-300/45" />
       <div className="neon-orb right-[-3rem] top-20 h-80 w-80 bg-blue-300/40" />
       <div className="neon-orb bottom-[-5rem] left-[40%] h-72 w-72 bg-emerald-300/35" />
@@ -502,7 +638,31 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-col gap-4">
-            {visibleBoards.length === 0 ? (
+            {boardsLoading || membersLoading ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={`skeleton-${index}`}
+                  className="flex animate-pulse flex-col gap-4 rounded-[26px] border border-slate-200/70 bg-white/90 p-4 shadow-[0_20px_80px_-40px_rgba(15,23,42,0.45)] lg:flex-row lg:items-stretch"
+                >
+                  <div className="h-40 w-full flex-shrink-0 rounded-2xl border border-slate-200/70 bg-slate-100/70 lg:h-32 lg:w-52" />
+                  <div className="flex flex-1 flex-col justify-between gap-3">
+                    <div className="flex flex-col gap-2">
+                      <div className="h-5 w-1/2 rounded-full bg-slate-200/70" />
+                      <div className="h-3 w-1/3 rounded-full bg-slate-200/70" />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {/* Collaborator avatars skeleton */}
+                      <div className="flex -space-x-1.5">
+                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
+                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
+                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
+                      </div>
+                      <div className="h-3 w-24 rounded-full bg-slate-200/70" />
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : visibleBoards.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-200/70 bg-slate-50/60 px-4 py-6 text-center text-sm text-slate-500">
                 {boards.length === 0
                   ? 'No boards yet. Create one to save a snapshot of your canvas.'
@@ -520,17 +680,7 @@ export default function DashboardPage() {
                     className="group flex flex-col gap-4 rounded-[26px] border border-slate-200/70 bg-white/90 p-4 shadow-[0_20px_80px_-40px_rgba(15,23,42,0.45)] transition hover:shadow-[0_30px_100px_-40px_rgba(15,23,42,0.55)] lg:flex-row lg:items-stretch"
                   >
                     <div className="relative h-40 w-full flex-shrink-0 overflow-hidden rounded-2xl border border-slate-200/70 bg-slate-100 shadow-inner lg:w-52 lg:h-auto">
-                      {board.thumbnail ? (
-                        <img
-                          src={board.thumbnail}
-                          alt={`${board.title} snapshot`}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wide text-slate-400">
-                          No snapshot yet
-                        </div>
-                      )}
+                      <BoardSnapshotPreview boardId={board.id} />
                     </div>
                     <div className="flex flex-1 flex-col justify-between gap-3">
                       <div className="flex flex-col gap-1">
@@ -636,25 +786,29 @@ export default function DashboardPage() {
                             </div>
                           )}
                         </div>
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setInviteTarget({ id: board.id, title: board.title });
-                            }}
-                            className="rounded-full border border-slate-200 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
-                          >
-                            Share
-                          </button>
+                        <div className="flex items-center gap-2">
                           {board.ownerUid === user?.uid ? (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setDeleteTarget({ id: board.id, title: board.title });
                               }}
-                              className="rounded-full border border-red-200 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-red-500 transition hover:border-red-300 hover:text-red-600"
+                              className="flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white text-red-500 transition hover:border-red-300 hover:text-red-600"
+                              aria-label={`Delete ${board.title}`}
                             >
-                              Delete
+                              <svg
+                                className="h-4 w-4"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                />
+                              </svg>
                             </button>
                           ) : (
                             <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600">

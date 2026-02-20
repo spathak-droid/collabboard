@@ -1,5 +1,5 @@
 /**
- * Custom hook for Yjs real-time sync
+ * Custom hook for Yjs real-time sync with auto-save
  *
  * Creates a fresh YjsProvider per mount (per board). The Hocuspocus Database
  * extension on the server loads/stores snapshots — the client doesn't load
@@ -8,6 +8,9 @@
  * However, we can preload snapshots from the dashboard for faster initial rendering.
  * The preloaded snapshot is applied before connecting, allowing instant display
  * while the server syncs any differences.
+ * 
+ * AUTO-SAVE: Snapshots are automatically saved to Supabase Storage every 30 seconds
+ * to ensure persistence and enable fast board loading.
  */
 
 'use client';
@@ -16,6 +19,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { YjsProvider } from '@/lib/yjs/provider';
 import { getUserColor } from '@/lib/utils/colors';
 import { getCachedSnapshot } from '@/lib/utils/snapshotCache';
+import { saveSnapshot } from '@/lib/yjs/sync';
 import type { WhiteboardObject } from '@/types/canvas';
 import type { ConnectionStatus, AwarenessState } from '@/types/yjs';
 
@@ -118,7 +122,73 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
     // Load initial objects (may be empty until server syncs the snapshot)
     setObjects(provider.getAllObjects());
 
+    // --- AUTO-SAVE: Save snapshot every 30 seconds (per PRD requirement) ---
+    let saveTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let hasChanges = false;
+    let hasSavedInitial = false;
+
+    // Save initial snapshot immediately if objects exist (ensures dashboard can preload)
+    // This prevents "no snapshot yet" errors when users create boards
+    const saveInitialSnapshot = async () => {
+      if (hasSavedInitial) return;
+      
+      try {
+        await saveSnapshot(boardId, provider.ydoc, userId);
+        hasSavedInitial = true;
+        console.log(`[Yjs Auto-save] Initial snapshot saved for board ${boardId}`);
+      } catch (error) {
+        console.error('[Yjs Auto-save] Failed to save initial snapshot:', error);
+      }
+    };
+
+    // Save initial snapshot after a short delay (allow server sync to complete first)
+    const initialSaveTimeout = setTimeout(() => {
+      saveInitialSnapshot();
+    }, 2000); // 2 seconds after connection
+
+    // Mark changes when objects change
+    const markChanges = () => {
+      hasChanges = true;
+      // If this is the first change and we haven't saved yet, save immediately
+      if (!hasSavedInitial) {
+        saveInitialSnapshot();
+      }
+    };
+    provider.onObjectsChange(markChanges);
+
+    const scheduleSave = () => {
+      saveTimeoutId = setTimeout(async () => {
+        if (hasChanges && provider.ydoc) {
+          try {
+            await saveSnapshot(boardId, provider.ydoc, userId);
+            hasChanges = false;
+            setHasUnsavedChanges(false);
+            console.log(`[Yjs Auto-save] Snapshot saved for board ${boardId}`);
+          } catch (error) {
+            console.error('[Yjs Auto-save] Failed to save snapshot:', error);
+          }
+        }
+        // Schedule next save
+        scheduleSave();
+      }, 30000); // 30 seconds
+    };
+
+    // Start auto-save cycle
+    scheduleSave();
+
     return () => {
+      if (initialSaveTimeout) {
+        clearTimeout(initialSaveTimeout);
+      }
+      if (saveTimeoutId) {
+        clearTimeout(saveTimeoutId);
+      }
+      // Save one final time on unmount if there are unsaved changes
+      if (hasChanges && provider.ydoc) {
+        saveSnapshot(boardId, provider.ydoc, userId).catch((error) => {
+          console.error('[Yjs Auto-save] Failed to save final snapshot on unmount:', error);
+        });
+      }
       unsubObjects();
       unsubStatus();
       unsubAwareness();

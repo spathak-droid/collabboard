@@ -39,7 +39,7 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
   const panStartPos = useRef({ x: 0, y: 0 });
   const isSelecting = useRef(false);
   
-  const { scale, position, setScale, setPosition, resetView, gridMode, activeTool, selectionRect, setSelectionRect } = useCanvasStore();
+  const { scale, position, setScale, setPosition, gridMode, activeTool, selectionRect, setSelectionRect } = useCanvasStore();
   const isInlineEditing = () => typeof document !== 'undefined' && !!document.getElementById('inline-shape-editor');
   
   // Set canvas dimensions
@@ -131,16 +131,15 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
     [scale, position, setScale, setPosition]
   );
   
-  // Handle double-click to reset view
+  // Handle double-click - disabled to prevent accidental zoom resets
   const handleDblClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       if (isInlineEditing()) return;
-      // Only reset if clicking on background (not on objects)
-      if (e.target === e.target.getStage()) {
-        resetView();
-      }
+      // Double-click on canvas background is now disabled
+      // Users can use the zoom controls instead for intentional zoom resets
+      // This prevents accidental zoom resets when double-clicking on empty space
     },
-    [resetView]
+    []
   );
   
   // Handle mouse down - start selection rectangle or panning

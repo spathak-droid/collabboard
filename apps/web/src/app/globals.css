@@ -55,6 +55,10 @@ body {
   height: 100%;
   overflow-x: hidden;
   zoom: 1; /* Reset any inherited zoom */
+  
+  /* Prevent overscroll bounce effect (rubber band scrolling) */
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 ::selection {
@@ -125,5 +129,17 @@ body {
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  
+  /* Hide scrollbar while keeping scroll functionality */
+  .hide-scrollbar {
+    /* Firefox */
+    scrollbar-width: none;
+    /* Safari and Chrome */
+    -ms-overflow-style: none;
+  }
+  
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 }

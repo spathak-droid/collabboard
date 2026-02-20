@@ -67,6 +67,20 @@ export default function BoardPage() {
   const titleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usersDropdownRef = useRef<HTMLDivElement>(null);
   
+  // Check if snapshot was preloaded from dashboard (for instant loading)
+  const preloadIndicator = useRef<string | null>(null);
+  if (typeof window !== 'undefined' && !preloadIndicator.current) {
+    try {
+      preloadIndicator.current = sessionStorage.getItem(`board_preload_${boardId}`);
+      if (preloadIndicator.current) {
+        // Clear immediately to avoid stale reads on refresh
+        sessionStorage.removeItem(`board_preload_${boardId}`);
+      }
+    } catch {
+      // Ignore sessionStorage errors
+    }
+  }
+  
   // Initialize Yjs connection
   const {
     objects,
@@ -86,6 +100,8 @@ export default function BoardPage() {
     boardId,
     userId: user?.uid || '',
     userName: user?.displayName || user?.email || 'Anonymous',
+    // preloadedSnapshot is fetched from cache inside useYjs if available
+    // The preloadIndicator ensures cache is used (already preloaded by dashboard)
   });
 
   // Initialize dedicated cursor sync (bypasses Yjs for ultra-low latency)
@@ -233,11 +249,12 @@ export default function BoardPage() {
     if (hasAutoFittedRef.current || !mounted) return;
     
     // If no objects yet, wait a bit to see if they load
+    // Reduced timeout from 1000ms to 300ms for faster loading when snapshot is preloaded
     if (objects.length === 0) {
       const timer = setTimeout(() => {
-        // If still no objects after 1 second, show canvas at default zoom
+        // If still no objects after 300ms, show canvas at default zoom
         hasAutoFittedRef.current = true;
-      }, 1000);
+      }, 300);
       return () => clearTimeout(timer);
     }
     

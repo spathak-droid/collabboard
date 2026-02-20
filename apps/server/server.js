@@ -22,6 +22,8 @@ import { traceable } from 'langsmith/traceable';
 import dotenv from 'dotenv';
 import { AI_SYSTEM_PROMPT, AI_TOOLS, buildAIContext } from './utils/ai-tools.js';
 import { orchestrateAgents, continueOrchestration } from './utils/agent-orchestrator.js';
+import { createGeminiClient } from './utils/gemini-adapter.js';
+import { routeCommand, executeSingleAgent, executeMiniAgent } from './utils/command-router.js';
 
 dotenv.config();
 
@@ -108,15 +110,27 @@ cursorWss.on('connection', (ws, request, boardId, userId, userName) => {
 // ── AI Assistant WebSocket (path-based, SAME PORT) ──────────
 const aiWss = new WebSocketServer({ noServer: true });
 
+// Check which AI provider is configured
 const openaiApiKey = process.env.OPENAI_API_KEY || '';
+const geminiApiKey = process.env.GOOGLE_GEMINI_API_KEY || '';
 let openai = null;
+let aiProvider = 'none';
+
 const langsmithEnabled = process.env.LANGSMITH_TRACING === 'true' && !!process.env.LANGSMITH_API_KEY;
+
 if (openaiApiKey) {
+  // Use OpenAI (prioritized)
   const rawClient = new OpenAI({ apiKey: openaiApiKey });
   openai = langsmithEnabled ? wrapOpenAI(rawClient) : rawClient;
-  console.log(`🤖 OpenAI client initialized${langsmithEnabled ? ' (LangSmith tracing ON)' : ''}`);
+  aiProvider = 'openai';
+  console.log(`🤖 OpenAI client initialized (gpt-4o-mini)${langsmithEnabled ? ' (LangSmith tracing ON)' : ''}`);
+} else if (geminiApiKey) {
+  // Fall back to Gemini
+  openai = createGeminiClient(geminiApiKey, 'gemini-2.5-flash');
+  aiProvider = 'gemini';
+  console.log(`🤖 Google Gemini client initialized (gemini-2.5-flash)${langsmithEnabled ? ' (LangSmith tracing ON)' : ''}`);
 } else {
-  console.warn('⚠️  No OPENAI_API_KEY — AI Assistant disabled');
+  console.warn('⚠️  No AI API key found (OPENAI_API_KEY or GOOGLE_GEMINI_API_KEY) — AI Assistant disabled');
 }
 
 /**
@@ -233,7 +247,7 @@ const callOpenAI = traceable(
 
     const startTime = Date.now();
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1-nano',
       messages,
       tools: AI_TOOLS,
       tool_choice: 'auto',
@@ -295,7 +309,7 @@ const callOpenAI = traceable(
         ];
 
         const response2 = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
+          model: 'gpt-4.1-nano',
           messages: messages2,
           temperature: 0.3,
         });
@@ -425,29 +439,82 @@ async function handleAIMessage(ws, data) {
         executeAnalyzeObjectsServerSide
       );
     } else {
-      // Start new orchestration
-      console.log('🎯 Starting multi-agent orchestration');
-      result = await orchestrateAgents(
-        openai,
-        message,
-        boardState,
-        context,
-        executeAnalyzeObjectsServerSide,
-        progressCallback  // Pass the callback
-      );
+      // Smart routing: Choose optimal execution path
+      const route = routeCommand(message, selectedIds?.length > 0);
+      
+      if (route.type === 'mini') {
+        // Level 1: Mini-agent (ultra-fast, ~300-500ms)
+        console.log(`⚡⚡ MINI-AGENT ROUTE: ${route.reason}`);
+        
+        result = await executeMiniAgent(
+          openai,
+          route.agent,
+          message,
+          boardState,
+          context,
+          executeAnalyzeObjectsServerSide
+        );
+        
+        // Format result to match orchestrator output
+        result = {
+          toolCalls: result.toolCalls || [],
+          summary: result.message || result.summary,
+          needsFollowUp: false,
+          progressSent: false,
+        };
+      } else if (route.type === 'single') {
+        // Level 2: Single worker agent (fast, ~800ms)
+        console.log(`⚡ FAST PATH: ${route.reason}`);
+        
+        result = await executeSingleAgent(
+          openai,
+          route.agent,
+          message,
+          boardState,
+          context,
+          executeAnalyzeObjectsServerSide
+        );
+        
+        // Format result to match orchestrator output
+        result = {
+          toolCalls: result.toolCalls || [],
+          summary: result.message || result.summary,
+          needsFollowUp: false,
+          progressSent: false,
+        };
+      } else {
+        // Level 3: Full orchestration (complex, 1500ms+)
+        console.log(`🎯 ORCHESTRATION: ${route.reason}`);
+        result = await orchestrateAgents(
+          openai,
+          message,
+          boardState,
+          context,
+          executeAnalyzeObjectsServerSide,
+          progressCallback
+        );
+      }
     }
 
     // Send final response only if we didn't send progress updates
     // (if progress was sent, each step already got its own message)
     if (!result.progressSent) {
-      ws.send(JSON.stringify({
+      const response = {
         type: 'result',
         actions: result.toolCalls || [],
         assistantMessage: result.summary || result.supervisorPlan?.summary || "I've completed the tasks",
         requiresFollowUp: result.needsFollowUp || false,
         remainingTasks: result.remainingTasks || null,
         supervisorPlan: result.supervisorPlan || null,
-      }));
+      };
+      
+      // DEBUG: Log color changes being sent to client
+      const colorChanges = response.actions.filter(a => a.name === 'changeColor');
+      if (colorChanges.length > 0) {
+        console.log('[SERVER SEND] changeColor actions:', JSON.stringify(colorChanges, null, 2));
+      }
+      
+      ws.send(JSON.stringify(response));
     } else {
       // Progress updates were sent, just send completion signal
       ws.send(JSON.stringify({
@@ -596,7 +663,7 @@ httpServer.listen(port, () => {
   console.log(`🖱️  Cursors: ws://0.0.0.0:${port}/cursor/{boardId}`);
   console.log(`🤖 AI Assistant: ws://0.0.0.0:${port}/ai/{boardId}`);
   console.log(`💾 Supabase: ${supabase ? 'connected' : 'disabled'}`);
-  console.log(`🤖 OpenAI: ${openai ? 'enabled' : 'disabled'}`);
+  console.log(`🤖 AI Provider: ${aiProvider === 'gemini' ? 'Google Gemini (Flash)' : aiProvider === 'openai' ? 'OpenAI (GPT-4o-mini)' : 'disabled'}`);
   console.log(`🗜️  Compression: enabled`);
   console.log(`✅ Single-port mode (Railway compatible)`);
   console.log('========================================');

@@ -34,7 +34,14 @@ export function generateResponse(context: ResponseContext): string {
   // Count what was done
   const createdCount = executionResult.createdIds.length;
   const modifiedCount = executionResult.modifiedIds.length;
-  const deletedCount = toolCalls.filter(tc => tc.name === 'deleteObject').length;
+  
+  // Count actual number of objects deleted (not number of deleteObject calls)
+  const deletedCount = toolCalls
+    .filter(tc => tc.name === 'deleteObject')
+    .reduce((total, tc) => {
+      const args = tc.arguments as { objectIds?: string[] };
+      return total + (args.objectIds?.length || 0);
+    }, 0);
 
   // Generate response based on what happened
   const actionParts: string[] = [];

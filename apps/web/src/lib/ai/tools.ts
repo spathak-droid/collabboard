@@ -87,6 +87,11 @@ export interface AnalyzeObjectsArgs {
   objectIds?: string[];
 }
 
+export interface FitFrameToContentsArgs {
+  frameId: string;
+  padding?: number;
+}
+
 // getBoardState and analyzeObjects take no/optional arguments — read-only tools
 
 export type ToolName =
@@ -98,11 +103,14 @@ export type ToolName =
   | 'createConnector'
   | 'moveObject'
   | 'resizeObject'
+  | 'rotateObject'
   | 'updateText'
   | 'changeColor'
   | 'deleteObject'
   | 'getBoardState'
   | 'arrangeInGrid'
+  | 'arrangeInGridAndResize'
+  | 'fitFrameToContents'
   | 'analyzeObjects';
 
 export type ToolArgs =
@@ -118,6 +126,7 @@ export type ToolArgs =
   | ChangeColorArgs
   | DeleteObjectArgs
   | ArrangeInGridArgs
+  | FitFrameToContentsArgs
   | AnalyzeObjectsArgs
   | Record<string, never>; // getBoardState
 
@@ -318,9 +327,30 @@ export const AI_TOOLS: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'rotateObject',
+      description: 'Rotate an existing object by a specified angle. Use when user says "rotate X by Y degrees" or "rotate 30 degrees".',
+      parameters: {
+        type: 'object',
+        properties: {
+          objectId: {
+            type: 'string',
+            description: 'ID of the object to rotate',
+          },
+          rotation: {
+            type: 'number',
+            description: 'Rotation angle in degrees (0-360)',
+          },
+        },
+        required: ['objectId', 'rotation'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'updateText',
       description:
-        'Update the text content of an existing sticky note or text element.',
+        'Update the text content of an existing sticky note, text element, text bubble, or frame name.',
       parameters: {
         type: 'object',
         properties: {
@@ -330,7 +360,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           newText: {
             type: 'string',
-            description: 'New text content',
+            description: 'New text content (or frame name for frames)',
           },
         },
         required: ['objectId', 'newText'],
@@ -378,7 +408,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'arrangeInGrid',
       description:
-        'Arrange the selected objects into an evenly spaced grid. Use when the user says "arrange in grid", "arrange these in a grid", "organize in a grid", etc. The layout engine computes positions deterministically.',
+        'Arrange the selected objects into an evenly spaced grid (positions only, keeps original sizes). Use when the user says "arrange in grid", "space them evenly", "organize in a grid", etc.',
       parameters: {
         type: 'object',
         properties: {
@@ -386,6 +416,25 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             type: 'array',
             items: { type: 'string' },
             description: 'Array of object IDs to arrange (the selected objects)',
+          },
+        },
+        required: ['objectIds'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'arrangeInGridAndResize',
+      description:
+        'Arrange objects in a grid AND resize them to perfectly fit the selection area. Use when the user says "resize and space them evenly", "resize to fit", "make them the same size and space evenly", etc.',
+      parameters: {
+        type: 'object',
+        properties: {
+          objectIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of object IDs to arrange and resize',
           },
         },
         required: ['objectIds'],
@@ -409,6 +458,28 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
         },
         required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'fitFrameToContents',
+      description:
+        'Automatically resize a frame to fit all objects contained within it, with proper padding. Use when the user says "resize to fit contents", "fit to contents", "resize frame to fit", "make frame fit the objects", "extend frame to fit", or similar. This tool automatically calculates the bounding box of all objects inside the frame and resizes it with padding.',
+      parameters: {
+        type: 'object',
+        properties: {
+          frameId: {
+            type: 'string',
+            description: 'ID of the frame to resize',
+          },
+          padding: {
+            type: 'number',
+            description: 'Padding in pixels around the contents (default 40)',
+          },
+        },
+        required: ['frameId'],
       },
     },
   },

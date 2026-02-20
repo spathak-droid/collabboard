@@ -27,6 +27,7 @@ export interface ChatMessage {
 interface UseAICommandsOptions {
   boardId: string;
   createObject: (obj: WhiteboardObject) => void;
+  createObjectsBatch: (objects: WhiteboardObject[]) => void;
   updateObject: (id: string, data: Partial<WhiteboardObject>) => void;
   deleteObjects: (ids: string[]) => void;
   objects: WhiteboardObject[];
@@ -38,7 +39,7 @@ interface UseAICommandsOptions {
 }
 
 export function useAICommands(options: UseAICommandsOptions) {
-  const { boardId, createObject, updateObject, deleteObjects, objects, userId, selectedIds = [], selectionArea = null } =
+  const { boardId, createObject, createObjectsBatch, updateObject, deleteObjects, objects, userId, selectedIds = [], selectionArea = null } =
     options;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -59,6 +60,8 @@ export function useAICommands(options: UseAICommandsOptions) {
   objectsRef.current = objects;
   const createObjectRef = useRef(createObject);
   createObjectRef.current = createObject;
+  const createObjectsBatchRef = useRef(createObjectsBatch);
+  createObjectsBatchRef.current = createObjectsBatch;
   const updateObjectRef = useRef(updateObject);
   updateObjectRef.current = updateObject;
   const deleteObjectsRef = useRef(deleteObjects);
@@ -108,6 +111,7 @@ export function useAICommands(options: UseAICommandsOptions) {
         
         const ops: BoardOperations = {
           createObject: createObjectRef.current,
+          createObjectsBatch: createObjectsBatchRef.current,
           updateObject: updateObjectRef.current,
           deleteObjects: deleteObjectsRef.current,
           objects: objectsRef.current,
@@ -166,8 +170,15 @@ export function useAICommands(options: UseAICommandsOptions) {
           supervisorPlan?: any;
         };
 
+        // DEBUG: Log color changes received from server
+        const colorChanges = actions.filter(a => a.name === 'changeColor');
+        if (colorChanges.length > 0) {
+          console.log('[CLIENT RECEIVE] changeColor actions:', JSON.stringify(colorChanges, null, 2));
+        }
+
         const ops: BoardOperations = {
           createObject: createObjectRef.current,
+          createObjectsBatch: createObjectsBatchRef.current,
           updateObject: updateObjectRef.current,
           deleteObjects: deleteObjectsRef.current,
           objects: objectsRef.current,
@@ -184,6 +195,17 @@ export function useAICommands(options: UseAICommandsOptions) {
           });
           actionSummary = executionResult.summary;
           createdIds = executionResult.createdIds;
+          
+          // Force immediate UI update for modified objects
+          // The Yjs observer will fire, but we want to ensure React re-renders immediately
+          if (executionResult.modifiedIds && executionResult.modifiedIds.length > 0) {
+            console.log(`[AI] Modified ${executionResult.modifiedIds.length} objects, forcing UI update`);
+            // Request animation frame to ensure Konva redraws after React updates
+            requestAnimationFrame(() => {
+              // The Yjs observer should have already triggered setObjects()
+              // This just ensures the frame completes
+            });
+          }
         }
 
         // If requires follow-up, send execution results back to server

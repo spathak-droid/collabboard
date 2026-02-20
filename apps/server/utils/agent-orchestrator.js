@@ -28,7 +28,7 @@ export async function createExecutionPlan(openai, userMessage, boardState, conte
   ];
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-4.1-nano',
     messages,
     temperature: 0.2,
     response_format: { type: 'json_object' },
@@ -90,7 +90,7 @@ export async function executeTask(openai, task, boardState, context, previousRes
   ];
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-4.1-nano',
     messages,
     tools: agent.tools,
     tool_choice: 'auto',
@@ -151,7 +151,7 @@ export async function executeTask(openai, task, boardState, context, previousRes
       ];
 
       const response2 = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4.1-nano',
         messages: messages2,
         temperature: 0.3,
       });
@@ -195,6 +195,7 @@ export async function executeTask(openai, task, boardState, context, previousRes
 
 /**
  * Orchestrate the entire multi-agent execution with streaming progress updates
+ * Supports parallel task execution for tasks with canRunInParallel: true
  */
 export async function orchestrateAgents(openai, userMessage, boardState, context, executeAnalyzeObjectsServerSide, progressCallback = null) {
   console.log('🎯 Starting agent orchestration');
@@ -206,49 +207,114 @@ export async function orchestrateAgents(openai, userMessage, boardState, context
     throw new Error('Invalid plan structure from Supervisor');
   }
 
-  // Step 2: Execute tasks sequentially with progress updates
+  // Step 2: Group tasks into parallel batches
+  const taskBatches = [];
+  let currentBatch = [];
+  
+  for (const task of plan.plan) {
+    // If task needs to wait, start a new batch
+    if (task.waitForPrevious && currentBatch.length > 0) {
+      taskBatches.push(currentBatch);
+      currentBatch = [task];
+    } else if (task.canRunInParallel && currentBatch.length > 0 && currentBatch[0].canRunInParallel) {
+      // Add to current parallel batch
+      currentBatch.push(task);
+    } else if (currentBatch.length > 0) {
+      // Start new batch
+      taskBatches.push(currentBatch);
+      currentBatch = [task];
+    } else {
+      currentBatch.push(task);
+    }
+  }
+  
+  if (currentBatch.length > 0) {
+    taskBatches.push(currentBatch);
+  }
+
+  console.log(`📦 Grouped ${plan.plan.length} tasks into ${taskBatches.length} batches`);
+  
+  // Step 3: Execute batches sequentially, tasks within batch in parallel
   const results = [];
   const allToolCalls = [];
+  let taskIndex = 0;
+  let progressWasSent = false; // Track if we actually sent progress updates
   
-  for (let i = 0; i < plan.plan.length; i++) {
-    const task = plan.plan[i];
+  for (let batchIdx = 0; batchIdx < taskBatches.length; batchIdx++) {
+    const batch = taskBatches[batchIdx];
     
-    // If task needs to wait for previous task, we need updated board state
-    // This will be handled by the client in the two-step flow
-    if (task.waitForPrevious && i > 0) {
-      console.log(`⏸️  Task ${i + 1} needs results from previous task - marking for follow-up`);
-      // Return what we have so far and signal need for follow-up
+    // Check if any task in this batch needs to wait for previous
+    const needsWait = batch.some(t => t.waitForPrevious);
+    if (needsWait && batchIdx > 0) {
+      console.log(`⏸️  Batch ${batchIdx + 1} needs results from previous batch - marking for follow-up`);
       return {
         partialResults: results,
         toolCalls: allToolCalls,
         needsFollowUp: true,
-        remainingTasks: plan.plan.slice(i),
+        remainingTasks: plan.plan.slice(taskIndex),
         supervisorPlan: plan,
       };
     }
     
-    // Execute the task
-    const result = await executeTask(openai, task, boardState, context, results, executeAnalyzeObjectsServerSide);
-    results.push(result);
+    // Execute all tasks in this batch in parallel
+    console.log(`⚡ Executing batch ${batchIdx + 1}/${taskBatches.length} with ${batch.length} parallel task(s)`);
     
-    if (result.success && result.toolCalls) {
-      allToolCalls.push(...result.toolCalls);
+    const batchPromises = batch.map(task => 
+      executeTask(openai, task, boardState, context, results, executeAnalyzeObjectsServerSide)
+    );
+    
+    const batchResults = await Promise.all(batchPromises);
+    
+    // Aggregate all tool calls from this parallel batch
+    const batchToolCalls = [];
+    let batchCreatedCount = 0;
+    
+    // Collect results
+    for (let i = 0; i < batchResults.length; i++) {
+      const result = batchResults[i];
+      const task = batch[i];
       
-      // Send progress update after each task
-      if (progressCallback && result.toolCalls.length > 0) {
-        const clientToolCalls = result.toolCalls.filter(tc => tc.name !== 'analyzeObjects');
-        if (clientToolCalls.length > 0) {
-          progressCallback({
-            type: 'progress',
-            step: i + 1,
-            totalSteps: plan.plan.length,
-            task: task.task,
-            actions: clientToolCalls,
-            message: result.message,
-          });
-        }
+      results.push(result);
+      taskIndex++;
+      
+      if (result.success && result.toolCalls) {
+        allToolCalls.push(...result.toolCalls);
+        batchToolCalls.push(...result.toolCalls);
+        batchCreatedCount += result.toolCalls.length;
       }
     }
+    
+    // Send ONE progress update for the entire parallel batch
+    // Only send progress for parallel CREATE operations (multiple agents)
+    // For single-agent operations (DELETE, RESIZE, MODIFY), skip progress - just show final result
+    const isParallelCreate = batch.length > 1 && batch[0].agent === 'CreateAgent';
+    
+    if (progressCallback && batchToolCalls.length > 0 && isParallelCreate) {
+      const clientToolCalls = batchToolCalls.filter(tc => tc.name !== 'analyzeObjects');
+      if (clientToolCalls.length > 0) {
+        // Extract object type from first task
+        const firstTask = batch[0].task;
+        const typeMatch = firstTask.match(/Create \d+ (\w+)/);
+        const objectType = typeMatch ? typeMatch[1] : 'objects';
+        
+        progressCallback({
+          type: 'progress',
+          step: taskIndex,
+          totalSteps: plan.plan.length,
+          task: `Creating ${batchCreatedCount} ${objectType} (${batch.length} parallel agents)`,
+          actions: clientToolCalls,
+          message: `Created ${batchCreatedCount} ${objectType} using ${batch.length} parallel agents`,
+          batchSize: batch.length,
+          parallelExecution: true,
+        });
+        
+        progressWasSent = true; // Mark that we actually sent progress
+      }
+    }
+    // For non-parallel or non-CREATE operations, skip progress callback
+    // The final summary will be shown instead
+    
+    console.log(`✅ Batch ${batchIdx + 1} complete (${batch.length} tasks executed in parallel)`);
   }
 
   console.log('✨ Agent orchestration complete');
@@ -275,7 +341,8 @@ export async function orchestrateAgents(openai, userMessage, boardState, context
     toolCalls: clientToolCalls,
     needsFollowUp: false,
     summary: finalMessage,
-    progressSent: progressCallback ? true : false, // Track if we sent progress updates
+    progressSent: progressWasSent, // Only true if we actually sent progress
+    parallelBatchesUsed: taskBatches.length > 1 || (taskBatches.length === 1 && taskBatches[0].length > 1),
   };
 }
 

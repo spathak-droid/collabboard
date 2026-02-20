@@ -84,16 +84,57 @@ export class YjsProvider {
   updateObject(id: string, data: Partial<WhiteboardObject>) {
     const existing = this.objects.get(id);
     if (existing) {
-      this.objects.set(id, { ...existing, ...data } as WhiteboardObject);
+      const updated = { ...existing, ...data } as WhiteboardObject;
+      console.log('[Yjs Provider] Updating object:', id, 'with data:', data);
+      this.objects.set(id, updated);
+      console.log('[Yjs Provider] Object updated, new value:', updated);
+    } else {
+      console.warn('[Yjs Provider] Cannot update - object not found:', id);
     }
   }
 
   createObject(object: WhiteboardObject) {
     this.objects.set(object.id, object);
   }
+  
+  /**
+   * Create multiple objects in a single atomic transaction
+   * This is much more efficient than calling createObject() in a loop
+   * @param objects - Array of objects to create
+   */
+  createObjectsBatch(objects: WhiteboardObject[]) {
+    if (objects.length === 0) return;
+    
+    // Use Yjs transaction to batch all creates into a single update
+    // This means: 1 Yjs update + 1 WebSocket broadcast + 1 React render
+    // Instead of: N updates + N broadcasts + N renders
+    this.ydoc.transact(() => {
+      for (const obj of objects) {
+        this.objects.set(obj.id, obj);
+      }
+    });
+  }
 
   deleteObject(id: string) {
     this.objects.delete(id);
+  }
+
+  /**
+   * Delete multiple objects in a single Yjs transaction.
+   * This batches all deletions into one update for optimal performance.
+   * 
+   * Performance: 100 deletes = 1 Yjs update + 1 WebSocket broadcast + 1 React render
+   * Instead of: 100 updates + 100 broadcasts + 100 renders
+   */
+  deleteObjectsBatch(ids: string[]) {
+    if (ids.length === 0) return;
+    
+    // Use Yjs transaction to batch all deletions into a single update
+    this.ydoc.transact(() => {
+      for (const id of ids) {
+        this.objects.delete(id);
+      }
+    });
   }
 
   getObject(id: string): WhiteboardObject | undefined {
@@ -258,9 +299,10 @@ export class YjsProvider {
   // ── Y.Map observer ──────────────────────────────────────
 
   onObjectsChange(callback: () => void) {
-    this.objects.observe(callback);
+    // Use observeDeep to catch changes to map entries, not just key add/remove
+    this.objects.observeDeep(callback);
     return () => {
-      this.objects.unobserve(callback);
+      this.objects.unobserveDeep(callback);
     };
   }
 

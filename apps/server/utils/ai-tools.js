@@ -38,7 +38,7 @@ Shape colors: use hex strings like "#3B82F6" (blue), "#EF4444" (red), "#10B981" 
 - When asked to move objects, use the objectId from the board state.
 - When asked to "move all pink sticky notes", find them in the board state and issue moveObject calls for each.
 - When asked to delete, remove, or clear objects, use deleteObject with the objectId(s). NEVER use moveObject to move objects off-screen — always delete properly.
-- When resizing frames to fit contents, calculate the bounding box of contained objects and add 40px padding.
+- **Resize frame to fit contents:** When the user says "resize to fit contents", "fit to contents", "resize frame to fit", "make frame fit the objects", "extend frame to fit", "make frame bigger to fit", or similar, ALWAYS use the fitFrameToContents tool (pass the frame's objectId). This tool automatically calculates the bounding box of all objects inside the frame and resizes it with proper padding. DO NOT manually calculate dimensions with resizeObject.
 - **Selection context:** If the prompt includes "User Selection" with object IDs, the user has those objects selected. Commands like "format them", "space them", "arrange in a grid", "organize these" refer to ONLY those selected objects.
 - **Arrange in grid:** When the user says "arrange in grid", "arrange these in a grid", "organize in a grid", or similar, ALWAYS call the arrangeInGrid tool with the selected object IDs. Do NOT use moveObject for grid layout — use arrangeInGrid.
 - **Connect objects:** When the user says "connect these", "connect A to B", "draw a line between them", "connect two red triangles", "create shapes with connectors", "X connected by a line", "X connected by lines", or similar:
@@ -213,12 +213,12 @@ export const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'updateText',
-      description: 'Update the text content of an existing sticky note or text element.',
+      description: 'Update the text content of an existing sticky note, text element, text bubble, or frame name.',
       parameters: {
         type: 'object',
         properties: {
           objectId: { type: 'string', description: 'ID of the object to update' },
-          newText: { type: 'string', description: 'New text content' },
+          newText: { type: 'string', description: 'New text content (or frame name for frames)' },
         },
         required: ['objectId', 'newText'],
       },
@@ -298,6 +298,27 @@ export const AI_TOOLS = [
           },
         },
         required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'fitFrameToContents',
+      description: 'Automatically resize a frame to fit all objects contained within it, with proper padding. Use when the user says "resize to fit contents", "fit to contents", "resize frame to fit", "make frame fit the objects", "extend frame to fit", or similar. This tool automatically calculates the bounding box of all objects inside the frame and resizes it with 40px padding.',
+      parameters: {
+        type: 'object',
+        properties: {
+          frameId: {
+            type: 'string',
+            description: 'ID of the frame to resize',
+          },
+          padding: {
+            type: 'number',
+            description: 'Padding in pixels around the contents (default 40)',
+          },
+        },
+        required: ['frameId'],
       },
     },
   },

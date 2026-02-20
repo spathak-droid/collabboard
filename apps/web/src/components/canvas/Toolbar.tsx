@@ -203,14 +203,6 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
                   <span className={`h-4 w-4 rounded-full border-2 ${gridMode === 'dot' ? 'border-slate-900 bg-slate-900' : 'border-slate-300'}`} />
                 </button>
               </div>
-
-              <button
-                onClick={() => setSnapToGrid(!snapToGrid)}
-                className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50"
-              >
-                <span>Snap to grid</span>
-                {renderSwitch(snapToGrid)}
-              </button>
             </div>
           )}
         </div>

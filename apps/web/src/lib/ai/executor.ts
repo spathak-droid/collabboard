@@ -52,16 +52,53 @@ const COLOR_NAME_TO_HEX: Record<string, string> = {
 
 function resolveStickyColor(color?: string): string {
   if (!color) return STICKY_COLORS.YELLOW;
+  
+  // If it's a hex color, validate and return it
+  if (color.startsWith('#')) {
+    const hex = color.slice(1);
+    if ((hex.length === 3 || hex.length === 6) && /^[0-9A-Fa-f]+$/.test(hex)) {
+      return color.toUpperCase(); // Valid hex, normalize to uppercase
+    }
+    console.error(`Invalid hex color for sticky: ${color}, using fallback`);
+    return STICKY_COLORS.YELLOW;
+  }
+  
+  // Otherwise try color name lookup
   return COLOR_NAME_TO_HEX[color.toLowerCase()] ?? STICKY_COLORS.YELLOW;
 }
 
 function resolveShapeColor(color?: string): string {
   if (!color) return '#E5E7EB';
-  if (color.startsWith('#')) return color;
+  
+  // If it's a hex color, validate it
+  if (color.startsWith('#')) {
+    // Valid hex: #RGB (3 digits) or #RRGGBB (6 digits)
+    const hex = color.slice(1);
+    if (hex.length === 3 || hex.length === 6) {
+      // Check if all characters are valid hex digits
+      if (/^[0-9A-Fa-f]+$/.test(hex)) {
+        return color.toUpperCase(); // Normalize to uppercase
+      }
+    }
+    console.error(`Invalid hex color: ${color}, using fallback`);
+    return '#E5E7EB'; // Invalid hex, use fallback
+  }
+  
+  // Try to resolve color name
   return COLOR_NAME_TO_HEX[color.toLowerCase()] ?? '#E5E7EB';
 }
 
+/**
+ * Check if coordinates are explicitly provided (not undefined or null).
+ * Used to determine whether to use smart placement or explicit coordinates.
+ */
+function hasExplicitCoordinates(args: { x?: number | null; y?: number | null }): boolean {
+  return args.x != null && args.y != null; // != null checks for both null and undefined
+}
+
 // ── Smart placement algorithm ──────────────────────────────
+// Used ONLY when user doesn't specify explicit coordinates (x, y)
+// When coordinates are provided, objects are placed exactly where requested
 
 interface PlacementBox {
   x: number;
@@ -85,47 +122,38 @@ function boxesOverlap(a: PlacementBox, b: PlacementBox, margin = 20): boolean {
 /**
  * Find a free position near existing objects or a reference point.
  * Tries positions in a spiral pattern: right, down, left, up, expanding outward.
+ * Optimized for performance with large object counts.
+ * 
+ * @param existingBoxes - Pre-calculated placement boxes (for performance)
+ * @param width - Width of object to place
+ * @param height - Height of object to place
+ * @param preferredX - Preferred X coordinate
+ * @param preferredY - Preferred Y coordinate
  */
-function findFreePosition(
-  objects: WhiteboardObject[],
+function findFreePositionWithBoxes(
+  existingBoxes: PlacementBox[],
   width: number,
   height: number,
   preferredX = 200,
   preferredY = 200,
 ): { x: number; y: number } {
   // If no objects exist, use the preferred position
-  if (objects.length === 0) {
+  if (existingBoxes.length === 0) {
     return { x: preferredX, y: preferredY };
   }
 
-  // Get all existing object bounds (excluding lines)
-  const existingBoxes: PlacementBox[] = objects
-    .filter((obj) => obj.type !== 'line')
-    .map((obj) => {
-      if (obj.type === 'circle') {
-        const r = (obj as CircleShape).radius;
-        return {
-          x: obj.x - r,
-          y: obj.y - r,
-          width: r * 2,
-          height: r * 2,
-        };
-      }
-      if ('width' in obj && 'height' in obj) {
-        return {
-          x: obj.x,
-          y: obj.y,
-          width: obj.width,
-          height: obj.height,
-        };
-      }
-      // Fallback for objects without dimensions
-      return { x: obj.x, y: obj.y, width: 100, height: 100 };
-    });
-
-  // Try the preferred position first
+  // For large numbers of objects, use optimized overlap checking
+  // Pre-calculate bounds for faster checks
   const candidate: PlacementBox = { x: preferredX, y: preferredY, width, height };
-  let hasOverlap = existingBoxes.some((box) => boxesOverlap(candidate, box));
+  
+  // Optimized overlap check: early exit on first match
+  let hasOverlap = false;
+  for (const box of existingBoxes) {
+    if (boxesOverlap(candidate, box)) {
+      hasOverlap = true;
+      break; // Early exit - found overlap, no need to check rest
+    }
+  }
 
   if (!hasOverlap) {
     return { x: preferredX, y: preferredY };
@@ -146,17 +174,27 @@ function findFreePosition(
   let directionIndex = 0;
   let stepsTaken = 0;
 
-  // Try up to 100 positions (reasonable limit)
-  for (let i = 0; i < 100; i++) {
+  // For large object counts, limit search iterations to prevent slowdown
+  // With many objects, finding exact free space becomes expensive
+  // Instead, use a faster grid-based approach after initial attempts
+  const maxIterations = existingBoxes.length > 100 ? 20 : 100;
+
+  for (let i = 0; i < maxIterations; i++) {
     const dir = directions[directionIndex];
     x += dir.dx * STEP;
     y += dir.dy * STEP;
     stepsTaken++;
 
-    // Check if this position is free
+    // Check if this position is free - optimized with early exit
     candidate.x = x;
     candidate.y = y;
-    hasOverlap = existingBoxes.some((box) => boxesOverlap(candidate, box));
+    hasOverlap = false;
+    for (const box of existingBoxes) {
+      if (boxesOverlap(candidate, box)) {
+        hasOverlap = true;
+        break; // Early exit on first overlap
+      }
+    }
 
     if (!hasOverlap) {
       return { x, y };
@@ -174,15 +212,61 @@ function findFreePosition(
     }
   }
 
-  // Fallback: if no free position found, place far to the right of all objects
-  const maxX = Math.max(...existingBoxes.map((b) => b.x + b.width), preferredX);
+  // Fallback: if no free position found quickly, place far to the right of all objects
+  // Calculate maxX efficiently (single pass)
+  let maxX = preferredX;
+  for (const box of existingBoxes) {
+    const rightEdge = box.x + box.width;
+    if (rightEdge > maxX) {
+      maxX = rightEdge;
+    }
+  }
   return { x: maxX + STEP, y: preferredY };
+}
+
+/**
+ * Legacy wrapper for backward compatibility.
+ * Prefer using findFreePositionWithBoxes with pre-calculated boxes for better performance.
+ */
+function findFreePosition(
+  objects: WhiteboardObject[],
+  width: number,
+  height: number,
+  preferredX = 200,
+  preferredY = 200,
+): { x: number; y: number } {
+  // Convert objects to boxes
+  const existingBoxes: PlacementBox[] = objects
+    .filter((obj) => obj.type !== 'line')
+    .map((obj) => {
+      if (obj.type === 'circle') {
+        const r = (obj as CircleShape).radius;
+        return {
+          x: obj.x - r,
+          y: obj.y - r,
+          width: r * 2,
+          height: r * 2,
+        };
+      }
+      if ('width' in obj && 'height' in obj) {
+        return {
+          x: obj.x,
+          y: obj.y,
+          width: obj.width,
+          height: obj.height,
+        };
+      }
+      return { x: obj.x, y: obj.y, width: 100, height: 100 };
+    });
+  
+  return findFreePositionWithBoxes(existingBoxes, width, height, preferredX, preferredY);
 }
 
 // ── CRUD interface (matches useYjs hook shape) ──────────────
 
 export interface BoardOperations {
   createObject: (obj: WhiteboardObject) => void;
+  createObjectsBatch: (objects: WhiteboardObject[]) => void;
   updateObject: (id: string, data: Partial<WhiteboardObject>) => void;
   deleteObjects: (ids: string[]) => void;
   objects: WhiteboardObject[];
@@ -216,8 +300,53 @@ export function executeToolCalls(
   // This ensures smart placement considers them for collision detection
   const tempObjects: WhiteboardObject[] = [];
   
+  // Collect all objects to create for batch insertion
+  const objectsToCreate: WhiteboardObject[] = [];
+  
+  // Cache for placement boxes to avoid recalculating for each object
+  // This dramatically speeds up bulk creation (e.g., 500 objects)
+  let cachedBoxes: PlacementBox[] | null = null;
+  let cachedBoxesVersion = 0;
+  
   // Helper to get all objects including temporary ones
   const getAllObjects = () => [...ops.objects, ...tempObjects];
+  
+  // Optimized helper to get placement boxes with caching
+  // For bulk creation (many objects), this cache dramatically improves performance
+  const getPlacementBoxes = (): PlacementBox[] => {
+    const currentVersion = ops.objects.length + tempObjects.length;
+    if (cachedBoxes && cachedBoxesVersion === currentVersion) {
+      return cachedBoxes;
+    }
+    
+    // Recalculate boxes - incremental update would be faster but more complex
+    // For now, full recalculation is acceptable since we cache the result
+    const allObjs = getAllObjects();
+    cachedBoxes = allObjs
+      .filter((obj) => obj.type !== 'line')
+      .map((obj) => {
+        if (obj.type === 'circle') {
+          const r = (obj as CircleShape).radius;
+          return {
+            x: obj.x - r,
+            y: obj.y - r,
+            width: r * 2,
+            height: r * 2,
+          };
+        }
+        if ('width' in obj && 'height' in obj) {
+          return {
+            x: obj.x,
+            y: obj.y,
+            width: obj.width,
+            height: obj.height,
+          };
+        }
+        return { x: obj.x, y: obj.y, width: 100, height: 100 };
+      });
+    cachedBoxesVersion = currentVersion;
+    return cachedBoxes;
+  };
   
   // Helper to get bounding box from any object
   const getBoxFromObject = (obj: WhiteboardObject): PlacementBox => {
@@ -248,26 +377,14 @@ export function executeToolCalls(
         const args = call.arguments as CreateStickyNoteArgs;
         const id = generateId();
         
-        // If explicit coordinates provided, verify they're free
         let pos: { x: number; y: number };
-        if (args.x !== undefined && args.y !== undefined) {
-          // Check if the explicit position overlaps with existing objects
-          const candidate = { x: args.x, y: args.y, width: 200, height: 200 };
-          const allObjs = getAllObjects().filter(o => o.type !== 'line');
-          const hasOverlap = allObjs.some(obj => {
-            const box = getBoxFromObject(obj);
-            return boxesOverlap(candidate, box);
-          });
-          
-          if (hasOverlap) {
-            // Find nearest free position instead
-            pos = findFreePosition(getAllObjects(), 200, 200, args.x, args.y);
-          } else {
-            pos = { x: args.x, y: args.y };
-          }
+        if (hasExplicitCoordinates(args)) {
+          // Explicit coordinates provided - use them directly (user's exact request)
+          pos = { x: args.x!, y: args.y! };
         } else {
-          // No coordinates provided, find free position
-          pos = findFreePosition(getAllObjects(), 200, 200);
+          // No coordinates provided - use smart placement to avoid overlaps
+          // Uses cached boxes for better performance
+          pos = findFreePositionWithBoxes(getPlacementBoxes(), 200, 200);
         }
         
         const obj: StickyNote = {
@@ -284,8 +401,10 @@ export function executeToolCalls(
           createdBy: ops.userId,
           createdAt: Date.now(),
         };
-        ops.createObject(obj);
-        tempObjects.push(obj); // Track for collision detection
+        // Add to tempObjects BEFORE next iteration (for collision detection)
+        tempObjects.push(obj);
+        // Queue for batch creation
+        objectsToCreate.push(obj);
         createdIds.push(id);
         descriptions.push(`Created sticky note "${truncate(args.text)}"`);
         break;
@@ -296,9 +415,9 @@ export function executeToolCalls(
         const id = generateId();
         
         // Text has no dimensions, use small area for collision detection
-        const pos = args.x !== undefined && args.y !== undefined
-          ? { x: args.x, y: args.y }
-          : findFreePosition(getAllObjects(), 100, 30);
+        const pos = hasExplicitCoordinates(args)
+          ? { x: args.x!, y: args.y! }
+          : findFreePositionWithBoxes(getPlacementBoxes(), 100, 30);
         
         const obj: TextShape = {
           id,
@@ -312,7 +431,8 @@ export function executeToolCalls(
           createdBy: ops.userId,
           createdAt: Date.now(),
         };
-        ops.createObject(obj);
+        // Queued for batch creation
+        objectsToCreate.push(obj);
         tempObjects.push(obj); // Track for collision detection
         createdIds.push(id);
         descriptions.push(`Created text "${truncate(args.text)}"`);
@@ -327,9 +447,9 @@ export function executeToolCalls(
         const height = args.height || 100;
         
         // Find free position if x/y not specified
-        const pos = args.x !== undefined && args.y !== undefined
-          ? { x: args.x, y: args.y }
-          : findFreePosition(getAllObjects(), width, height);
+        const pos = hasExplicitCoordinates(args)
+          ? { x: args.x!, y: args.y! }
+          : findFreePositionWithBoxes(getPlacementBoxes(), width, height);
         
         const obj: TextBubbleShape = {
           id,
@@ -344,7 +464,8 @@ export function executeToolCalls(
           createdBy: ops.userId,
           createdAt: Date.now(),
         };
-        ops.createObject(obj);
+        // Queued for batch creation
+        objectsToCreate.push(obj);
         tempObjects.push(obj); // Track for collision detection
         createdIds.push(id);
         descriptions.push(`Created text bubble "${truncate(args.text)}"`);
@@ -361,26 +482,22 @@ export function executeToolCalls(
         const radius = args.type === 'circle' ? Math.round((width + height) / 4) : 0;
         const placementSize = args.type === 'circle' ? radius * 2 : width;
         
-        // If explicit coordinates provided, verify they're free
         let pos: { x: number; y: number };
-        if (args.x !== undefined && args.y !== undefined) {
-          // Check if the explicit position overlaps
-          const candidate = { x: args.x, y: args.y, width: placementSize, height: placementSize };
-          const allObjs = getAllObjects().filter(o => o.type !== 'line');
-          const hasOverlap = allObjs.some(obj => {
-            const box = getBoxFromObject(obj);
-            return boxesOverlap(candidate, box);
-          });
-          
-          if (hasOverlap) {
-            // Find nearest free position
-            pos = findFreePosition(getAllObjects(), placementSize, placementSize, args.x, args.y);
-          } else {
-            pos = { x: args.x, y: args.y };
-          }
+        if (hasExplicitCoordinates(args)) {
+          // Explicit coordinates provided - use them directly (user's exact request)
+          pos = { x: args.x!, y: args.y! };
         } else {
-          // No coordinates provided, find free position
-          pos = findFreePosition(getAllObjects(), placementSize, placementSize);
+          // No coordinates provided - use smart placement to avoid overlaps
+          // Uses cached boxes for better performance
+          pos = findFreePositionWithBoxes(getPlacementBoxes(), placementSize, placementSize);
+          
+          // CRITICAL FIX: Circles use center-based coordinates, not top-left
+          // findFreePositionWithBoxes returns top-left position of bounding box
+          // For circles, we need to offset to the center point
+          if (args.type === 'circle') {
+            pos.x += radius;
+            pos.y += radius;
+          }
         }
         
         const baseFields = {
@@ -404,7 +521,8 @@ export function executeToolCalls(
             stroke: '#000000',
             strokeWidth: 2,
           } as CircleShape;
-          ops.createObject(createdObj);
+          // Queued for batch creation
+          objectsToCreate.push(createdObj);
         } else if (args.type === 'triangle') {
           createdObj = {
             ...baseFields,
@@ -415,7 +533,8 @@ export function executeToolCalls(
             stroke: '#000000',
             strokeWidth: 2,
           } as TriangleShape;
-          ops.createObject(createdObj);
+          // Queued for batch creation
+          objectsToCreate.push(createdObj);
         } else if (args.type === 'star') {
           createdObj = {
             ...baseFields,
@@ -426,7 +545,8 @@ export function executeToolCalls(
             stroke: '#000000',
             strokeWidth: 2,
           } as StarShape;
-          ops.createObject(createdObj);
+          // Queued for batch creation
+          objectsToCreate.push(createdObj);
         } else {
           createdObj = {
             ...baseFields,
@@ -437,7 +557,8 @@ export function executeToolCalls(
             stroke: '#000000',
             strokeWidth: 2,
           } as RectShape;
-          ops.createObject(createdObj);
+          // Queued for batch creation
+          objectsToCreate.push(createdObj);
         }
 
         tempObjects.push(createdObj); // Track for collision detection
@@ -499,9 +620,10 @@ export function executeToolCalls(
               }
             }
           }
-        } else if (x === undefined || y === undefined) {
+        } else if (!hasExplicitCoordinates({ x, y })) {
           // Find free position if x/y not specified
-          const pos = findFreePosition(getAllObjects(), width, height, 100, 100);
+          // Use cached boxes for better performance
+          const pos = findFreePositionWithBoxes(getPlacementBoxes(), width, height, 100, 100);
           x = pos.x;
           y = pos.y;
         }
@@ -522,7 +644,8 @@ export function executeToolCalls(
           createdBy: ops.userId,
           createdAt: Date.now(),
         };
-        ops.createObject(obj);
+        // Queued for batch creation
+        objectsToCreate.push(obj);
         tempObjects.push(obj); // Track for collision detection
         createdIds.push(id);
         descriptions.push(`Created frame "${args.title}"`);
@@ -563,7 +686,8 @@ export function executeToolCalls(
           createdBy: ops.userId,
           createdAt: Date.now(),
         };
-        ops.createObject(obj);
+        // Queued for batch creation
+        objectsToCreate.push(obj);
         createdIds.push(id);
         descriptions.push('Created connector');
         break;
@@ -609,6 +733,23 @@ export function executeToolCalls(
         break;
       }
 
+      case 'rotateObject': {
+        const args = call.arguments as { objectId: string; rotation: number };
+        const target = ops.objects.find((o) => o.id === args.objectId);
+        if (!target) {
+          descriptions.push(
+            `Could not rotate object — ID "${args.objectId}" not found`,
+          );
+          break;
+        }
+        ops.updateObject(args.objectId, { rotation: args.rotation } as Partial<WhiteboardObject>);
+        modifiedIds.push(args.objectId);
+        descriptions.push(
+          `Rotated object to ${args.rotation} degrees`,
+        );
+        break;
+      }
+
       case 'updateText': {
         const args = call.arguments as UpdateTextArgs;
         const target = ops.objects.find((o) => o.id === args.objectId);
@@ -618,16 +759,29 @@ export function executeToolCalls(
           );
           break;
         }
-        ops.updateObject(args.objectId, {
-          text: args.newText,
-        } as Partial<WhiteboardObject>);
-        modifiedIds.push(args.objectId);
-        descriptions.push(`Updated text to "${truncate(args.newText)}"`);
+        
+        // Frames use 'name' property, other objects use 'text'
+        if (target.type === 'frame') {
+          ops.updateObject(args.objectId, {
+            name: args.newText,
+          } as Partial<WhiteboardObject>);
+          modifiedIds.push(args.objectId);
+          descriptions.push(`Updated frame name to "${truncate(args.newText)}"`);
+        } else {
+          ops.updateObject(args.objectId, {
+            text: args.newText,
+          } as Partial<WhiteboardObject>);
+          modifiedIds.push(args.objectId);
+          descriptions.push(`Updated text to "${truncate(args.newText)}"`);
+        }
         break;
       }
 
       case 'changeColor': {
         const args = call.arguments as ChangeColorArgs;
+        console.log('[changeColor] Received args:', JSON.stringify(args));
+        console.log('[changeColor] Color value:', args.color, 'Length:', args.color?.length);
+        
         const target = ops.objects.find((o) => o.id === args.objectId);
         if (!target) {
           descriptions.push(
@@ -637,17 +791,23 @@ export function executeToolCalls(
         }
 
         if (target.type === 'sticky') {
+          const resolvedColor = resolveStickyColor(args.color);
+          console.log(`[changeColor] Sticky: ${args.color} → ${resolvedColor} (Length: ${resolvedColor.length})`);
           ops.updateObject(args.objectId, {
-            color: resolveStickyColor(args.color),
+            color: resolvedColor,
           } as Partial<WhiteboardObject>);
         } else if (target.type === 'frame') {
+          const resolvedColor = resolveShapeColor(args.color);
+          console.log(`[changeColor] Frame: ${args.color} → ${resolvedColor} (Length: ${resolvedColor.length})`);
           // Frames: fill is the background color
           ops.updateObject(args.objectId, {
-            fill: resolveShapeColor(args.color),
+            fill: resolvedColor,
           } as Partial<WhiteboardObject>);
         } else if ('fill' in target) {
+          const resolvedColor = resolveShapeColor(args.color);
+          console.log(`[changeColor] Shape: ${args.color} → ${resolvedColor} (Length: ${resolvedColor.length})`);
           ops.updateObject(args.objectId, {
-            fill: resolveShapeColor(args.color),
+            fill: resolvedColor,
           } as Partial<WhiteboardObject>);
         }
         modifiedIds.push(args.objectId);
@@ -686,9 +846,163 @@ export function executeToolCalls(
 
       case 'arrangeInGrid': {
         const args = call.arguments as ArrangeInGridArgs;
-        const result = runArrangeInGrid(args.objectIds, ops, options?.selectionArea ?? null);
+        const result = runArrangeInGrid(args.objectIds, ops, options?.selectionArea ?? null, false);
         modifiedIds.push(...result.modifiedIds);
         descriptions.push(result.summary);
+        break;
+      }
+
+      case 'arrangeInGridAndResize': {
+        const args = call.arguments as ArrangeInGridArgs;
+        const result = runArrangeInGrid(args.objectIds, ops, options?.selectionArea ?? null, true);
+        modifiedIds.push(...result.modifiedIds);
+        descriptions.push(result.summary);
+        break;
+      }
+
+      case 'fitFrameToContents': {
+        const args = call.arguments as { frameId: string; padding?: number };
+        const padding = args.padding ?? 40;
+        
+        const frame = ops.objects.find((o) => o.id === args.frameId && o.type === 'frame');
+        if (!frame || frame.type !== 'frame') {
+          descriptions.push(
+            `Could not fit frame to contents — Frame ID "${args.frameId}" not found or is not a frame`,
+          );
+          break;
+        }
+
+        // Strategy 1: Use containedObjectIds if available
+        let containedObjects: WhiteboardObject[] = [];
+        const frameData = frame as any;
+        
+        if (frameData.containedObjectIds && Array.isArray(frameData.containedObjectIds) && frameData.containedObjectIds.length > 0) {
+          // Use the frame's tracked contained object IDs
+          containedObjects = ops.objects.filter((obj) => 
+            frameData.containedObjectIds.includes(obj.id) && obj.type !== 'line'
+          );
+        } else {
+          // Strategy 2: Find objects that overlap or are inside the frame bounds
+          const frameX = frame.x;
+          const frameY = frame.y;
+          const frameWidth = frameData.width || 0;
+          const frameHeight = frameData.height || 0;
+          const frameRight = frameX + frameWidth;
+          const frameBottom = frameY + frameHeight;
+          
+          containedObjects = ops.objects.filter((obj) => {
+            if (obj.id === args.frameId) return false; // Skip the frame itself
+            if (obj.type === 'line') return false; // Skip lines for bounding box calculation
+            
+            // Get object bounds
+            let objLeft = obj.x;
+            let objTop = obj.y;
+            let objRight = obj.x;
+            let objBottom = obj.y;
+            
+            if (obj.type === 'circle') {
+              const radius = (obj as any).radius || 50;
+              objLeft = obj.x - radius;
+              objTop = obj.y - radius;
+              objRight = obj.x + radius;
+              objBottom = obj.y + radius;
+            } else if (obj.type === 'star') {
+              // Stars have width/height but are centered
+              const starWidth = (obj as any).width || 180;
+              const starHeight = (obj as any).height || 180;
+              objLeft = obj.x;
+              objTop = obj.y;
+              objRight = obj.x + starWidth;
+              objBottom = obj.y + starHeight;
+            } else if ('width' in obj && 'height' in obj) {
+              objRight = obj.x + (obj as any).width;
+              objBottom = obj.y + (obj as any).height;
+            } else {
+              // Default size for objects without dimensions (like plain text)
+              objRight = obj.x + 100;
+              objBottom = obj.y + 30;
+            }
+            
+            // Check if object overlaps with frame (not just if top-left corner is inside)
+            const overlaps = !(
+              objRight < frameX ||   // Object is completely to the left
+              objLeft > frameRight || // Object is completely to the right
+              objBottom < frameY ||   // Object is completely above
+              objTop > frameBottom    // Object is completely below
+            );
+            
+            return overlaps;
+          });
+        }
+
+        if (containedObjects.length === 0) {
+          descriptions.push(
+            `Frame is empty — no objects found inside to fit`,
+          );
+          break;
+        }
+
+        // Calculate bounding box of all contained objects
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+
+        for (const obj of containedObjects) {
+          let objMinX = obj.x;
+          let objMinY = obj.y;
+          let objMaxX = obj.x;
+          let objMaxY = obj.y;
+
+          if (obj.type === 'circle') {
+            const radius = (obj as any).radius || 50;
+            objMinX = obj.x - radius;
+            objMinY = obj.y - radius;
+            objMaxX = obj.x + radius;
+            objMaxY = obj.y + radius;
+          } else if (obj.type === 'star') {
+            // Stars have width/height and are positioned at top-left
+            const starWidth = (obj as any).width || 180;
+            const starHeight = (obj as any).height || 180;
+            objMinX = obj.x;
+            objMinY = obj.y;
+            objMaxX = obj.x + starWidth;
+            objMaxY = obj.y + starHeight;
+          } else if ('width' in obj && 'height' in obj) {
+            objMaxX = obj.x + (obj as any).width;
+            objMaxY = obj.y + (obj as any).height;
+          } else {
+            // Default size for objects without dimensions (like plain text)
+            objMaxX = obj.x + 100;
+            objMaxY = obj.y + 30;
+          }
+
+          minX = Math.min(minX, objMinX);
+          minY = Math.min(minY, objMinY);
+          maxX = Math.max(maxX, objMaxX);
+          maxY = Math.max(maxY, objMaxY);
+        }
+
+        // Calculate new frame dimensions with padding
+        const newX = minX - padding;
+        const newY = minY - padding;
+        const newWidth = (maxX - minX) + (padding * 2);
+        const newHeight = (maxY - minY) + (padding * 2);
+
+        // Update frame
+        ops.updateObject(args.frameId, {
+          x: newX,
+          y: newY,
+          width: newWidth,
+          height: newHeight,
+        } as Partial<WhiteboardObject>);
+
+        modifiedIds.push(args.frameId);
+        descriptions.push(
+          `Resized frame to fit ${containedObjects.length} object(s) with ${padding}px padding (${Math.round(newWidth)}×${Math.round(newHeight)})`,
+        );
+        
+        console.log(`[fitFrameToContents] Resized frame ${args.frameId} to ${Math.round(newWidth)}×${Math.round(newHeight)}`);
         break;
       }
 
@@ -702,6 +1016,15 @@ export function executeToolCalls(
       default:
         descriptions.push(`Unknown tool: ${call.name}`);
     }
+  }
+  
+  // Batch create all queued objects for optimal performance
+  // This creates all objects in a single Yjs transaction:
+  // - 50 objects = 1 Yjs update (instead of 50)
+  // - 1 WebSocket broadcast (instead of 50) 
+  // - 1 React render (instead of 50)
+  if (objectsToCreate.length > 0) {
+    ops.createObjectsBatch(objectsToCreate);
   }
 
   return {
@@ -766,6 +1089,7 @@ function runArrangeInGrid(
   objectIds: string[],
   ops: BoardOperations,
   selectionArea: { x: number; y: number; width: number; height: number } | null,
+  shouldResize = false,
 ): { modifiedIds: string[]; summary: string } {
   const modifiedIds: string[] = [];
   const objects = objectIds
@@ -830,27 +1154,51 @@ function runArrangeInGrid(
     const rowIndex = Math.floor(i / columns);
     const colIndex = i % columns;
     
-    // Get visual dimensions accounting for rotation
-    const dim = getObjectVisualDimensions(obj, objectMap);
-    
     // Calculate cell position with gaps
     const cellX = boundingBox.x + colIndex * (cellWidth + GAP);
     const cellY = boundingBox.y + rowIndex * (cellHeight + GAP);
     
-    // Center object within cell
-    const targetRefX = cellX + (cellWidth - dim.width) / 2;
-    const targetRefY = cellY + (cellHeight - dim.height) / 2;
+    if (shouldResize) {
+      // RESIZE MODE: Make objects fit perfectly in cells
+      if (obj.type === 'circle') {
+        // For circles, use the smaller dimension to maintain aspect ratio
+        const newRadius = Math.min(cellWidth, cellHeight) / 2;
+        // Center the circle in the cell
+        const centerX = cellX + cellWidth / 2;
+        const centerY = cellY + cellHeight / 2;
+        ops.updateObject(obj.id, { 
+          x: centerX, 
+          y: centerY, 
+          radius: newRadius 
+        } as Partial<WhiteboardObject>);
+      } else if ('width' in obj && 'height' in obj) {
+        // For rectangles, stars, triangles, sticky notes - resize to fill cell
+        ops.updateObject(obj.id, {
+          x: cellX,
+          y: cellY,
+          width: cellWidth,
+          height: cellHeight,
+        } as Partial<WhiteboardObject>);
+      } else {
+        // For objects without dimensions (text), just position
+        ops.updateObject(obj.id, { x: cellX, y: cellY });
+      }
+    } else {
+      // POSITION-ONLY MODE: Keep original size, center in cell
+      const dim = getObjectVisualDimensions(obj, objectMap);
+      const targetRefX = cellX + (cellWidth - dim.width) / 2;
+      const targetRefY = cellY + (cellHeight - dim.height) / 2;
+      const newPos = calculatePositionForTarget(obj, targetRefX, targetRefY, objectMap);
+      ops.updateObject(obj.id, { x: newPos.x, y: newPos.y });
+    }
     
-    // Calculate actual object position to place visual bounds at target
-    const newPos = calculatePositionForTarget(obj, targetRefX, targetRefY, objectMap);
-
-    ops.updateObject(obj.id, { x: newPos.x, y: newPos.y });
     modifiedIds.push(obj.id);
   }
 
+  const action = shouldResize ? 'Arranged and resized' : 'Arranged';
   return {
     modifiedIds,
-    summary: `Arranged ${modifiedIds.length} objects in a ${columns}×${rows} grid`,
+    summary: `${action} ${modifiedIds.length} objects in a ${columns}×${rows} grid`,
   };
 }
 

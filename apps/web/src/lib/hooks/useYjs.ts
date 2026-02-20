@@ -49,7 +49,11 @@ export const useYjs = ({ boardId, userId, userName }: UseYjsOptions) => {
 
     // --- object change listener ---
     const unsubObjects = provider.onObjectsChange(() => {
-      setObjects(provider.getAllObjects());
+      const newObjects = provider.getAllObjects();
+      console.log('[useYjs] Objects changed, updating React state. Frame object:', 
+        newObjects.find(o => o.type === 'frame')
+      );
+      setObjects(newObjects);
       setHasUnsavedChanges(true);
     });
 
@@ -122,6 +126,10 @@ export const useYjs = ({ boardId, userId, userName }: UseYjsOptions) => {
   const createObject = useCallback((object: WhiteboardObject) => {
     providerRef.current?.createObject(object);
   }, []);
+  
+  const createObjectsBatch = useCallback((objects: WhiteboardObject[]) => {
+    providerRef.current?.createObjectsBatch(objects);
+  }, []);
 
   const updateObject = useCallback((id: string, data: Partial<WhiteboardObject>) => {
     providerRef.current?.updateObject(id, data);
@@ -132,7 +140,7 @@ export const useYjs = ({ boardId, userId, userName }: UseYjsOptions) => {
   }, []);
 
   const deleteObjects = useCallback((ids: string[]) => {
-    ids.forEach((id) => providerRef.current?.deleteObject(id));
+    providerRef.current?.deleteObjectsBatch(ids);
   }, []);
 
   const updateCursor = useCallback((x: number, y: number) => {
@@ -171,6 +179,7 @@ export const useYjs = ({ boardId, userId, userName }: UseYjsOptions) => {
     hasUnsavedChanges,
     boardTitle,
     createObject,
+    createObjectsBatch,
     updateObject,
     deleteObject,
     deleteObjects,

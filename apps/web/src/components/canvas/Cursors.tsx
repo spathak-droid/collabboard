@@ -11,7 +11,7 @@
 
 'use client';
 
-import { useEffect, useRef, memo } from 'react';
+import { useEffect, useRef, memo, useState } from 'react';
 import type { CursorPosition } from '@/lib/websocket/cursor-sync';
 
 interface AwarenessLike {
@@ -61,9 +61,15 @@ export const Cursors = memo(function Cursors({
   cursors: fastCursors,
   useFastCursors = true,
 }: CursorsProps) {
+  const [mounted, setMounted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const scaleRef = useRef(scale);
   const positionRef = useRef(position);
+
+  // Only render on client to avoid hydration mismatch
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   scaleRef.current = scale;
   positionRef.current = position;
@@ -250,6 +256,11 @@ export const Cursors = memo(function Cursors({
       cursorElements.clear();
     };
   }, [useFastCursors, awareness, currentUserId]);
+
+  // Don't render container until mounted to avoid hydration mismatch
+  if (!mounted) {
+    return null;
+  }
 
   return (
     <div

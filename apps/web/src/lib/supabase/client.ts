@@ -257,23 +257,33 @@ const PRESENCE_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
  * Called on sign-out and when the heartbeat hook unmounts.
  */
 export const clearPresence = async (userUid: string): Promise<void> => {
-  await supabase.from('user_presence').delete().eq('user_uid', userUid);
+  try {
+    await supabase.from('user_presence').delete().eq('user_uid', userUid);
+  } catch {
+    // Fail silently — non-critical
+  }
 };
 
 /**
  * Upsert the current user's heartbeat in user_presence.
  * Called every 60s while the user is logged in.
+ * Fails silently if table doesn't exist or connection fails.
  */
 export const heartbeatPresence = async (userUid: string): Promise<void> => {
-  const { error } = await supabase.from('user_presence').upsert(
-    { user_uid: userUid, last_seen_at: new Date().toISOString() },
-    { onConflict: 'user_uid' }
-  );
-  if (error) {
-    // Table may not exist yet — fail silently
-    if (!error.message?.includes('user_presence')) {
-      console.error('[supabase] heartbeatPresence failed:', error);
+  try {
+    const { error } = await supabase.from('user_presence').upsert(
+      { user_uid: userUid, last_seen_at: new Date().toISOString() },
+      { onConflict: 'user_uid' }
+    );
+    if (error) {
+      // Table may not exist yet or RLS policy issue — fail silently
+      if (!error.message?.includes('user_presence') && !error.message?.includes('relation') && !error.message?.includes('policy')) {
+        console.warn('[supabase] heartbeatPresence failed (non-critical):', error.message);
+      }
     }
+  } catch (err) {
+    // Network errors (ERR_CONNECTION_CLOSED, etc.) — fail silently
+    // This is non-critical functionality, don't disrupt the user experience
   }
 };
 
@@ -284,19 +294,24 @@ export const heartbeatPresence = async (userUid: string): Promise<void> => {
 export const fetchOnlineUserUids = async (userUids: string[]): Promise<Set<string>> => {
   if (userUids.length === 0) return new Set();
 
-  const cutoff = new Date(Date.now() - PRESENCE_TIMEOUT_MS).toISOString();
-  const { data, error } = await supabase
-    .from('user_presence')
-    .select('user_uid')
-    .in('user_uid', userUids)
-    .gte('last_seen_at', cutoff);
+  try {
+    const cutoff = new Date(Date.now() - PRESENCE_TIMEOUT_MS).toISOString();
+    const { data, error } = await supabase
+      .from('user_presence')
+      .select('user_uid')
+      .in('user_uid', userUids)
+      .gte('last_seen_at', cutoff);
 
-  if (error) {
-    // Table may not exist yet — return empty
+    if (error) {
+      // Table may not exist yet — return empty
+      return new Set();
+    }
+
+    return new Set((data ?? []).map((r: Record<string, unknown>) => r.user_uid as string));
+  } catch {
+    // Network error or other issue — return empty (non-critical)
     return new Set();
   }
-
-  return new Set((data ?? []).map((r: Record<string, unknown>) => r.user_uid as string));
 };
 
 // ── Board Invites ────────────────────────────────────────────

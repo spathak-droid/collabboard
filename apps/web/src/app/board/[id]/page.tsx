@@ -74,6 +74,7 @@ export default function BoardPage() {
     onlineUsers,
     awareness,
     createObject,
+    createObjectsBatch,
     updateObject,
     deleteObjects,
     updateCursor,
@@ -169,10 +170,10 @@ export default function BoardPage() {
 
   // Connector drawing state moved to useConnectorDrawing hook
   // Live drag/transform state moved to useObjectManipulation hook
-  // Track line points for live drag (for lines contained in frames)
+  // Track line points for live drag (for lines)
   const liveLinePointsRef = useRef<Map<string, number[]>>(new Map());
-  // Track initial frame position when drag starts (for calculating contained object deltas)
-  const frameDragStartRef = useRef<Map<string, { x: number; y: number; containedInitialPositions: Map<string, { x: number; y: number; points?: number[] }> }>>(new Map());
+  // Track initial frame position when drag starts
+  const frameDragStartRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const [isTransforming, setIsTransforming] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -433,6 +434,7 @@ export default function BoardPage() {
   const aiCommands = useAICommands({
     boardId,
     createObject,
+    createObjectsBatch,
     updateObject,
     deleteObjects,
     objects,
@@ -441,7 +443,21 @@ export default function BoardPage() {
     selectionArea: selectionAreaForAI,
   });
   const frameManagement = useFrameManagement(objects);
-  const manipulation = useObjectManipulation(objects, objectsMap, updateObject, frameManagement);
+  const manipulation = useObjectManipulation(objects, objectsMap, updateObject);
+  
+  // Clear live drag/transform refs when objects change from external sources (AI, other users)
+  // This ensures AI updates aren't overridden by stale live drag positions
+  useEffect(() => {
+    // When objects change, clear ALL live drag/transform overlays
+    // This is necessary because AI updates and external user updates should take precedence
+    // over any stale local drag/transform state
+    if (manipulation.liveDragRef.current.size > 0) {
+      manipulation.liveDragRef.current.clear();
+    }
+    if (manipulation.liveTransformRef.current.size > 0) {
+      manipulation.liveTransformRef.current.clear();
+    }
+  }, [objects, manipulation.liveDragRef, manipulation.liveTransformRef]);
 
   const handleShapeDragMoveWithBroadcast = useCallback(
     (shapeId: string, liveX: number, liveY: number) => {
@@ -829,101 +845,33 @@ export default function BoardPage() {
     return [...frames, ...others];
   }, [objects]);
 
-  // Check if any selected object is a frame, and if so, lock contained objects
-  const selectedFrameIds = useMemo(() => {
-    return selectedIds.filter((id: string) => {
-      const obj = objectsMap.get(id);
-      return obj?.type === 'frame';
-    });
-  }, [selectedIds, objectsMap]);
-
-  const isObjectLockedByFrame = useCallback((objectId: string): boolean => {
-    for (const frameId of selectedFrameIds) {
-      const frame = objectsMap.get(frameId);
-      if (frame?.type === 'frame' && frame.containedObjectIds?.includes(objectId)) {
-        return true;
-      }
-    }
-    return false;
-  }, [selectedFrameIds, objectsMap]);
+  // Frames are visual containers only - objects can move independently
 
   const updateFrameAndContents = useCallback(
     (frameId: string, updates: Partial<FrameType>) => {
+      // Frames are visual containers only - update frame only, objects move independently
       const frame = objectsMap.get(frameId);
       if (!frame || frame.type !== 'frame') {
         updateObject(frameId, updates);
         return;
       }
 
-      const prevX = frame.x;
-      const prevY = frame.y;
-      const nextX = typeof updates.x === 'number' ? updates.x : prevX;
-      const nextY = typeof updates.y === 'number' ? updates.y : prevY;
-      const deltaX = nextX - prevX;
-      const deltaY = nextY - prevY;
-      const isResizeOrRotate =
-        typeof updates.width === 'number' ||
-        typeof updates.height === 'number' ||
-        typeof updates.rotation === 'number';
-
-      // Clear live drag overlays once final values are persisted.
+      // Clear live drag overlays once final values are persisted
       manipulation.liveDragRef.current.delete(frameId);
       frameDragStartRef.current.delete(frameId);
-      
-      // Clear live drag for contained objects
-      if (frame.containedObjectIds) {
-        for (const containedId of frame.containedObjectIds) {
-          manipulation.liveDragRef.current.delete(containedId);
-          liveLinePointsRef.current.delete(containedId);
-        }
-      }
 
       updateObject(frameId, updates);
 
-      // Clear live drag broadcast for frame and contained objects
+      // Clear live drag broadcast for frame
       clearLiveDrag(frameId);
       clearCursorServerLiveDrag(frameId);
-      if (frame.containedObjectIds) {
-        for (const containedId of frame.containedObjectIds) {
-          clearLiveDrag(containedId);
-          clearCursorServerLiveDrag(containedId);
-        }
-      }
-      
-      // Move all contained objects when frame moves
-      if ((deltaX !== 0 || deltaY !== 0) && !isResizeOrRotate && frame.containedObjectIds) {
-        for (const containedId of frame.containedObjectIds) {
-          const containedObj = objectsMap.get(containedId);
-          if (!containedObj) continue;
-          
-          // Clear live drag overlay for contained object
-          manipulation.liveDragRef.current.delete(containedId);
-          
-          if (containedObj.type === 'line') {
-            // Line objects use points array instead of x/y
-            const line = containedObj as LineShape;
-            const newPoints = [
-              line.points[0] + deltaX,
-              line.points[1] + deltaY,
-              line.points[2] + deltaX,
-              line.points[3] + deltaY,
-            ];
-            updateObject(containedId, { points: newPoints });
-          } else {
-            // Regular objects use x/y
-            updateObject(containedId, {
-              x: containedObj.x + deltaX,
-              y: containedObj.y + deltaY,
-            });
-          }
-        }
-      }
     },
     [objectsMap, updateObject, clearLiveDrag, clearCursorServerLiveDrag]
   );
 
   const handleFrameDragMove = useCallback(
     (frameId: string, liveX: number, liveY: number) => {
+      // Frames are visual containers only - move frame only, objects move independently
       const frame = objectsMap.get(frameId);
       if (!frame || frame.type !== 'frame') {
         manipulation.liveDragRef.current.set(frameId, { x: liveX, y: liveY });
@@ -934,93 +882,20 @@ export default function BoardPage() {
       // Initialize drag start tracking if this is the first move
       let dragStart = frameDragStartRef.current.get(frameId);
       if (!dragStart) {
-        const containedInitialPositions = new Map<string, { x: number; y: number; points?: number[] }>();
-        if (frame.containedObjectIds) {
-          for (const containedId of frame.containedObjectIds) {
-            const containedObj = objectsMap.get(containedId);
-            if (!containedObj) continue;
-            if (containedObj.type === 'line') {
-              containedInitialPositions.set(containedId, { 
-                x: containedObj.x, 
-                y: containedObj.y,
-                points: [...(containedObj as LineShape).points]
-              });
-            } else {
-              containedInitialPositions.set(containedId, { 
-                x: containedObj.x, 
-                y: containedObj.y 
-              });
-            }
-          }
-        }
         dragStart = {
           x: frame.x,
           y: frame.y,
-          containedInitialPositions,
         };
         frameDragStartRef.current.set(frameId, dragStart);
       }
 
-      // Calculate delta from initial frame position
-      const deltaX = liveX - dragStart.x;
-      const deltaY = liveY - dragStart.y;
-
-      // Move frame visually during drag (persist on drag end).
+      // Move frame visually during drag (persist on drag end)
       manipulation.liveDragRef.current.set(frameId, { x: liveX, y: liveY });
-
-      // Move all contained objects during live drag
-      if ((deltaX !== 0 || deltaY !== 0) && frame.containedObjectIds) {
-        for (const containedId of frame.containedObjectIds) {
-          const initialPos = dragStart.containedInitialPositions.get(containedId);
-          if (!initialPos) continue;
-          
-          if (initialPos.points) {
-            // Line object - update points array
-            const newPoints = [
-              initialPos.points[0] + deltaX,
-              initialPos.points[1] + deltaY,
-              initialPos.points[2] + deltaX,
-              initialPos.points[3] + deltaY,
-            ];
-            liveLinePointsRef.current.set(containedId, newPoints);
-          } else {
-            // Regular object - update x/y
-            manipulation.liveDragRef.current.set(containedId, {
-              x: initialPos.x + deltaX,
-              y: initialPos.y + deltaY,
-            });
-          }
-        }
-      }
-
       manipulation.setDragTick((t: number) => t + 1);
 
-      // Broadcast live drag for remote users: frame + all contained objects
+      // Broadcast live drag for remote users: frame only
       if (cursorSyncConnected) sendCursorServerLiveDrag(frameId, liveX, liveY);
       broadcastLiveDrag(frameId, liveX, liveY);
-      if (frame.containedObjectIds) {
-        for (const containedId of frame.containedObjectIds) {
-          const initialPos = dragStart.containedInitialPositions.get(containedId);
-          if (!initialPos) continue;
-          const containedObj = objectsMap.get(containedId);
-          if (!containedObj) continue;
-          if (initialPos.points) {
-            const newPoints = [
-              initialPos.points[0] + deltaX,
-              initialPos.points[1] + deltaY,
-              initialPos.points[2] + deltaX,
-              initialPos.points[3] + deltaY,
-            ];
-            if (cursorSyncConnected) sendCursorServerLiveDrag(containedId, 0, 0, { points: newPoints });
-            broadcastLiveDrag(containedId, 0, 0, { points: newPoints } as any);
-          } else {
-            const newX = initialPos.x + deltaX;
-            const newY = initialPos.y + deltaY;
-            if (cursorSyncConnected) sendCursorServerLiveDrag(containedId, newX, newY);
-            broadcastLiveDrag(containedId, newX, newY);
-          }
-        }
-      }
     },
     [objectsMap, cursorSyncConnected, sendCursorServerLiveDrag, broadcastLiveDrag]
   );
@@ -1670,14 +1545,14 @@ export default function BoardPage() {
           <div className="relative" ref={usersDropdownRef}>
             <button
               onClick={() => setShowAllUsers((prev: boolean) => !prev)}
-              className="flex items-center focus:outline-none"
+              className="flex items-center gap-2 px-2 py-1.5 rounded-full bg-gray-100 border border-gray-200 hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
               title="View collaborators"
             >
               <div className="flex -space-x-2">
                 {visibleCollabs.map((c, i) => (
                   <div
                     key={c.uid}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white border-2 border-white shadow-sm relative hover:z-20 hover:scale-110 transition-transform"
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white border-2 border-gray-100 shadow-sm relative hover:z-20 hover:scale-110 transition-transform"
                     style={{
                       backgroundColor: c.color,
                       zIndex: MAX_VISIBLE - i,
@@ -1690,12 +1565,22 @@ export default function BoardPage() {
 
                 {overflowCount > 0 && (
                   <div
-                    className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 text-xs font-bold border-2 border-white shadow-sm hover:bg-gray-300 transition-colors relative z-0"
+                    className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 text-xs font-bold border-2 border-gray-100 shadow-sm hover:bg-gray-300 transition-colors relative z-0"
                   >
                     +{overflowCount}
                   </div>
                 )}
               </div>
+              
+              {/* Dropdown chevron icon */}
+              <svg 
+                className="w-4 h-4 text-gray-600 flex-shrink-0" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
 
             {/* Dropdown listing all collaborators */}
@@ -1952,13 +1837,12 @@ export default function BoardPage() {
           }
 
           if (renderObj.type === 'sticky') {
-            const isLocked = isObjectLockedByFrame(obj.id);
             return (
               <StickyNote
                 key={obj.id}
                 data={renderObj as StickyNoteType}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked && activeTool !== 'move'}
+                isDraggable={activeTool !== 'move'}
                 onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -1979,13 +1863,12 @@ export default function BoardPage() {
           }
           
           if (renderObj.type === 'rect') {
-            const isLocked = isObjectLockedByFrame(obj.id);
             return (
               <Rectangle
                 key={obj.id}
                 data={renderObj as RectShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked && activeTool !== 'move'}
+                isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -2006,13 +1889,12 @@ export default function BoardPage() {
           }
           
           if (renderObj.type === 'circle') {
-            const isLocked = isObjectLockedByFrame(obj.id);
             return (
               <Circle
                 key={obj.id}
                 data={renderObj as CircleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked && activeTool !== 'move'}
+                isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -2062,13 +1944,12 @@ export default function BoardPage() {
           }
 
           if (renderObj.type === 'text') {
-            const isLocked = isObjectLockedByFrame(obj.id);
             return (
               <Text
                 key={obj.id}
                 data={renderObj as TextShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked && activeTool !== 'move'}
+                isDraggable={activeTool !== 'move'}
                 onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -2089,13 +1970,12 @@ export default function BoardPage() {
           }
 
           if (renderObj.type === 'textBubble') {
-            const isLocked = isObjectLockedByFrame(obj.id);
             return (
               <TextBubble
                 key={obj.id}
                 data={renderObj as TextBubbleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked && activeTool !== 'move'}
+                isDraggable={activeTool !== 'move'}
                 onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -2116,13 +1996,12 @@ export default function BoardPage() {
           }
 
           if (renderObj.type === 'triangle') {
-            const isLocked = isObjectLockedByFrame(obj.id);
             return (
               <Triangle
                 key={obj.id}
                 data={renderObj as TriangleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked && activeTool !== 'move'}
+                isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {
@@ -2143,13 +2022,12 @@ export default function BoardPage() {
           }
 
           if (renderObj.type === 'star') {
-            const isLocked = isObjectLockedByFrame(obj.id);
             return (
               <Star
                 key={obj.id}
                 data={renderObj as StarShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
-                isDraggable={!isLocked && activeTool !== 'move'}
+                isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
                   if (selectionArea) {

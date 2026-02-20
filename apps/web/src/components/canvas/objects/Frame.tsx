@@ -35,6 +35,9 @@ export const Frame = ({
   const [nameText, setNameText] = useState(data.name || 'frame1');
   const textRef = useRef<Konva.Text>(null);
   
+  // Debug: Log when Frame receives new props
+  console.log('[Frame] Rendering with data:', { id: data.id, x: data.x, y: data.y, width: data.width, height: data.height });
+  
   // Update name text when data.name changes
   useEffect(() => {
     setNameText(data.name || 'frame1');
@@ -78,7 +81,8 @@ export const Frame = ({
       const scaleY = node.scaleY();
       const liveWidth = baseDimensionsRef.current.width * scaleX;
       const liveHeight = baseDimensionsRef.current.height * scaleY;
-      onTransformMove(data.id, node.x(), node.y(), node.rotation(), { width: liveWidth, height: liveHeight });
+      // Frames cannot be rotated - always use 0 rotation
+      onTransformMove(data.id, node.x(), node.y(), 0, { width: liveWidth, height: liveHeight });
     }
   };
 
@@ -93,10 +97,11 @@ export const Frame = ({
 
     node.scaleX(1);
     node.scaleY(1);
+    // Reset rotation to 0 if it was changed (frames cannot be rotated)
+    node.rotation(0);
 
     const finalX = node.x();
     const finalY = node.y();
-    const finalRotation = node.rotation();
 
     if (transformerRef.current) {
       transformerRef.current.forceUpdate();
@@ -111,7 +116,7 @@ export const Frame = ({
       y: finalY,
       width: newWidth,
       height: newHeight,
-      rotation: finalRotation,
+      rotation: 0, // Frames cannot be rotated - always keep at 0
       modifiedAt: Date.now(),
     });
   };
@@ -135,14 +140,9 @@ export const Frame = ({
     const curX = groupRef.current?.x() ?? data.x;
     const curY = groupRef.current?.y() ?? data.y;
 
-    // Calculate position accounting for rotation
-    const cos = Math.cos((data.rotation * Math.PI) / 180);
-    const sin = Math.sin((data.rotation * Math.PI) / 180);
-    const rotatedX = curX + 8 * cos + 18 * sin;
-    const rotatedY = curY + 8 * sin - 18 * cos;
-    
-    const editorX = containerRect.left + stagePos.x + rotatedX * stageScale;
-    const editorY = containerRect.top + stagePos.y + rotatedY * stageScale;
+    // Frames cannot be rotated, so position is straightforward
+    const editorX = containerRect.left + stagePos.x + (curX + 8) * stageScale;
+    const editorY = containerRect.top + stagePos.y + (curY - 18) * stageScale;
     const editorWidth = Math.max(100, (nameText.length + 5) * 8 * stageScale);
     const editorHeight = 20 * stageScale;
 
@@ -225,7 +225,7 @@ export const Frame = ({
         id={data.id}
         x={data.x}
         y={data.y}
-        rotation={data.rotation}
+        rotation={0}
         draggable={isDraggable}
         onClick={onSelect}
         onTap={onSelect}
@@ -270,7 +270,7 @@ export const Frame = ({
       {isSelected && (
         <Transformer
           ref={transformerRef}
-          rotateEnabled={true}
+          rotateEnabled={false}
           keepRatio={false}
           enabledAnchors={[
             'top-left',

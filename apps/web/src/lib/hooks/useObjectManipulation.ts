@@ -5,7 +5,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { WhiteboardObject, LineShape } from '@/types/canvas';
 import { resolveLinePoints } from '@/lib/utils/connectors';
-import { useFrameManagement } from './useFrameManagement';
 
 interface LiveDragPosition {
   x: number;
@@ -27,8 +26,7 @@ interface LiveTransformPosition {
 export function useObjectManipulation(
   objects: WhiteboardObject[],
   objectsMap: Map<string, WhiteboardObject>,
-  updateObject: (id: string, updates: Partial<WhiteboardObject>) => void,
-  frameManagement: ReturnType<typeof useFrameManagement>
+  updateObject: (id: string, updates: Partial<WhiteboardObject>) => void
 ) {
   const liveDragRef = useRef<Map<string, LiveDragPosition>>(new Map());
   const liveTransformRef = useRef<Map<string, LiveTransformPosition>>(new Map());
@@ -36,7 +34,7 @@ export function useObjectManipulation(
 
   /**
    * Update a shape and reposition any connected lines.
-   * Also checks frame containment and shows warning if needed.
+   * Objects can move independently - no frame locking.
    */
   const updateShapeAndConnectors = useCallback(
     (shapeId: string, updates: Partial<WhiteboardObject>) => {
@@ -47,40 +45,13 @@ export function useObjectManipulation(
       const currentObj = objects.find((o) => o.id === shapeId);
       if (!currentObj) return;
 
-      // Check if object is contained in a frame and if new position would be outside
-      const containingFrame = frameManagement.findContainingFrame(shapeId);
-      if (containingFrame && (typeof updates.x === 'number' || typeof updates.y === 'number')) {
-        const newX = typeof updates.x === 'number' ? updates.x : currentObj.x;
-        const newY = typeof updates.y === 'number' ? updates.y : currentObj.y;
-        const isWithin = frameManagement.isObjectWithinFrame(
-          currentObj,
-          containingFrame,
-          newX,
-          newY
-        );
-        
-        if (!isWithin) {
-          // Don't update position if outside frame - revert to current position
-          frameManagement.showFrameWarning();
-          // Only update other properties, not position
-          const { x, y, ...otherUpdates } = updates;
-          if (Object.keys(otherUpdates).length > 0) {
-            updateObject(shapeId, otherUpdates);
-          }
-          
-          const updatedObj = { ...currentObj, ...otherUpdates } as WhiteboardObject;
-          // Still update connected lines with current position
-          updateConnectedLines(shapeId, updatedObj, objects, updateObject);
-          return;
-        }
-      }
-
+      // Update object - no frame containment checks
       updateObject(shapeId, updates);
 
       const updatedObj = { ...currentObj, ...updates } as WhiteboardObject;
       updateConnectedLines(shapeId, updatedObj, objects, updateObject);
     },
-    [objects, updateObject, frameManagement]
+    [objects, updateObject]
   );
 
   /**
@@ -110,35 +81,14 @@ export function useObjectManipulation(
   /**
    * Live-update connected lines while a shape is being dragged.
    * Uses a ref so we bypass stale React state — just store position and trigger re-render.
+   * Objects can move independently - no frame containment checks.
    */
   const handleShapeDragMove = useCallback(
     (shapeId: string, liveX: number, liveY: number) => {
-      const obj = objectsMap.get(shapeId);
-      if (!obj) {
-        liveDragRef.current.set(shapeId, { x: liveX, y: liveY });
-        setDragTick((t) => t + 1);
-        return;
-      }
-
-      // Check if object is contained in a frame
-      const containingFrame = frameManagement.findContainingFrame(shapeId);
-      if (containingFrame) {
-        // Check if new position would be outside frame
-        const isWithin = frameManagement.isObjectWithinFrame(
-          obj,
-          containingFrame,
-          liveX,
-          liveY
-        );
-        if (!isWithin) {
-          frameManagement.showFrameWarning();
-        }
-      }
-
       liveDragRef.current.set(shapeId, { x: liveX, y: liveY });
       setDragTick((t) => t + 1);
     },
-    [objectsMap, frameManagement]
+    []
   );
 
   /**

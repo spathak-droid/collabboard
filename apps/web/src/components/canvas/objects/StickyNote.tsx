@@ -79,12 +79,14 @@ const StickyNoteComponent = ({
       if (cleaned.length === 6) {
         return cleaned;
       }
+      // Invalid hex length - log error and return fallback
+      console.error(`[StickyNote] Invalid hex color length: "${hex}" (length: ${cleaned.length})`);
       return null;
     };
 
     const adjust = (hex: string, delta: number) => {
       const normalized = normalizeHex(hex);
-      if (!normalized) return hex;
+      if (!normalized) return '#FFF59D'; // Fallback to yellow if invalid
 
       const toChannel = (start: number) =>
         Math.max(0, Math.min(255, parseInt(normalized.slice(start, start + 2), 16) + delta));
@@ -99,6 +101,11 @@ const StickyNoteComponent = ({
   };
 
   const [startColor, endColor] = getGradientStops(data.color);
+  
+  // DEBUG: Log sticky note color on every render
+  useEffect(() => {
+    console.log(`[StickyNote ${data.id.slice(-6)}] Color: "${data.color}" (length: ${data.color.length})`);
+  }, [data.color, data.id]);
 
   useEffect(() => {
     if (isSelected && transformerRef.current && groupRef.current) {

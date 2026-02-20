@@ -29,7 +29,10 @@ const SUGGESTED_COMMANDS = [
 interface AIAssistantProps {
   messages: ChatMessage[];
   isProcessing: boolean;
+  isConnected: boolean;
+  isReconnecting: boolean;
   onSendMessage: (message: string) => void;
+  onReconnect: () => void;
 }
 
 // ── Component ───────────────────────────────────────────────
@@ -37,7 +40,10 @@ interface AIAssistantProps {
 export const AIAssistant = ({
   messages,
   isProcessing,
+  isConnected,
+  isReconnecting,
   onSendMessage,
+  onReconnect,
 }: AIAssistantProps) => {
   const [showChat, setShowChat] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -127,11 +133,29 @@ export const AIAssistant = ({
                     <AutoAwesomeIcon className="w-4 h-4 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold text-xs">
-                      AI Assistant
-                    </h3>
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="text-white font-semibold text-xs">
+                        AI Assistant
+                      </h3>
+                      {/* Connection status indicator */}
+                      <span className="text-[10px]">
+                        {isConnected ? (
+                          <span className="text-green-300" title="Connected">🟢</span>
+                        ) : isReconnecting ? (
+                          <span className="text-yellow-300 animate-pulse" title="Reconnecting">🟡</span>
+                        ) : (
+                          <span className="text-red-300" title="Disconnected">🔴</span>
+                        )}
+                      </span>
+                    </div>
                     <p className="text-indigo-200 text-[10px]">
-                      {isProcessing ? 'Thinking...' : 'Ask me to create or organize'}
+                      {isProcessing
+                        ? 'Thinking...'
+                        : !isConnected && !isReconnecting
+                        ? 'Disconnected'
+                        : isReconnecting
+                        ? 'Reconnecting...'
+                        : 'Ask me to create or organize'}
                     </p>
                   </div>
                 </div>
@@ -218,6 +242,30 @@ export const AIAssistant = ({
 
               {/* Input area */}
               <div className="border-t border-gray-200 p-2 flex-shrink-0">
+                {/* Reconnect button (shown when disconnected and not auto-reconnecting) */}
+                {!isConnected && !isReconnecting && (
+                  <div className="mb-2">
+                    <button
+                      onClick={onReconnect}
+                      className="w-full px-2.5 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium hover:bg-red-100 transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <svg
+                        className="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                      Reconnect
+                    </button>
+                  </div>
+                )}
                 <div className="flex gap-1.5">
                   <input
                     ref={inputRef}
@@ -228,15 +276,17 @@ export const AIAssistant = ({
                     placeholder={
                       isProcessing
                         ? 'Processing...'
+                        : !isConnected
+                        ? 'Disconnected...'
                         : 'Type a command...'
                     }
-                    disabled={isProcessing}
+                    disabled={isProcessing || !isConnected}
                     className="flex-1 px-2.5 py-2 bg-gray-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all disabled:opacity-60"
                   />
                   <motion.button
                     onClick={handleSend}
                     className="px-3 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                    disabled={!inputValue.trim() || isProcessing}
+                    disabled={!inputValue.trim() || isProcessing || !isConnected}
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.97 }}
                   >

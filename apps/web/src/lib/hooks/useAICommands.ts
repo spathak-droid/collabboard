@@ -45,10 +45,15 @@ export function useAICommands(options: UseAICommandsOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const messageIdCounter = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  const reconnectAttempts = useRef(0);
+  const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const maxReconnectAttempts = 3;
+  const pendingMessage = useRef<string | null>(null);
 
   const nextId = () => {
     messageIdCounter.current += 1;
@@ -75,8 +80,8 @@ export function useAICommands(options: UseAICommandsOptions) {
   const originalMessageRef = useRef<string>('');
   const boardIdRef = useRef(boardId);
 
-  // Connect WebSocket (only reconnect when boardId changes)
-  useEffect(() => {
+  // Connect WebSocket with auto-reconnect logic
+  const connectWebSocket = useCallback(() => {
     if (!boardId) return;
 
     const baseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:1234';
@@ -85,7 +90,17 @@ export function useAICommands(options: UseAICommandsOptions) {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      console.log('[AI WS] Connected');
       setIsConnected(true);
+      setIsReconnecting(false);
+      reconnectAttempts.current = 0;
+      
+      // Retry pending message if any
+      if (pendingMessage.current) {
+        const msg = pendingMessage.current;
+        pendingMessage.current = null;
+        setTimeout(() => sendCommand(msg), 100);
+      }
     };
 
     ws.onmessage = (event) => {
@@ -253,20 +268,61 @@ export function useAICommands(options: UseAICommandsOptions) {
     };
 
     ws.onclose = () => {
+      console.log('[AI WS] Disconnected');
       setIsConnected(false);
+      
+      // Attempt auto-reconnect if under max attempts
+      if (reconnectAttempts.current < maxReconnectAttempts) {
+        const delay = Math.pow(2, reconnectAttempts.current) * 1000; // 1s, 2s, 4s
+        console.log(`[AI WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current + 1}/${maxReconnectAttempts})`);
+        
+        setIsReconnecting(true);
+        reconnectAttempts.current += 1;
+        
+        reconnectTimeout.current = setTimeout(() => {
+          connectWebSocket();
+        }, delay);
+      } else {
+        console.log('[AI WS] Max reconnect attempts reached');
+        setIsReconnecting(false);
+      }
     };
 
     ws.onerror = (err) => {
       console.error('[AI WS] Error:', err);
       setIsConnected(false);
     };
+  }, [boardId]);
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    if (!boardId) return;
+    
+    connectWebSocket();
 
     return () => {
-      ws.close();
-      wsRef.current = null;
+      if (reconnectTimeout.current) {
+        clearTimeout(reconnectTimeout.current);
+      }
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId]);
+
+  /**
+   * Manual reconnect function
+   */
+  const reconnect = useCallback(() => {
+    if (reconnectTimeout.current) {
+      clearTimeout(reconnectTimeout.current);
+    }
+    reconnectAttempts.current = 0;
+    setIsReconnecting(true);
+    connectWebSocket();
+  }, [connectWebSocket]);
 
   /**
    * Send a natural-language command to the AI server via WebSocket.
@@ -277,10 +333,15 @@ export function useAICommands(options: UseAICommandsOptions) {
 
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
+        // Store message for retry when reconnected
+        pendingMessage.current = text;
+        
         const errorMsg: ChatMessage = {
           id: nextId(),
           role: 'assistant',
-          content: 'AI Assistant is not connected. Please try again in a moment.',
+          content: isReconnecting 
+            ? 'Reconnecting to AI Assistant... Your message will be sent automatically.'
+            : 'AI Assistant is disconnected. Click Reconnect to try again.',
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, errorMsg]);
@@ -327,7 +388,9 @@ export function useAICommands(options: UseAICommandsOptions) {
     messages,
     isProcessing,
     isConnected,
+    isReconnecting,
     sendCommand,
     clearMessages,
+    reconnect,
   };
 }

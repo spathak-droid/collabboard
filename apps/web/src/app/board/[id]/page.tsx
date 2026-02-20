@@ -2092,7 +2092,10 @@ export default function BoardPage() {
       <AIAssistant
         messages={aiCommands.messages}
         isProcessing={aiCommands.isProcessing}
+        isConnected={aiCommands.isConnected}
+        isReconnecting={aiCommands.isReconnecting}
         onSendMessage={aiCommands.sendCommand}
+        onReconnect={aiCommands.reconnect}
       />
     </div>
   );

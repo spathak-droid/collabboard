@@ -297,6 +297,9 @@ export function executeFromIntent(intent, boardState) {
       // Generate tool calls for creation
       const quantity = intent.quantity || 1;
       
+      // Convert color name to hex
+      const color = intent.color ? colorNameToHex(intent.color) : undefined;
+      
       if (intent.objectType === 'shape' && intent.shapeType) {
         // Create shapes
         for (let i = 0; i < quantity; i++) {
@@ -304,9 +307,9 @@ export function executeFromIntent(intent, boardState) {
             type: intent.shapeType,
           };
           
-          // Add color if specified
-          if (intent.color) {
-            args.color = intent.color;
+          // Add color if specified (now converted to hex)
+          if (color) {
+            args.color = color;
           }
           
           // Add coordinates if specified (only for first object, others auto-placed)
@@ -334,8 +337,9 @@ export function executeFromIntent(intent, boardState) {
             text: intent.text || '',
           };
           
-          if (intent.color) {
-            args.color = intent.color;
+          // Sticky notes can use color names, but normalize them
+          if (color) {
+            args.color = color;
           }
           
           if (i === 0 && intent.coordinates) {
@@ -413,13 +417,16 @@ export function executeFromIntent(intent, boardState) {
       // Find matching objects and change their color
       const targets = findMatchingObjects(boardState, intent.targetFilter);
       
+      // Convert color name to hex if needed
+      const hexColor = colorNameToHex(intent.color);
+      
       targets.forEach((obj, i) => {
         toolCalls.push({
           id: `color_${i}`,
           name: 'changeColor',
           arguments: {
             objectId: obj.id,
-            color: intent.color,
+            color: hexColor,
           },
         });
       });
@@ -543,6 +550,37 @@ export function executeFromIntent(intent, boardState) {
   
   console.log(`✅ Generated ${toolCalls.length} tool calls from intent`);
   return toolCalls;
+}
+
+/**
+ * Convert color names to hex codes
+ * Ensures consistent color mapping regardless of LLM output
+ */
+function colorNameToHex(colorInput) {
+  if (!colorInput) return colorInput;
+  
+  // If already hex, return as-is
+  if (colorInput.startsWith('#')) return colorInput;
+  
+  // Normalize to lowercase for matching
+  const color = colorInput.toLowerCase().trim();
+  
+  // Color mapping (matches intent classifier prompt)
+  const colorMap = {
+    'red': '#EF4444',
+    'blue': '#3B82F6',
+    'green': '#10B981',
+    'yellow': '#EAB308',
+    'orange': '#F97316',
+    'pink': '#EC4899',
+    'purple': '#A855F7',
+    'gray': '#6B7280',
+    'grey': '#6B7280',
+    'black': '#000000',
+    'white': '#FFFFFF',
+  };
+  
+  return colorMap[color] || colorInput;
 }
 
 /**

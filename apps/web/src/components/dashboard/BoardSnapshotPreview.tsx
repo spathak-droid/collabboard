@@ -85,8 +85,10 @@ const getBounds = (obj: WhiteboardObject) => {
       const height = ('height' in obj && typeof obj.height === 'number' ? obj.height : 40);
       return { x: obj.x, y: obj.y, width, height };
     }
-    default:
-      return { x: obj.x, y: obj.y, width: 32, height: 32 };
+    default: {
+      const unknownObj = obj as { x: number; y: number };
+      return { x: unknownObj.x, y: unknownObj.y, width: 32, height: 32 };
+    }
   }
 };
 
@@ -141,7 +143,12 @@ const drawShape = (ctx: CanvasRenderingContext2D, obj: WhiteboardObject) => {
     case 'frame':
       drawRect(obj.width ?? 120, obj.height ?? 80, obj.fill);
       break;
-    case 'textBubble':
+    case 'textBubble': {
+      const width = ('width' in obj && typeof obj.width === 'number' ? obj.width : 60);
+      const height = ('height' in obj && typeof obj.height === 'number' ? obj.height : 40);
+      drawRect(width, height, '#fff1f2');
+      break;
+    }
     case 'rect':
     case 'star': {
       const width = ('width' in obj && typeof obj.width === 'number' ? obj.width : 60);

@@ -20,10 +20,12 @@
 }
 
 html {
-  font-size: 16px; /* Base font size - ensures consistent scaling */
-  -webkit-text-size-adjust: 100%; /* Prevent mobile Safari from auto-adjusting font sizes */
-  -moz-text-size-adjust: 100%;
-  text-size-adjust: 100%;
+  font-size: 16px !important; /* Base font size - ensures consistent scaling */
+  -webkit-text-size-adjust: 100% !important; /* Prevent mobile Safari from auto-adjusting font sizes */
+  -moz-text-size-adjust: 100% !important;
+  text-size-adjust: 100% !important;
+  width: 100%;
+  height: 100%;
 }
 
 body {

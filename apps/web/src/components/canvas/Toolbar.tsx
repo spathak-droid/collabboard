@@ -41,27 +41,27 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
     {
       id: 'select' as const,
       label: 'Select',
-      icon: <NearMeIcon sx={{ fontSize: 24 }} />,
+      icon: <NearMeIcon sx={{ fontSize: 20 }} />,
     },
     {
       id: 'move' as const,
       label: 'Move',
-      icon: <PanToolIcon sx={{ fontSize: 24 }} />,
+      icon: <PanToolIcon sx={{ fontSize: 20 }} />,
     },
     {
       id: 'sticky' as const,
       label: 'Sticky Note',
-      icon: <StickyNote2OutlinedIcon sx={{ fontSize: 24 }} />,
+      icon: <StickyNote2OutlinedIcon sx={{ fontSize: 20 }} />,
     },
     {
       id: 'text' as const,
       label: 'Text',
-      icon: <TextFieldsIcon sx={{ fontSize: 24 }} />,
+      icon: <TextFieldsIcon sx={{ fontSize: 20 }} />,
     },
     {
       id: 'frame' as const,
       label: 'Frame',
-      icon: <CropFreeIcon sx={{ fontSize: 24 }} />,
+      icon: <CropFreeIcon sx={{ fontSize: 20 }} />,
     },
   ];
 
@@ -69,27 +69,27 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
     {
       id: 'rect' as const,
       label: 'Rectangle',
-      icon: <CropSquareIcon sx={{ fontSize: 20 }} />,
+      icon: <CropSquareIcon sx={{ fontSize: 16 }} />,
     },
     {
       id: 'circle' as const,
       label: 'Circle',
-      icon: <CircleOutlinedIcon sx={{ fontSize: 20 }} />,
+      icon: <CircleOutlinedIcon sx={{ fontSize: 16 }} />,
     },
     {
       id: 'triangle' as const,
       label: 'Triangle',
-      icon: <ChangeHistoryOutlinedIcon sx={{ fontSize: 20 }} />,
+      icon: <ChangeHistoryOutlinedIcon sx={{ fontSize: 16 }} />,
     },
     {
       id: 'star' as const,
       label: 'Star',
-      icon: <StarOutlineIcon sx={{ fontSize: 20 }} />,
+      icon: <StarOutlineIcon sx={{ fontSize: 16 }} />,
     },
     {
       id: 'line' as const,
       label: 'Line',
-      icon: <ShowChartIcon sx={{ fontSize: 20 }} />,
+      icon: <ShowChartIcon sx={{ fontSize: 16 }} />,
     },
   ];
 
@@ -125,7 +125,7 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
       onMouseEnter={() => setHoveredTooltip(label)}
       onMouseLeave={() => setHoveredTooltip(null)}
       aria-pressed={isActive !== undefined ? isActive : activeTool === id}
-      className={`group relative flex h-11 w-11 items-center justify-center rounded-lg transition-all ${
+      className={`group relative flex h-9 w-9 items-center justify-center rounded-lg transition-all ${
         (isActive !== undefined ? isActive : activeTool === id)
           ? 'bg-slate-200 text-slate-900'
           : 'text-slate-700 hover:bg-slate-100'
@@ -134,7 +134,7 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
     >
       {icon}
       {hoveredTooltip === label && (
-        <div className="pointer-events-none absolute left-full top-1/2 ml-3 -translate-y-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white shadow-lg z-50">
+        <div className="pointer-events-none absolute left-full top-1/2 ml-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white shadow-lg z-50">
           {label}
         </div>
       )}
@@ -143,13 +143,13 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
 
   const renderSwitch = (isOn: boolean) => (
     <span
-      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+      className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${
         isOn ? 'bg-slate-900' : 'bg-slate-300'
       }`}
       aria-hidden="true"
     >
       <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+        className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
           isOn ? 'translate-x-4' : 'translate-x-0.5'
         }`}
       />
@@ -157,50 +157,50 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
   );
   
   return (
-    <div className="fixed left-5 top-1/2 z-30 -translate-y-1/2">
-      <div className="flex w-[60px] flex-col items-center gap-1 rounded-[16px] bg-white p-2 shadow-[6px_0_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)]">
+    <div className="fixed left-4 top-1/2 z-30 -translate-y-1/2">
+      <div className="flex w-[48px] flex-col items-center gap-1 rounded-[12px] bg-white p-1.5 shadow-[6px_0_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)]">
         {/* View options button */}
         <div ref={viewMenuRef} className="relative">
           {renderToolButton(
             'view',
             'View options',
-            <Grid3x3Icon sx={{ fontSize: 24 }} />,
+            <Grid3x3Icon sx={{ fontSize: 20 }} />,
             () => setIsViewMenuOpen(!isViewMenuOpen),
             isViewMenuOpen
           )}
           
           {/* View options dropdown menu */}
           {isViewMenuOpen && (
-            <div className="absolute left-full top-0 ml-3 w-56 rounded-xl bg-white p-3 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_12px_48px_rgba(0,0,0,0.08)] border border-slate-200">
-              <div className="mb-2 px-1 text-xs font-semibold text-slate-500">VIEW</div>
-              <div className="rounded-lg bg-slate-50 p-2 mb-2">
-                <div className="mb-1.5 px-2 text-[11px] font-semibold text-slate-500">GRID</div>
+            <div className="absolute left-full top-0 ml-2 w-48 rounded-lg bg-white p-2.5 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_12px_48px_rgba(0,0,0,0.08)] border border-slate-200">
+              <div className="mb-1.5 px-1 text-[10px] font-semibold text-slate-500">VIEW</div>
+              <div className="rounded-md bg-slate-50 p-1.5 mb-1.5">
+                <div className="mb-1 px-1.5 text-[10px] font-semibold text-slate-500">GRID</div>
                 <button
                   onClick={() => setGridMode('none')}
-                  className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center justify-between rounded-md px-1.5 py-1.5 text-xs transition-colors ${
                     gridMode === 'none' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-700 hover:bg-white/50'
                   }`}
                 >
                   <span>None</span>
-                  <span className={`h-4 w-4 rounded-full border-2 ${gridMode === 'none' ? 'border-slate-900 bg-slate-900' : 'border-slate-300'}`} />
+                  <span className={`h-3 w-3 rounded-full border-2 ${gridMode === 'none' ? 'border-slate-900 bg-slate-900' : 'border-slate-300'}`} />
                 </button>
                 <button
                   onClick={() => setGridMode('line')}
-                  className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center justify-between rounded-md px-1.5 py-1.5 text-xs transition-colors ${
                     gridMode === 'line' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-700 hover:bg-white/50'
                   }`}
                 >
                   <span>Line grid</span>
-                  <span className={`h-4 w-4 rounded-full border-2 ${gridMode === 'line' ? 'border-slate-900 bg-slate-900' : 'border-slate-300'}`} />
+                  <span className={`h-3 w-3 rounded-full border-2 ${gridMode === 'line' ? 'border-slate-900 bg-slate-900' : 'border-slate-300'}`} />
                 </button>
                 <button
                   onClick={() => setGridMode('dot')}
-                  className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center justify-between rounded-md px-1.5 py-1.5 text-xs transition-colors ${
                     gridMode === 'dot' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-700 hover:bg-white/50'
                   }`}
                 >
                   <span>Dot grid</span>
-                  <span className={`h-4 w-4 rounded-full border-2 ${gridMode === 'dot' ? 'border-slate-900 bg-slate-900' : 'border-slate-300'}`} />
+                  <span className={`h-3 w-3 rounded-full border-2 ${gridMode === 'dot' ? 'border-slate-900 bg-slate-900' : 'border-slate-300'}`} />
                 </button>
               </div>
             </div>
@@ -208,7 +208,7 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
         </div>
 
         {/* Divider */}
-        <div className="my-0.5 h-px w-8 bg-slate-200" />
+        <div className="my-0.5 h-px w-6 bg-slate-200" />
 
         {tools.filter(tool => tool.id !== 'text').map((tool) => renderToolButton(tool.id, tool.label, tool.icon))}
         
@@ -217,15 +217,15 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
           {renderToolButton(
             'text',
             'Text',
-            <TextFieldsIcon sx={{ fontSize: 24 }} />,
+            <TextFieldsIcon sx={{ fontSize: 20 }} />,
             () => setIsTextMenuOpen(!isTextMenuOpen),
             isTextMenuOpen || activeTool === 'text' || activeTool === 'textBubble'
           )}
           
           {/* Text dropdown menu */}
           {isTextMenuOpen && (
-            <div className="absolute left-full top-0 ml-3 w-48 rounded-xl bg-white p-2 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_12px_48px_rgba(0,0,0,0.08)] border border-slate-200">
-              <div className="mb-1 px-2 text-xs font-semibold text-slate-500">Text</div>
+            <div className="absolute left-full top-0 ml-2 w-40 rounded-lg bg-white p-1.5 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_12px_48px_rgba(0,0,0,0.08)] border border-slate-200">
+              <div className="mb-1 px-1.5 text-[10px] font-semibold text-slate-500">Text</div>
               <div className="space-y-0.5">
                 <button
                   onClick={() => {
@@ -234,13 +234,13 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
                   }}
                   onMouseEnter={() => setHoveredTooltip('Text')}
                   onMouseLeave={() => setHoveredTooltip(null)}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors ${
                     activeTool === 'text'
                       ? 'bg-slate-200 text-slate-900'
                       : 'text-slate-700 hover:bg-slate-100'
                   }`}
                 >
-                  <TextFieldsIcon sx={{ fontSize: 20 }} />
+                  <TextFieldsIcon sx={{ fontSize: 16 }} />
                   <span>Text</span>
                 </button>
                 <button
@@ -250,13 +250,13 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
                   }}
                   onMouseEnter={() => setHoveredTooltip('Text Bubble')}
                   onMouseLeave={() => setHoveredTooltip(null)}
-                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors ${
                     activeTool === 'textBubble'
                       ? 'bg-slate-200 text-slate-900'
                       : 'text-slate-700 hover:bg-slate-100'
                   }`}
                 >
-                  <TextFieldsIcon sx={{ fontSize: 20 }} />
+                  <TextFieldsIcon sx={{ fontSize: 16 }} />
                   <span>Text Bubble</span>
                 </button>
               </div>
@@ -269,14 +269,14 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
           {renderToolButton(
             'shapes',
             'Shapes',
-            <CategoryOutlinedIcon sx={{ fontSize: 24 }} />,
+            <CategoryOutlinedIcon sx={{ fontSize: 20 }} />,
             () => setIsShapesMenuOpen(!isShapesMenuOpen)
           )}
           
           {/* Shapes dropdown menu */}
           {isShapesMenuOpen && (
-            <div className="absolute left-full top-0 ml-3 w-48 rounded-xl bg-white p-2 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_12px_48px_rgba(0,0,0,0.08)] border border-slate-200">
-              <div className="mb-1 px-2 text-xs font-semibold text-slate-500">Shapes</div>
+            <div className="absolute left-full top-0 ml-2 w-40 rounded-lg bg-white p-1.5 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_12px_48px_rgba(0,0,0,0.08)] border border-slate-200">
+              <div className="mb-1 px-1.5 text-[10px] font-semibold text-slate-500">Shapes</div>
               <div className="space-y-0.5">
                 {shapeTools.map((shape) => (
                   <button
@@ -287,7 +287,7 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
                     }}
                     onMouseEnter={() => setHoveredTooltip(shape.label)}
                     onMouseLeave={() => setHoveredTooltip(null)}
-                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors ${
                       activeTool === shape.id
                         ? 'bg-slate-200 text-slate-900'
                         : 'text-slate-700 hover:bg-slate-100'
@@ -303,7 +303,7 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
         </div>
         
         {/* Divider */}
-        <div className="my-0.5 h-px w-8 bg-slate-200" />
+        <div className="my-0.5 h-px w-6 bg-slate-200" />
         
         {/* AI/AutoAwesome button at the bottom */}
         {/* AI Assistant button - replaced with floating AIAssistant component */}

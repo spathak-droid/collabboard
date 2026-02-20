@@ -36,10 +36,17 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
 
   useEffect(() => {
     if (isSelected && transformerRef.current && groupRef.current) {
+      console.log('🔷 [TRANSFORMER UPDATE]', {
+        id: data.id,
+        currentNodeScale: { scaleX: groupRef.current.scaleX(), scaleY: groupRef.current.scaleY() },
+        currentNodePos: { x: groupRef.current.x(), y: groupRef.current.y() },
+        dataFromProps: { x: data.x, y: data.y, width: rectWidth, height: rectHeight },
+      });
+      
       transformerRef.current.nodes([groupRef.current]);
       transformerRef.current.getLayer()?.batchDraw();
     }
-  }, [isSelected, data.x, data.y, rectWidth, rectHeight, data.rotation]);
+  }, [isSelected, data.x, data.y, data.id, rectWidth, rectHeight, data.rotation]);
 
   const handleDragStart = () => {
     window.dispatchEvent(new Event('object-drag-start'));
@@ -58,16 +65,43 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
 
   const handleTransformStart = () => {
     baseDimensionsRef.current = { width: data.width, height: data.height };
+    console.log('🔷 [RESIZE START]', {
+      id: data.id,
+      baseDimensions: baseDimensionsRef.current,
+      currentPosition: { x: data.x, y: data.y },
+      rotation: data.rotation,
+    });
     window.dispatchEvent(new Event('object-transform-start'));
   };
 
   const handleTransform = () => {
     const node = groupRef.current;
+    const transformer = transformerRef.current;
+    
     if (node && onTransformMove && baseDimensionsRef.current) {
       const scaleX = node.scaleX();
       const scaleY = node.scaleY();
       const liveWidth = baseDimensionsRef.current.width * scaleX;
       const liveHeight = baseDimensionsRef.current.height * scaleY;
+      
+      // Get pointer position from stage
+      const stage = node.getStage();
+      const pointerPos = stage?.getPointerPosition();
+      
+      // Get transformer anchor being dragged
+      const activeAnchor = transformer?.getActiveAnchor();
+      
+      console.log('🔷 [RESIZE TRANSFORM]', {
+        id: data.id,
+        nodePosition: { x: node.x(), y: node.y() },
+        scale: { scaleX, scaleY },
+        baseDimensions: baseDimensionsRef.current,
+        liveDimensions: { width: liveWidth, height: liveHeight },
+        pointerPosition: pointerPos,
+        activeAnchor,
+        rotation: node.rotation(),
+      });
+      
       onTransformMove(data.id, node.x(), node.y(), node.rotation(), { width: liveWidth, height: liveHeight });
     }
   };
@@ -78,15 +112,32 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
 
     const scaleX = node.scaleX();
     const scaleY = node.scaleY();
+    
+    console.log('🔷 [BEFORE RESET]', {
+      id: data.id,
+      nodeScale: { scaleX, scaleY },
+      nodePosition: { x: node.x(), y: node.y() },
+      baseDimensions: baseDimensionsRef.current,
+      dataBeforeUpdate: { x: data.x, y: data.y, width: data.width, height: data.height },
+    });
+    
     const newWidth = Math.max(20, baseDimensionsRef.current.width * scaleX);
     const newHeight = Math.max(20, baseDimensionsRef.current.height * scaleY);
 
+    // Reset scale to 1
     node.scaleX(1);
     node.scaleY(1);
 
     const finalX = node.x();
     const finalY = node.y();
     const finalRotation = node.rotation();
+
+    console.log('🔷 [AFTER RESET]', {
+      id: data.id,
+      nodeScaleReset: { scaleX: node.scaleX(), scaleY: node.scaleY() },
+      nodePosition: { x: finalX, y: finalY },
+      calculatedDimensions: { width: newWidth, height: newHeight },
+    });
 
     // Force Transformer to recalculate bounding box
     if (transformerRef.current) {
@@ -98,6 +149,17 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
     
     // Clear refs after all updates
     baseDimensionsRef.current = null;
+
+    console.log('🔷 [FINAL UPDATE SENT]', {
+      id: data.id,
+      updates: {
+        width: newWidth,
+        height: newHeight,
+        x: finalX,
+        y: finalY,
+        rotation: finalRotation,
+      }
+    });
 
     onUpdate({
       width: newWidth,
@@ -257,6 +319,21 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
           perfectDrawEnabled={false}
           shadowForStrokeEnabled={false}
         />
+        
+        {/* DEBUG: Visual outline showing exact shape bounds */}
+        {isSelected && (
+          <Rect
+            x={0}
+            y={0}
+            width={rectWidth}
+            height={rectHeight}
+            stroke="red"
+            strokeWidth={1}
+            dash={[5, 5]}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        )}
 
         {displayText && !isEditingText ? (
           <Text
@@ -282,11 +359,24 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
         <Transformer
           ref={transformerRef}
           boundBoxFunc={(oldBox, newBox) => {
+            console.log('🔷 [TRANSFORMER BOUNDS]', {
+              id: data.id,
+              oldBox: { x: oldBox.x, y: oldBox.y, width: oldBox.width, height: oldBox.height, rotation: oldBox.rotation },
+              newBox: { x: newBox.x, y: newBox.y, width: newBox.width, height: newBox.height, rotation: newBox.rotation },
+              minSizeRejected: newBox.width < 20 || newBox.height < 20,
+            });
+            
             if (newBox.width < 20 || newBox.height < 20) {
               return oldBox;
             }
             return newBox;
           }}
+          anchorSize={10}
+          borderStroke="#006eff"
+          borderStrokeWidth={2}
+          anchorStroke="#006eff"
+          anchorFill="#ffffff"
+          anchorCornerRadius={2}
         />
       )}
     </>

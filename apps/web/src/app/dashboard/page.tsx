@@ -27,6 +27,7 @@ import {
 } from '@/lib/supabase/client';
 import { getUserColor } from '@/lib/utils/colors';
 import { getCachedBoards, setCachedBoards } from '@/lib/utils/boardsCache';
+import { preloadSnapshots } from '@/lib/utils/snapshotCache';
 import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
 
 type BoardVisibilityFilter = 'all' | 'owned' | 'shared';
@@ -114,8 +115,8 @@ export default function DashboardPage() {
       const ref = collaboratorsDropdownRefs.current[openCollaboratorsDropdown];
       if (ref) {
         const rect = ref.getBoundingClientRect();
-        const dropdownWidth = 260; // min-w-[260px]
-        const dropdownMaxHeight = 288; // max-h-72 = 288px
+        const dropdownWidth = 220; // min-w-[220px]
+        const dropdownMaxHeight = 240; // max-h-60 = 240px
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
         const padding = 16; // 16px padding from viewport edges
@@ -220,6 +221,14 @@ export default function DashboardPage() {
           
           // Cache the fresh data
           setCachedBoards(user.uid, data);
+
+          // Preload snapshots for all boards in parallel (non-blocking)
+          // This allows instant rendering when user clicks on a board
+          const boardIds = data.map((b) => b.id);
+          preloadSnapshots(boardIds).catch((err) => {
+            console.warn('Failed to preload some snapshots:', err);
+            // Non-critical - boards will still load, just slower
+          });
 
           // Fetch collaborators for each board in parallel (non-blocking)
           Promise.all(
@@ -375,26 +384,37 @@ export default function DashboardPage() {
     });
   }, [allBoards, search, sortBy, user?.uid, visibilityFilter]);
 
+  // Preload snapshots for visible boards when they change (filter/search)
+  useEffect(() => {
+    if (visibleBoards.length === 0) return;
+    
+    const visibleBoardIds = visibleBoards.map((b) => b.id);
+    // Preload in background - don't block UI
+    preloadSnapshots(visibleBoardIds).catch((err) => {
+      console.warn('Failed to preload visible board snapshots:', err);
+    });
+  }, [visibleBoards]);
+
   if (authLoading || !user || (!user.emailVerified && !user.isAnonymous) || boardsLoading) {
     return (
       <div className="relative flex h-screen w-full items-center justify-center overflow-hidden">
         <div className="neon-orb left-[-3rem] top-6 h-64 w-64 bg-cyan-300/45" />
         <div className="neon-orb right-[-3rem] top-20 h-80 w-80 bg-blue-300/40" />
         <div className="neon-orb bottom-[-5rem] left-[40%] h-72 w-72 bg-emerald-300/35" />
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-6 py-4 text-lg font-medium text-slate-700">Loading workspace...</div>
+        <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-5 py-3 text-sm font-medium text-slate-700">Loading workspace...</div>
       </div>
     );
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden px-4 py-6 sm:px-6 lg:px-8">
+    <div className="relative min-h-screen overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
       <div className="neon-orb left-[-3rem] top-6 h-64 w-64 bg-cyan-300/45" />
       <div className="neon-orb right-[-3rem] top-20 h-80 w-80 bg-blue-300/40" />
       <div className="neon-orb bottom-[-5rem] left-[40%] h-72 w-72 bg-emerald-300/35" />
 
-      <header className="relative z-20 mx-auto w-full max-w-[1200px] pb-5">
-        <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-transparent px-5 py-4 shadow-[0_20px_60px_-38px_rgba(0,67,156,0.3)]">
-          <BrandLogo size="sm" showText={false} logoClassName="h-10 w-auto drop-shadow-none" />
+      <header className="relative z-20 mx-auto w-full max-w-[1200px] pb-4">
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-transparent px-4 py-2.5 shadow-[0_20px_60px_-38px_rgba(0,67,156,0.3)]">
+          <BrandLogo size="sm" showText={false} logoClassName="h-12 w-auto drop-shadow-none" />
           <div className="flex items-center gap-3">
             {/* TODO: Uncomment when Resend domain is verified
             <button
@@ -413,35 +433,35 @@ export default function DashboardPage() {
       </header>
 
       <main className="relative z-10 mx-auto w-full max-w-[1200px]">
-        <section className="rounded-2xl border border-slate-200 bg-transparent p-5">
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-2xl font-semibold text-slate-900">Boards</h2>
+        <section className="rounded-xl border border-slate-200 bg-transparent p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-xl font-semibold text-slate-900">Boards</h2>
             <button
               onClick={() => setShowNewBoardModal(true)}
               disabled={creating}
-              className="rounded-xl bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
               + Create New
             </button>
           </div>
 
           {error && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               {error}
             </div>
           )}
 
-          <div className="mb-5 grid gap-3 lg:grid-cols-[1.5fr_auto_auto]">
+          <div className="mb-4 grid gap-2 lg:grid-cols-[1.5fr_auto_auto]">
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search boards, owners..."
-              className="w-full rounded-xl border border-slate-300 bg-transparent px-4 py-2.5 text-slate-700 outline-none transition-colors focus:border-cyan-500"
+              className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-cyan-500"
             />
             <select
               value={visibilityFilter}
               onChange={(event) => setVisibilityFilter(event.target.value as BoardVisibilityFilter)}
-              className="rounded-xl border border-slate-300 bg-transparent px-4 py-2.5 text-slate-700 outline-none transition-colors focus:border-cyan-500"
+              className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-cyan-500"
             >
               <option value="all">All boards</option>
               <option value="owned">Owned by me</option>
@@ -450,7 +470,7 @@ export default function DashboardPage() {
             <select
               value={sortBy}
               onChange={(event) => setSortBy(event.target.value as BoardSort)}
-              className="rounded-xl border border-slate-300 bg-transparent px-4 py-2.5 text-slate-700 outline-none transition-colors focus:border-cyan-500"
+              className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-cyan-500"
             >
               <option value="last_modified">Last modified</option>
               <option value="created">Last created</option>
@@ -458,8 +478,8 @@ export default function DashboardPage() {
             </select>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-transparent">
-            <div className="grid grid-cols-12 border-b border-slate-200 bg-transparent px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="overflow-hidden rounded-lg border border-slate-200/80 bg-transparent">
+            <div className="grid grid-cols-12 border-b border-slate-200 bg-transparent px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               <div className="col-span-4">Board</div>
               <div className="col-span-3">Collaborators</div>
               <div className="col-span-2">Last Modified</div>
@@ -468,7 +488,7 @@ export default function DashboardPage() {
             </div>
 
             {visibleBoards.length === 0 ? (
-              <div className="bg-transparent px-5 py-10 text-center text-slate-500">
+              <div className="bg-transparent px-4 py-8 text-center text-sm text-slate-500">
                 {boards.length === 0
                   ? 'No boards yet. Click "+ Create New" to get started!'
                   : 'No boards match your current filters.'}
@@ -482,17 +502,17 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={board.id}
-                    className="grid w-full grid-cols-12 items-center border-b border-slate-200/60 bg-transparent px-5 py-4 text-left transition-colors hover:bg-cyan-50/40 last:border-b-0"
+                    className="grid w-full grid-cols-12 items-center border-b border-slate-200/60 bg-transparent px-4 py-3 text-left transition-colors hover:bg-cyan-50/40 last:border-b-0"
                   >
                     <button
                       onClick={() => handleOpenBoard(board.id)}
                       className="col-span-4 text-left"
                     >
-                      <p className="text-base font-semibold text-slate-900">{board.title}</p>
+                      <p className="text-sm font-semibold text-slate-900">{board.title}</p>
                     </button>
                     <div className="col-span-3">
                       {board.collaborators.length === 0 ? (
-                        <span className="text-xs text-slate-400">—</span>
+                        <span className="text-[11px] text-slate-400">—</span>
                       ) : (
                         <div 
                           className="relative"
@@ -509,11 +529,11 @@ export default function DashboardPage() {
                             }}
                             className="flex items-center hover:opacity-80 transition-opacity"
                           >
-                            <div className="flex -space-x-2">
+                            <div className="flex -space-x-1.5">
                               {visibleCollabs.map((c, i) => (
                                 <div
                                   key={c.uid}
-                                  className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-bold text-white shadow-sm"
+                                  className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white shadow-sm"
                                   style={{
                                     backgroundColor: c.color,
                                     zIndex: MAX_AVATARS - i,
@@ -525,14 +545,14 @@ export default function DashboardPage() {
                               ))}
                               {overflow > 0 && (
                                 <div
-                                  className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-gray-200 text-[11px] font-bold text-gray-600 shadow-sm"
+                                  className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-gray-200 text-[10px] font-bold text-gray-600 shadow-sm"
                                   style={{ zIndex: 0 }}
                                 >
                                   +{overflow}
                                 </div>
                               )}
                             </div>
-                            <span className="ml-2 text-xs text-slate-500">
+                            <span className="ml-2 text-[11px] text-slate-500">
                               {board.collaborators.length}
                             </span>
                           </button>
@@ -541,23 +561,23 @@ export default function DashboardPage() {
                           {openCollaboratorsDropdown === board.id && dropdownPosition && (
                             <div 
                               data-collaborators-dropdown
-                              className="fixed z-[100] bg-white rounded-xl shadow-xl border border-gray-200 py-3 px-1 min-w-[260px] max-w-[calc(100vw-32px)] animate-in fade-in slide-in-from-top-2 duration-150"
+                              className="fixed z-[100] bg-white rounded-lg shadow-xl border border-gray-200 py-2 px-1 min-w-[220px] max-w-[calc(100vw-32px)] animate-in fade-in slide-in-from-top-2 duration-150"
                               style={{
                                 top: `${dropdownPosition.top}px`,
                                 left: `${dropdownPosition.left}px`,
                               }}
                             >
-                              <div className="px-3 pb-2 mb-1 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                              <div className="px-2.5 pb-1.5 mb-1 border-b border-gray-100 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
                                 Collaborators — {board.collaborators.length}
                               </div>
-                              <div className="max-h-72 overflow-y-auto">
+                              <div className="max-h-60 overflow-y-auto">
                                 {board.collaborators.map((c) => (
                                   <div
                                     key={c.uid}
-                                    className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+                                    className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
                                   >
                                     <div
-                                      className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 text-white"
+                                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white"
                                       style={{
                                         backgroundColor: c.color,
                                       }}
@@ -565,10 +585,10 @@ export default function DashboardPage() {
                                       {c.name.charAt(0).toUpperCase()}
                                     </div>
                                     <div className="flex flex-col min-w-0">
-                                      <span className="text-sm text-gray-800 truncate leading-tight">
+                                      <span className="text-xs text-gray-800 truncate leading-tight">
                                         {c.name}
                                         {c.uid === user?.uid && (
-                                          <span className="text-gray-400 ml-1 text-xs">(You)</span>
+                                          <span className="text-gray-400 ml-1 text-[10px]">(You)</span>
                                         )}
                                       </span>
                                     </div>
@@ -580,8 +600,8 @@ export default function DashboardPage() {
                         </div>
                       )}
                     </div>
-                    <div className="col-span-2 text-sm text-slate-500">{timeAgo(board.lastModified)}</div>
-                    <div className="col-span-2 text-sm text-slate-700">{board.ownerName}</div>
+                    <div className="col-span-2 text-xs text-slate-500">{timeAgo(board.lastModified)}</div>
+                    <div className="col-span-2 text-xs text-slate-700">{board.ownerName}</div>
                     <div className="col-span-1 flex items-center justify-end gap-1">
                       {board.ownerUid === user?.uid ? (
                         <>
@@ -590,16 +610,16 @@ export default function DashboardPage() {
                               e.stopPropagation();
                               setDeleteTarget({ id: board.id, title: board.title });
                             }}
-                            className="rounded p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                            className="rounded p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
                             title="Delete board"
                           >
-                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                             </svg>
                           </button>
                         </>
                       ) : (
-                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-600">
+                        <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600">
                           Collab
                         </span>
                       )}

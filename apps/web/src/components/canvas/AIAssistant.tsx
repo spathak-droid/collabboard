@@ -96,7 +96,7 @@ export const AIAssistant = ({
         <motion.button
           ref={buttonRef}
           onClick={handleButtonClick}
-          className="fixed bottom-8 left-8 w-14 h-14 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-[6px_-6px_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] hover:shadow-[8px_-8px_24px_rgba(0,0,0,0.2),0_6px_16px_rgba(0,0,0,0.12),0_16px_40px_rgba(0,0,0,0.1)] transition-shadow flex items-center justify-center z-50"
+          className="fixed bottom-6 left-6 w-12 h-12 rounded-full bg-gradient-to-br from-indigo-600 to-purple-600 text-white shadow-[6px_-6px_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] hover:shadow-[8px_-8px_24px_rgba(0,0,0,0.2),0_6px_16px_rgba(0,0,0,0.12),0_16px_40px_rgba(0,0,0,0.1)] transition-shadow flex items-center justify-center z-50"
           animate={{
             scale: 1,
             boxShadow: '6px -6px 20px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1), 0 12px 32px rgba(0, 0, 0, 0.08)',
@@ -105,7 +105,7 @@ export const AIAssistant = ({
           whileTap={{ scale: 0.95 }}
           transition={{ type: 'spring', stiffness: 400, damping: 17 }}
         >
-          <AutoAwesomeIcon className="w-6 h-6" />
+          <AutoAwesomeIcon className="w-5 h-5" />
         </motion.button>
 
       {/* Energy particle animation (preserved from original) */}
@@ -113,34 +113,34 @@ export const AIAssistant = ({
       <AnimatePresence>
         {showChat && (
           <motion.div
-            className="fixed bottom-28 left-8 z-[200] pointer-events-auto"
+            className="fixed bottom-[88px] left-6 z-[200] pointer-events-auto"
             initial={{ opacity: 0, y: 30, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 30, scale: 0.95 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
           >
-            <div className="w-[340px] max-w-[90vw] bg-white rounded-2xl shadow-[6px_-6px_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] overflow-hidden flex flex-col max-h-[480px]">
+            <div className="w-[300px] max-w-[90vw] bg-white rounded-xl shadow-[6px_-6px_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] overflow-hidden flex flex-col max-h-[400px]">
               {/* Header */}
-              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-2.5 flex items-center justify-between flex-shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
-                    <AutoAwesomeIcon className="w-5 h-5 text-white" />
+              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-3 py-2 flex items-center justify-between flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
+                    <AutoAwesomeIcon className="w-4 h-4 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold text-sm">
+                    <h3 className="text-white font-semibold text-xs">
                       AI Assistant
                     </h3>
-                    <p className="text-indigo-200 text-xs">
+                    <p className="text-indigo-200 text-[10px]">
                       {isProcessing ? 'Thinking...' : 'Ask me to create or organize'}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={handleClose}
-                  className="text-white/80 hover:text-white transition-colors p-1"
+                  className="text-white/80 hover:text-white transition-colors p-0.5"
                 >
                   <svg
-                    className="w-5 h-5"
+                    className="w-4 h-4"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -156,17 +156,17 @@ export const AIAssistant = ({
               </div>
 
               {/* Messages area */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-2.5 min-h-[140px] max-h-[280px]">
+              <div className="flex-1 overflow-y-auto p-2.5 space-y-2 min-h-[120px] max-h-[240px]">
                 {/* Welcome message (always shown) */}
-                <div className="flex gap-2.5">
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <div className="flex gap-2">
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                     <AutoAwesomeIcon
-                      style={{ fontSize: 14 }}
+                      style={{ fontSize: 12 }}
                       className="text-white"
                     />
                   </div>
-                  <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-3.5 py-2.5 max-w-[85%]">
-                    <p className="text-gray-800 text-sm">
+                  <div className="bg-gray-100 rounded-xl rounded-tl-sm px-2.5 py-2 max-w-[85%]">
+                    <p className="text-gray-800 text-xs">
                       Hi! I can help you create and organize your whiteboard.
                       Try a command or pick a suggestion below.
                     </p>
@@ -175,13 +175,13 @@ export const AIAssistant = ({
 
                 {/* Suggestion chips (shown when no messages yet) */}
                 {messages.length === 0 && (
-                  <div className="flex flex-wrap gap-1.5 pl-9">
+                  <div className="flex flex-wrap gap-1 pl-8">
                     {SUGGESTED_COMMANDS.map((cmd) => (
                       <button
                         key={cmd}
                         onClick={() => handleSuggestionClick(cmd)}
                         disabled={isProcessing}
-                        className="text-xs px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-full hover:bg-indigo-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="text-[10px] px-2 py-1 bg-indigo-50 text-indigo-700 rounded-full hover:bg-indigo-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {cmd}
                       </button>
@@ -196,18 +196,18 @@ export const AIAssistant = ({
 
                 {/* Processing indicator */}
                 {isProcessing && (
-                  <div className="flex gap-2.5">
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <div className="flex gap-2">
+                    <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
                       <AutoAwesomeIcon
-                        style={{ fontSize: 14 }}
+                        style={{ fontSize: 12 }}
                         className="text-white"
                       />
                     </div>
-                    <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-3.5 py-2.5">
+                    <div className="bg-gray-100 rounded-xl rounded-tl-sm px-2.5 py-2">
                       <div className="flex gap-1">
-                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                        <span className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                        <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:0ms]" />
+                        <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:150ms]" />
+                        <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:300ms]" />
                       </div>
                     </div>
                   </div>
@@ -217,8 +217,8 @@ export const AIAssistant = ({
               </div>
 
               {/* Input area */}
-              <div className="border-t border-gray-200 p-2.5 flex-shrink-0">
-                <div className="flex gap-2">
+              <div className="border-t border-gray-200 p-2 flex-shrink-0">
+                <div className="flex gap-1.5">
                   <input
                     ref={inputRef}
                     type="text"
@@ -231,11 +231,11 @@ export const AIAssistant = ({
                         : 'Type a command...'
                     }
                     disabled={isProcessing}
-                    className="flex-1 px-3.5 py-2.5 bg-gray-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all disabled:opacity-60"
+                    className="flex-1 px-2.5 py-2 bg-gray-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all disabled:opacity-60"
                   />
                   <motion.button
                     onClick={handleSend}
-                    className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-3 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={!inputValue.trim() || isProcessing}
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.97 }}
@@ -265,8 +265,8 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2 }}
       >
-        <div className="bg-indigo-600 text-white rounded-2xl rounded-tr-sm px-3.5 py-2.5 max-w-[85%]">
-          <p className="text-sm">{message.content}</p>
+        <div className="bg-indigo-600 text-white rounded-xl rounded-tr-sm px-2.5 py-2 max-w-[85%]">
+          <p className="text-xs">{message.content}</p>
         </div>
       </motion.div>
     );
@@ -274,17 +274,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
   return (
     <motion.div
-      className="flex gap-2.5"
+      className="flex gap-2"
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
     >
-      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
-        <AutoAwesomeIcon style={{ fontSize: 14 }} className="text-white" />
+      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+        <AutoAwesomeIcon style={{ fontSize: 12 }} className="text-white" />
       </div>
-      <div className="max-w-[85%] space-y-1.5">
-        <div className="bg-gray-100 rounded-2xl rounded-tl-sm px-3.5 py-2.5">
-          <p className="text-sm text-gray-800">{message.content}</p>
+      <div className="max-w-[85%] space-y-1">
+        <div className="bg-gray-100 rounded-xl rounded-tl-sm px-2.5 py-2">
+          <p className="text-xs text-gray-800">{message.content}</p>
         </div>
       </div>
     </motion.div>

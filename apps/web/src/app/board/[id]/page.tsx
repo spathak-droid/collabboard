@@ -926,11 +926,13 @@ export default function BoardPage() {
         manipulation.liveTransformRef.current.forEach((transform: { x: number; y: number; rotation: number; width?: number; height?: number; radius?: number }, id: string) => {
           const obj = map.get(id);
           if (obj) {
+            // During transform, only update dimensions and rotation, NOT position
+            // Position will be finalized in handleTransformEnd
             const updates: Partial<WhiteboardObject> & {
               width?: number;
               height?: number;
               radius?: number;
-            } = { x: transform.x, y: transform.y, rotation: transform.rotation };
+            } = { rotation: transform.rotation };
             if (transform.width !== undefined) updates.width = transform.width;
             if (transform.height !== undefined) updates.height = transform.height;
             if (transform.radius !== undefined) updates.radius = transform.radius;
@@ -1509,19 +1511,19 @@ export default function BoardPage() {
       )}
       
       {/* Top Header Bar */}
-      <div className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 py-2.5 px-4 flex items-center justify-between z-40">
-        <div className="flex items-center gap-3">
+      <div className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 py-2 px-3 flex items-center justify-between z-40">
+        <div className="flex items-center gap-2">
           <button
             onClick={handleBackToDashboard}
-            className="p-2 rounded-lg transition-colors hover:bg-gray-100"
+            className="p-1.5 rounded-md transition-colors hover:bg-gray-100"
             title="Back to Dashboard"
           >
-            <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
           </button>
-          <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-lg flex items-center justify-center">
-            <span className="text-white text-sm font-bold">C</span>
+          <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-md flex items-center justify-center">
+            <span className="text-white text-xs font-bold">C</span>
           </div>
           <input
             type="text"
@@ -1529,7 +1531,7 @@ export default function BoardPage() {
             onChange={handleTitleChange}
             readOnly={!isOwner}
             disabled={!isOwner}
-            className={`text-lg font-bold text-gray-900 bg-transparent border-none outline-none px-2 py-1 rounded ${
+            className={`text-sm font-bold text-gray-900 bg-transparent border-none outline-none px-1.5 py-0.5 rounded ${
               isOwner
                 ? 'hover:bg-gray-100 cursor-text'
                 : 'cursor-default opacity-100'
@@ -1539,19 +1541,19 @@ export default function BoardPage() {
           />
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {/* Collaborator avatars */}
           <div className="relative" ref={usersDropdownRef}>
             <button
               onClick={() => setShowAllUsers((prev: boolean) => !prev)}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-full bg-gray-100 border border-gray-200 hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+              className="flex items-center gap-1.5 px-1.5 py-1 rounded-full bg-gray-100 border border-gray-200 hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
               title="View collaborators"
             >
-              <div className="flex -space-x-2">
+              <div className="flex -space-x-1.5">
                 {visibleCollabs.map((c, i) => (
                   <div
                     key={c.uid}
-                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white border-2 border-gray-100 shadow-sm relative hover:z-20 hover:scale-110 transition-transform"
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-gray-100 shadow-sm relative hover:z-20 hover:scale-110 transition-transform"
                     style={{
                       backgroundColor: c.color,
                       zIndex: MAX_VISIBLE - i,
@@ -1564,7 +1566,7 @@ export default function BoardPage() {
 
                 {overflowCount > 0 && (
                   <div
-                    className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 text-xs font-bold border-2 border-gray-100 shadow-sm hover:bg-gray-300 transition-colors relative z-0"
+                    className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 text-[10px] font-bold border-2 border-gray-100 shadow-sm hover:bg-gray-300 transition-colors relative z-0"
                   >
                     +{overflowCount}
                   </div>
@@ -1573,7 +1575,7 @@ export default function BoardPage() {
               
               {/* Dropdown chevron icon */}
               <svg 
-                className="w-4 h-4 text-gray-600 flex-shrink-0" 
+                className="w-3 h-3 text-gray-600 flex-shrink-0" 
                 fill="none" 
                 stroke="currentColor" 
                 viewBox="0 0 24 24"
@@ -1584,18 +1586,18 @@ export default function BoardPage() {
 
             {/* Dropdown listing all collaborators */}
             {showAllUsers && (
-              <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-200 py-3 px-1 min-w-[260px] z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="px-3 pb-2 mb-1 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              <div className="absolute right-0 top-full mt-1.5 bg-white rounded-lg shadow-xl border border-gray-200 py-2 px-1 min-w-[220px] z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="px-2.5 pb-1.5 mb-1 border-b border-gray-100 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
                   Collaborators — {collaborators.length}
                 </div>
-                <div className="max-h-72 overflow-y-auto">
+                <div className="max-h-60 overflow-y-auto">
                   {collaborators.map((c) => (
                     <div
                       key={c.uid}
-                      className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+                      className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
                     >
                       <div
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 text-white"
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white"
                         style={{
                           backgroundColor: c.color,
                         }}
@@ -1603,10 +1605,10 @@ export default function BoardPage() {
                         {c.name.charAt(0).toUpperCase()}
                       </div>
                       <div className="flex flex-col min-w-0">
-                        <span className="text-sm text-gray-800 truncate leading-tight">
+                        <span className="text-xs text-gray-800 truncate leading-tight">
                           {c.name}
                           {c.isYou && (
-                            <span className="text-gray-400 ml-1 text-xs">(You)</span>
+                            <span className="text-gray-400 ml-1 text-[10px]">(You)</span>
                           )}
                         </span>
                       </div>
@@ -1617,8 +1619,8 @@ export default function BoardPage() {
             )}
           </div>
 
-          <span className="text-gray-300">|</span>
-          <div className="text-xs text-gray-500">
+          <span className="text-gray-300 text-xs">|</span>
+          <div className="text-[11px] text-gray-500">
             Objects: <strong>{objects.length}</strong>
           </div>
         </div>

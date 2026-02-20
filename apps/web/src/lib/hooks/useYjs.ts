@@ -4,6 +4,10 @@
  * Creates a fresh YjsProvider per mount (per board). The Hocuspocus Database
  * extension on the server loads/stores snapshots — the client doesn't load
  * snapshots itself, which avoids stale/corrupt data issues.
+ * 
+ * However, we can preload snapshots from the dashboard for faster initial rendering.
+ * The preloaded snapshot is applied before connecting, allowing instant display
+ * while the server syncs any differences.
  */
 
 'use client';
@@ -11,6 +15,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { YjsProvider } from '@/lib/yjs/provider';
 import { getUserColor } from '@/lib/utils/colors';
+import { getCachedSnapshot } from '@/lib/utils/snapshotCache';
 import type { WhiteboardObject } from '@/types/canvas';
 import type { ConnectionStatus, AwarenessState } from '@/types/yjs';
 
@@ -18,9 +23,10 @@ interface UseYjsOptions {
   boardId: string;
   userId: string;
   userName: string;
+  preloadedSnapshot?: Uint8Array | null;
 }
 
-export const useYjs = ({ boardId, userId, userName }: UseYjsOptions) => {
+export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsOptions) => {
   const [objects, setObjects] = useState<WhiteboardObject[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
     status: 'connecting',
@@ -54,9 +60,13 @@ export const useYjs = ({ boardId, userId, userName }: UseYjsOptions) => {
       setHasUnsavedChanges(true);
     });
 
+    // Get snapshot from cache if not provided as prop
+    const snapshot = preloadedSnapshot ?? getCachedSnapshot(boardId);
+
     // Connect — HocuspocusProvider connects synchronously in the constructor
+    // Preloaded snapshot is applied before connecting for instant rendering
     const userColor = getUserColor(userId);
-    provider.connect(boardId, { id: userId, name: userNameRef.current, color: userColor });
+    provider.connect(boardId, { id: userId, name: userNameRef.current, color: userColor }, snapshot);
 
     // --- connection status listener (needs hocuspocus instance) ---
     const unsubStatus = provider.onStatusChange(({ status }) => {

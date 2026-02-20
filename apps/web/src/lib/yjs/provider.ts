@@ -23,9 +23,21 @@ export class YjsProvider {
     this.meta = this.ydoc.getMap('meta');
   }
 
-  connect(boardId: string, user: { id: string; name: string; color: string }) {
+  connect(boardId: string, user: { id: string; name: string; color: string }, preloadedSnapshot?: Uint8Array | null) {
     if (this.hocuspocus) {
       this.disconnect();
+    }
+
+    // Apply preloaded snapshot if available (before connecting to server)
+    // This allows instant rendering while server syncs any differences
+    if (preloadedSnapshot) {
+      try {
+        Y.applyUpdate(this.ydoc, preloadedSnapshot);
+        console.log(`[Yjs] Applied preloaded snapshot for board ${boardId} (${preloadedSnapshot.length} bytes)`);
+      } catch (error) {
+        console.warn(`[Yjs] Failed to apply preloaded snapshot for board ${boardId}:`, error);
+        // Continue anyway - server will sync the correct state
+      }
     }
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:1234';

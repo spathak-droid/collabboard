@@ -90,35 +90,46 @@ export const PropertiesSidebar = ({
   
   const stickyColors = ['#FFF59D', '#F48FB1', '#81D4FA', '#A5D6A7', '#FFCC80'];
   
+  // Format object type name for display
+  const formatTypeName = (type: string): string => {
+    if (type === 'rect') return 'Rectangle';
+    return type.charAt(0).toUpperCase() + type.slice(1);
+  };
+  
+  const getHeaderText = (): string => {
+    if (isSelectionArea) {
+      return `Selection (${selectedObjects.length} objects)`;
+    }
+    if (selectedObjects.length === 1) {
+      return formatTypeName(selectedObjects[0].type);
+    }
+    return `${selectedObjects.length} Selected`;
+  };
+  
   return (
     <>
-    <div className="fixed right-5 top-1/2 -translate-y-1/2 w-64 max-h-[80vh] bg-white rounded-[16px] shadow-[-6px_0_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] z-40 flex flex-col overflow-hidden">
+    <div className="fixed right-4 top-1/2 -translate-y-1/2 w-56 max-h-[60vh] bg-white rounded-[12px] shadow-[-6px_0_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)] z-40 flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-slate-200">
-        <h3 className="text-sm font-semibold text-slate-900">
-          {isSelectionArea 
-            ? `Selection Area (${selectedObjects.length} objects)`
-            : selectedObjects.length === 1 
-              ? `${selectedObjects[0].type.charAt(0).toUpperCase() + selectedObjects[0].type.slice(1)} Properties`
-              : `${selectedObjects.length} Objects Selected`
-          }
+      <div className="p-2.5 border-b border-slate-200">
+        <h3 className="text-xs font-semibold text-slate-900 text-center">
+          {getHeaderText()}
         </h3>
       </div>
       
       {/* Properties */}
-    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+    <div className="flex-1 overflow-y-auto px-2.5 py-2 space-y-2.5">
         {/* For selection area, show info message */}
         {isSelectionArea ? (
-          <div className="text-sm text-slate-600 text-center py-8">
-            <p className="mb-2">Drag the selection area to move all selected objects.</p>
-            <p className="text-xs text-slate-500">Use Copy, Duplicate, or Delete buttons below.</p>
+          <div className="text-xs text-slate-600 text-center py-6">
+            <p className="mb-1.5">Drag to move all objects.</p>
+            <p className="text-[10px] text-slate-500">Use Copy, Duplicate, or Delete below.</p>
           </div>
         ) : (
           <>
         {/* Stroke Color Section */}
         {hasShapes && (
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
               Stroke Color
             </label>
             
@@ -127,19 +138,19 @@ export const PropertiesSidebar = ({
                 setShowStrokePicker(!showStrokePicker);
                 setShowFillPicker(false);
               }}
-              className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors"
+              className="w-full flex items-center justify-between px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200 transition-colors"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <div 
-                  className="w-6 h-6 rounded border-2 border-slate-300"
+                  className="w-5 h-5 rounded border-2 border-slate-300"
                   style={{ backgroundColor: currentStroke }}
                 />
-                <span className="text-sm font-mono text-slate-700">
+                <span className="text-xs font-mono text-slate-700">
                   {currentStroke.toUpperCase()}
                 </span>
               </div>
               <svg 
-                className={`w-4 h-4 text-slate-500 transition-transform ${showStrokePicker ? 'rotate-180' : ''}`}
+                className={`w-3 h-3 text-slate-500 transition-transform ${showStrokePicker ? 'rotate-180' : ''}`}
                 fill="none" 
                 stroke="currentColor" 
                 viewBox="0 0 24 24"
@@ -149,32 +160,27 @@ export const PropertiesSidebar = ({
             </button>
             
             {showStrokePicker && (
-              <div className="space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                <div className="w-full overflow-visible rounded-xl border border-slate-200">
+              <div className="space-y-2 p-2 bg-slate-50 rounded-md border border-slate-200">
+                <div className="w-full overflow-hidden rounded-lg border border-slate-200">
                   <HexColorPicker
                     color={currentStroke}
                     onChange={onStrokeColorChange}
-                    style={{ paddingBottom: '18px' }}
+                    style={{ paddingBottom: '10px', width: '100%' }}
                   />
                 </div>
                 <input
                   type="text"
                   value={currentStroke.toUpperCase()}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (/^#[0-9A-F]{0,6}$/i.test(val)) {
-                      onStrokeColorChange(val);
-                    }
-                  }}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  readOnly
+                  className="w-full px-2 py-1.5 text-xs font-mono border border-slate-200 rounded-md bg-slate-50 cursor-default select-all"
                   placeholder="#000000"
                 />
-                <div className="grid grid-cols-6 gap-1.5">
+                <div className="grid grid-cols-6 gap-1">
                   {presetColors.map((color) => (
                     <button
                       key={color}
                       onClick={() => onStrokeColorChange(color)}
-                      className={`w-full aspect-square rounded-lg border-2 transition-all hover:scale-110 ${
+                      className={`w-full aspect-square rounded-md border-2 transition-all hover:scale-110 ${
                         currentStroke.toUpperCase() === color.toUpperCase()
                           ? 'border-slate-900 ring-2 ring-slate-300'
                           : 'border-slate-200'
@@ -191,7 +197,7 @@ export const PropertiesSidebar = ({
         {/* Sticky Note Color Section */}
         {hasSticky && (
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
               Note Color
             </label>
 
@@ -201,14 +207,14 @@ export const PropertiesSidebar = ({
                 setShowFillPicker(false);
                 setShowStrokePicker(false);
               }}
-              className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors"
+              className="w-full flex items-center justify-between px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200 transition-colors"
             >
               <div className="flex items-center gap-2">
                 <div
                   className="w-6 h-6 rounded border-2 border-slate-300"
                   style={{ backgroundColor: currentStickyColor }}
                 />
-                <span className="text-sm font-mono text-slate-700">
+                <span className="text-xs font-mono text-slate-700">
                   {currentStickyColor.toUpperCase()}
                 </span>
               </div>
@@ -223,32 +229,27 @@ export const PropertiesSidebar = ({
             </button>
 
             {showStickyPicker && (
-              <div className="space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+              <div className="space-y-2 p-2 bg-slate-50 rounded-md border border-slate-200">
                 <div className="w-full overflow-visible rounded-xl border border-slate-200">
                   <HexColorPicker
                     color={currentStickyColor}
                     onChange={onStickyColorChange}
-                    className="hex-color-picker" style={{ paddingBottom: '16px' }}
+                    className="hex-color-picker" style={{ paddingBottom: '10px' }}
                   />
                 </div>
                 <input
                   type="text"
                   value={currentStickyColor.toUpperCase()}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (/^#[0-9A-F]{0,6}$/i.test(val)) {
-                      onStickyColorChange(val);
-                    }
-                  }}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  readOnly
+                  className="w-full px-2 py-1.5 text-xs font-mono border border-slate-200 rounded-md bg-slate-50 cursor-default select-all"
                   placeholder="#FFF59D"
                 />
-                <div className="grid grid-cols-5 gap-1.5">
+                <div className="grid grid-cols-5 gap-1">
                   {[...stickyColors, ...presetColors.slice(0, 7)].map((color) => (
                     <button
                       key={`sticky-${color}`}
                       onClick={() => onStickyColorChange(color)}
-                      className={`w-full aspect-square rounded-lg border-2 transition-all hover:scale-110 ${
+                      className={`w-full aspect-square rounded-md border-2 transition-all hover:scale-110 ${
                         currentStickyColor.toUpperCase() === color.toUpperCase()
                           ? 'border-slate-900 ring-2 ring-slate-300'
                           : 'border-slate-200'
@@ -265,7 +266,7 @@ export const PropertiesSidebar = ({
         {/* Fill Color Section */}
         {hasShapes && (
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
               Fill Color
             </label>
             
@@ -274,14 +275,14 @@ export const PropertiesSidebar = ({
                 setShowFillPicker(!showFillPicker);
                 setShowStrokePicker(false);
               }}
-              className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors"
+              className="w-full flex items-center justify-between px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200 transition-colors"
             >
               <div className="flex items-center gap-2">
                 <div 
-                  className="w-6 h-6 rounded border-2 border-slate-300"
+                  className="w-5 h-5 rounded border-2 border-slate-300"
                   style={{ backgroundColor: currentFill }}
                 />
-                <span className="text-sm font-mono text-slate-700">
+                <span className="text-xs font-mono text-slate-700">
                   {currentFill.toUpperCase()}
                 </span>
               </div>
@@ -296,32 +297,27 @@ export const PropertiesSidebar = ({
             </button>
             
             {showFillPicker && (
-              <div className="space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
+              <div className="space-y-2 p-2 bg-slate-50 rounded-md border border-slate-200">
                 <div className="w-full overflow-visible rounded-xl border border-slate-200">
                   <HexColorPicker
                     color={currentFill}
                     onChange={onFillColorChange}
-                    style={{ paddingBottom: '16px' }}
+                    style={{ paddingBottom: '10px', width: '100%' }}
                   />
                 </div>
                 <input
                   type="text"
                   value={currentFill.toUpperCase()}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (/^#[0-9A-F]{0,6}$/i.test(val)) {
-                      onFillColorChange(val);
-                    }
-                  }}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  readOnly
+                  className="w-full px-2 py-1.5 text-xs font-mono border border-slate-200 rounded-md bg-slate-50 cursor-default select-all"
                   placeholder="#FFFFFF"
                 />
-                <div className="grid grid-cols-6 gap-1.5">
+                <div className="grid grid-cols-6 gap-1">
                   {presetColors.map((color) => (
                     <button
                       key={color}
                       onClick={() => onFillColorChange(color)}
-                      className={`w-full aspect-square rounded-lg border-2 transition-all hover:scale-110 ${
+                      className={`w-full aspect-square rounded-md border-2 transition-all hover:scale-110 ${
                         currentFill.toUpperCase() === color.toUpperCase()
                           ? 'border-slate-900 ring-2 ring-slate-300'
                           : 'border-slate-200'
@@ -338,7 +334,7 @@ export const PropertiesSidebar = ({
         {/* Text Color Section - For plain text objects */}
         {hasText && onTextColorChange && (
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
               Text Color
             </label>
             
@@ -349,14 +345,14 @@ export const PropertiesSidebar = ({
                 setShowFillPicker(false);
                 setShowStickyPicker(false);
               }}
-              className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors"
+              className="w-full flex items-center justify-between px-2 py-1.5 bg-slate-50 hover:bg-slate-100 rounded-md border border-slate-200 transition-colors"
             >
               <div className="flex items-center gap-2">
                 <div 
-                  className="w-6 h-6 rounded border-2 border-slate-300"
+                  className="w-5 h-5 rounded border-2 border-slate-300"
                   style={{ backgroundColor: currentTextColor }}
                 />
-                <span className="text-sm font-mono text-slate-700">
+                <span className="text-xs font-mono text-slate-700">
                   {currentTextColor.toUpperCase()}
                 </span>
               </div>
@@ -371,32 +367,27 @@ export const PropertiesSidebar = ({
             </button>
             
             {showTextColorPicker && (
-              <div className="space-y-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
-                <div className="w-full overflow-visible rounded-xl border border-slate-200">
+              <div className="space-y-2 p-2 bg-slate-50 rounded-md border border-slate-200">
+                <div className="w-full overflow-hidden rounded-lg border border-slate-200">
                   <HexColorPicker
                     color={currentTextColor}
                     onChange={onTextColorChange}
-                    style={{ paddingBottom: '18px' }}
+                    style={{ paddingBottom: '10px', width: '100%' }}
                   />
                 </div>
                 <input
                   type="text"
                   value={currentTextColor.toUpperCase()}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (/^#[0-9A-F]{0,6}$/i.test(val)) {
-                      onTextColorChange(val);
-                    }
-                  }}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  readOnly
+                  className="w-full px-2 py-1.5 text-xs font-mono border border-slate-200 rounded-md bg-slate-50 cursor-default select-all"
                   placeholder="#000000"
                 />
-                <div className="grid grid-cols-6 gap-1.5">
+                <div className="grid grid-cols-6 gap-1">
                   {presetColors.map((color) => (
                     <button
                       key={color}
                       onClick={() => onTextColorChange(color)}
-                      className={`w-full aspect-square rounded-lg border-2 transition-all hover:scale-110 ${
+                      className={`w-full aspect-square rounded-md border-2 transition-all hover:scale-110 ${
                         currentTextColor.toUpperCase() === color.toUpperCase()
                           ? 'border-slate-900 ring-2 ring-slate-300'
                           : 'border-slate-200'
@@ -413,7 +404,7 @@ export const PropertiesSidebar = ({
         {/* Text Section - For rectangles, circles, sticky notes, and text objects */}
         {hasTextSupport && (
           <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
               Text
             </label>
             
@@ -421,12 +412,12 @@ export const PropertiesSidebar = ({
               value={currentText}
               onChange={(e) => onTextChange(e.target.value)}
               placeholder="Enter text..."
-              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
-              rows={3}
+              className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none"
+              rows={2}
             />
 
             <div className="space-y-2 pt-2">
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
                 Font Size
               </label>
               <div className="flex items-center gap-2">
@@ -445,21 +436,21 @@ export const PropertiesSidebar = ({
                   max={48}
                   value={Math.round(Math.max(12, Math.min(48, currentTextSize)))}
                   onChange={(e) => onTextSizeChange(Number(e.target.value))}
-                  className="w-16 px-2 py-1 text-sm border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-400"
+                  className="w-14 px-1.5 py-1 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-slate-400"
                 />
               </div>
             </div>
 
             <div className="space-y-2 pt-1">
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
                 Font Style
               </label>
-              <div className="grid grid-cols-1 gap-1.5">
+              <div className="grid grid-cols-1 gap-1">
                 {(['Inter', 'Poppins', 'Merriweather'] as const).map((font) => (
                   <button
                     key={font}
                     onClick={() => onTextFamilyChange(font)}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium text-center transition-colors ${
+                    className={`rounded-md border px-2 py-1.5 text-xs font-medium text-center transition-colors ${
                       currentTextFamily === font
                         ? 'border-slate-900 bg-slate-100 text-slate-900'
                         : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
@@ -477,14 +468,14 @@ export const PropertiesSidebar = ({
       </div>
       
       {/* Actions Footer */}
-      <div className="p-4 border-t border-slate-200 space-y-2">
+      <div className="p-2 border-t border-slate-200 space-y-1.5">
         {/* Copy Button */}
         {onCopy && (
           <button
             onClick={onCopy}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-colors"
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-md transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
             </svg>
             Copy
@@ -495,10 +486,11 @@ export const PropertiesSidebar = ({
         {onDuplicate && (
           <button
             onClick={onDuplicate}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-lg transition-colors"
+            className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-md transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h8a2 2 0 012 2v8a2 2 0 01-2 2H8a2 2 0 01-2-2V9a2 2 0 012-2z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V7a2 2 0 012-2z" />
             </svg>
             Duplicate
           </button>
@@ -507,9 +499,9 @@ export const PropertiesSidebar = ({
         {/* Delete Button */}
         <button
           onClick={onDelete}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-600 font-medium rounded-lg transition-colors"
+          className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium rounded-md transition-colors"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
           </svg>
           Delete
@@ -518,11 +510,37 @@ export const PropertiesSidebar = ({
     </div>
     <style jsx>{`
       :global(.hex-color-picker) {
-        width: 100%;
-        min-height: 240px;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: 110px;
       }
       :global(.hex-color-picker .react-colorful__saturation) {
-        border-radius: 12px;
+        border-radius: 8px;
+        min-height: 80px;
+        height: 80px;
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      :global(.hex-color-picker .react-colorful__hue) {
+        height: 12px;
+        border-radius: 6px;
+        margin-top: 8px;
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+      :global(.hex-color-picker .react-colorful__pointer) {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 2px solid white;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      }
+      :global(.hex-color-picker .react-colorful__saturation-pointer) {
+        width: 16px;
+        height: 16px;
+      }
+      :global(.hex-color-picker .react-colorful__interactive) {
+        width: 100% !important;
       }
     `}</style>
     </>

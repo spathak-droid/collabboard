@@ -45,6 +45,32 @@ export default function RootLayout({
     <html lang="en" style={{ fontSize: '16px' }}>
       <head>
         <meta name="theme-color" content="#ffffff" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              // Detect and log zoom level for debugging
+              (function() {
+                const devicePixelRatio = window.devicePixelRatio || 1;
+                const zoomLevel = Math.round(devicePixelRatio * 100);
+                console.log('Browser zoom level:', zoomLevel + '%');
+                console.log('Device pixel ratio:', devicePixelRatio);
+                console.log('Window.innerWidth:', window.innerWidth);
+                console.log('Document.documentElement.clientWidth:', document.documentElement.clientWidth);
+                
+                // Force normalize zoom by resetting the viewport
+                const metaViewport = document.querySelector('meta[name="viewport"]');
+                if (metaViewport) {
+                  metaViewport.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+                }
+                
+                // Add a visual indicator in development
+                if (zoomLevel !== 100) {
+                  console.warn('⚠️ Browser zoom is not 100%. This may cause visual inconsistencies.');
+                }
+              })();
+            `,
+          }}
+        />
       </head>
       <body
         className={`${manrope.variable} ${geistMono.variable} antialiased`}

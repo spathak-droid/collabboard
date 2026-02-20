@@ -69,7 +69,7 @@ export const UserMenu = ({ displayName, email, onSignOut }: UserMenuProps) => {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 via-cyan-500 to-emerald-500 text-sm font-bold tracking-wide text-white shadow-md shadow-cyan-200 transition-transform hover:scale-[1.03]"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 via-cyan-500 to-emerald-500 text-xs font-bold tracking-wide text-white shadow-md shadow-cyan-200 transition-transform hover:scale-[1.03]"
         aria-haspopup="menu"
         aria-expanded={open}
         title="Open profile menu"
@@ -78,10 +78,10 @@ export const UserMenu = ({ displayName, email, onSignOut }: UserMenuProps) => {
       </button>
 
       {open ? (
-        <div className="absolute right-0 z-50 mt-3 min-w-[220px] rounded-xl border border-slate-200 bg-slate-50/95 p-3 shadow-[0_24px_50px_-25px_rgba(0,49,117,0.5)] backdrop-blur-sm">
-          <div className="mb-3 border-b border-slate-200 pb-3">
-            <p className="text-sm font-semibold text-slate-900">{displayName || 'User'}</p>
-            <p className="truncate text-xs text-slate-500">{email || 'No email'}</p>
+        <div className="absolute right-0 z-50 mt-2 min-w-[200px] rounded-lg border border-slate-200 bg-slate-50/95 p-2.5 shadow-[0_24px_50px_-25px_rgba(0,49,117,0.5)] backdrop-blur-sm">
+          <div className="mb-2 border-b border-slate-200 pb-2">
+            <p className="text-xs font-semibold text-slate-900">{displayName || 'User'}</p>
+            <p className="truncate text-[11px] text-slate-500">{email || 'No email'}</p>
           </div>
           <button
             type="button"
@@ -89,7 +89,7 @@ export const UserMenu = ({ displayName, email, onSignOut }: UserMenuProps) => {
               setOpen(false);
               await onSignOut();
             }}
-            className="w-full rounded-lg px-3 py-2 text-left text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+            className="w-full rounded-md px-2.5 py-1.5 text-left text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50"
           >
             Sign Out
           </button>

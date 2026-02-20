@@ -125,6 +125,7 @@ export interface Frame extends BaseObject {
   fill?: string; // Optional background fill (default transparent)
   containedObjectIds: string[]; // IDs of objects inside this frame
   name?: string; // Frame name (default: frame1, frame2, etc.)
+  isAIContainer?: boolean; // True if AI created this for grouping/organizing objects, false/undefined for user-drawn frames
 }
 
 export type WhiteboardObject = StickyNote | RectShape | CircleShape | TriangleShape | StarShape | LineShape | TextShape | TextBubbleShape | Frame;

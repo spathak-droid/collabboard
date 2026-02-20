@@ -14,6 +14,9 @@ export interface CreateStickyNoteArgs {
   x?: number;
   y?: number;
   color?: 'yellow' | 'pink' | 'blue' | 'green' | 'orange';
+  quantity?: number; // Optional: create multiple sticky notes
+  rows?: number; // Optional: explicit grid rows (e.g., "7x2 grid" = rows:7)
+  columns?: number; // Optional: explicit grid columns (e.g., "7x2 grid" = columns:2)
 }
 
 export interface CreateTextArgs {
@@ -37,6 +40,10 @@ export interface CreateShapeArgs {
   width?: number;
   height?: number;
   color?: string;
+  text?: string; // Optional text label to display inside the shape
+  quantity?: number; // Optional: create multiple shapes
+  rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)
+  columns?: number; // Optional: explicit grid columns (e.g., "4x2 grid" = columns:2)
 }
 
 export interface CreateFrameArgs {
@@ -55,8 +62,9 @@ export interface CreateConnectorArgs {
 
 export interface MoveObjectArgs {
   objectId: string;
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
+  direction?: 'left' | 'right' | 'up' | 'down';
 }
 
 export interface ResizeObjectArgs {
@@ -81,6 +89,9 @@ export interface DeleteObjectArgs {
 
 export interface ArrangeInGridArgs {
   objectIds: string[];
+  frameId?: string; // Optional: arrange within this frame's bounds
+  rows?: number; // Optional: explicit number of rows
+  columns?: number; // Optional: explicit number of columns
 }
 
 export interface AnalyzeObjectsArgs {
@@ -90,6 +101,40 @@ export interface AnalyzeObjectsArgs {
 export interface FitFrameToContentsArgs {
   frameId: string;
   padding?: number;
+}
+
+export interface CreateSWOTAnalysisArgs {
+  quadrants?: number;
+  shape?: 'rect' | 'circle' | 'triangle' | 'star';
+  x?: number;
+  y?: number;
+  color?: string;
+  withFrame?: boolean;
+}
+
+export interface CreateUserJourneyMapArgs {
+  stages: string[];
+  x?: number;
+  y?: number;
+  orientation?: 'horizontal' | 'vertical';
+}
+
+export interface CreateRetrospectiveBoardArgs {
+  columns?: string[];
+  notesPerColumn?: number;
+  noteContents?: string[][]; // Optional: 2D array of note contents [column][note]
+  x?: number;
+  y?: number;
+}
+
+export interface CreateProsConsBoardArgs {
+  topic?: string;
+  prosCount?: number;
+  consCount?: number;
+  prosContent?: string[];
+  consContent?: string[];
+  x?: number;
+  y?: number;
 }
 
 // getBoardState and analyzeObjects take no/optional arguments — read-only tools
@@ -111,7 +156,11 @@ export type ToolName =
   | 'arrangeInGrid'
   | 'arrangeInGridAndResize'
   | 'fitFrameToContents'
-  | 'analyzeObjects';
+  | 'analyzeObjects'
+  | 'createSWOTAnalysis'
+  | 'createUserJourneyMap'
+  | 'createRetrospectiveBoard'
+  | 'createProsConsBoard';
 
 export type ToolArgs =
   | CreateStickyNoteArgs
@@ -128,6 +177,10 @@ export type ToolArgs =
   | ArrangeInGridArgs
   | FitFrameToContentsArgs
   | AnalyzeObjectsArgs
+  | CreateSWOTAnalysisArgs
+  | CreateUserJourneyMapArgs
+  | CreateRetrospectiveBoardArgs
+  | CreateProsConsBoardArgs
   | Record<string, never>; // getBoardState
 
 export interface ParsedToolCall {
@@ -144,7 +197,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'createStickyNote',
       description:
-        'Create a sticky note on the whiteboard. Use for brainstorming items, ideas, labels, or any text-based card.',
+        'Create sticky note(s) on the whiteboard. Use for brainstorming items, ideas, labels. Can create multiple notes at once in a grid layout.',
       parameters: {
         type: 'object',
         properties: {
@@ -167,6 +220,18 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             enum: ['yellow', 'pink', 'blue', 'green', 'orange'],
             description: 'Sticky note color. Defaults to yellow.',
           },
+          quantity: {
+            type: 'number',
+            description: 'Number of sticky notes to create. Use when user specifies a count (e.g., "create 10 pink notes").',
+          },
+          rows: {
+            type: 'number',
+            description: 'Explicit number of rows for grid layout (e.g., "7x2 grid" = rows:7). Only used with quantity > 1.',
+          },
+          columns: {
+            type: 'number',
+            description: 'Explicit number of columns for grid layout (e.g., "7x2 grid" = columns:2). Only used with quantity > 1.',
+          },
         },
         required: ['text'],
       },
@@ -177,7 +242,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'createShape',
       description:
-        'Create a geometric shape (rectangle, circle, triangle, or star) on the whiteboard.',
+        'Create geometric shape(s) (rectangle, circle, triangle, or star) with OPTIONAL text label inside. Shapes can have text labels built-in - no need for separate text objects. Can create multiple shapes at once in a grid layout.',
       parameters: {
         type: 'object',
         properties: {
@@ -207,6 +272,23 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             description:
               'Fill color as hex string (e.g. "#3B82F6") or color name',
           },
+          text: {
+            type: 'string',
+            description:
+              'Optional text label to display INSIDE the shape. Use this to label circles (e.g., planet names), rectangles (e.g., stage names), etc. No need to create separate text objects.',
+          },
+          quantity: {
+            type: 'number',
+            description: 'Number of shapes to create. Use when user specifies a count (e.g., "create 8 stars").',
+          },
+          rows: {
+            type: 'number',
+            description: 'Explicit number of rows for grid layout (e.g., "4x2 grid" = rows:4). Only used with quantity > 1.',
+          },
+          columns: {
+            type: 'number',
+            description: 'Explicit number of columns for grid layout (e.g., "4x2 grid" = columns:2). Only used with quantity > 1.',
+          },
         },
         required: ['type'],
       },
@@ -217,13 +299,13 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'createFrame',
       description:
-        'Create a frame (grouping container) on the whiteboard. Frames visually group objects and have a title label.',
+        'Create a frame (visual container) to organize and group objects on the whiteboard. Use this when the user asks to "organize", "group", "put things in sections/categories", or "create sections". When created by AI, frames automatically contain objects within their bounds. For simple "draw a frame" commands without grouping intent, the user will draw it manually. Only use this tool when there is clear intent to organize or group existing objects.',
       parameters: {
         type: 'object',
         properties: {
           title: {
             type: 'string',
-            description: 'Frame title / label',
+            description: 'Frame title / label (e.g., "Ideas", "Done", "In Progress")',
           },
           x: {
             type: 'number',
@@ -235,11 +317,11 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           width: {
             type: 'number',
-            description: 'Width in pixels (default 400)',
+            description: 'Width in pixels (default 400). Use large values (1000+) to encompass all objects when organizing the entire board.',
           },
           height: {
             type: 'number',
-            description: 'Height in pixels (default 400)',
+            description: 'Height in pixels (default 400). Use large values (800+) to encompass all objects when organizing the entire board.',
           },
         },
         required: ['title'],
@@ -278,7 +360,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'moveObject',
       description:
-        'Move an existing object to a new position on the whiteboard.',
+        'Move an existing object to a new position. Supports absolute positioning (x, y) or directional movement (left, right, up, down). Use direction for commands like "move right" or "shift left".',
       parameters: {
         type: 'object',
         properties: {
@@ -288,14 +370,19 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           x: {
             type: 'number',
-            description: 'New X position in pixels',
+            description: 'New X position in pixels (absolute positioning)',
           },
           y: {
             type: 'number',
-            description: 'New Y position in pixels',
+            description: 'New Y position in pixels (absolute positioning)',
+          },
+          direction: {
+            type: 'string',
+            enum: ['left', 'right', 'up', 'down'],
+            description: 'Direction to move the object relative to viewport (use this for "move right", "shift left", etc.)',
           },
         },
-        required: ['objectId', 'x', 'y'],
+        required: ['objectId'],
       },
     },
   },
@@ -408,7 +495,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'arrangeInGrid',
       description:
-        'Arrange the selected objects into an evenly spaced grid (positions only, keeps original sizes). Use when the user says "arrange in grid", "space them evenly", "organize in a grid", etc.',
+        'Arrange the selected objects into an evenly spaced grid (positions only, keeps original sizes). Use when the user says "arrange in grid", "space them evenly", "organize in a grid", etc. Can optionally arrange within a frame\'s bounds.',
       parameters: {
         type: 'object',
         properties: {
@@ -416,6 +503,18 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             type: 'array',
             items: { type: 'string' },
             description: 'Array of object IDs to arrange (the selected objects)',
+          },
+          frameId: {
+            type: 'string',
+            description: 'Optional: ID of frame to arrange objects within. If provided, arranges objects to fit within this frame\'s bounds.',
+          },
+          rows: {
+            type: 'number',
+            description: 'Optional: Explicit number of rows. Use when user specifies like "1x5 grid" (1 row) or "2x3 grid" (2 rows).',
+          },
+          columns: {
+            type: 'number',
+            description: 'Optional: Explicit number of columns. Use when user specifies like "1x5 grid" (5 columns) or "2x3 grid" (3 columns).',
           },
         },
         required: ['objectIds'],
@@ -427,7 +526,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'arrangeInGridAndResize',
       description:
-        'Arrange objects in a grid AND resize them to perfectly fit the selection area. Use when the user says "resize and space them evenly", "resize to fit", "make them the same size and space evenly", etc.',
+        'Arrange objects in a grid AND resize them to perfectly fit the selection area or frame. Use when the user says "resize and space them evenly", "resize to fit", "make them the same size and space evenly", etc.',
       parameters: {
         type: 'object',
         properties: {
@@ -435,6 +534,10 @@ export const AI_TOOLS: ChatCompletionTool[] = [
             type: 'array',
             items: { type: 'string' },
             description: 'Array of object IDs to arrange and resize',
+          },
+          frameId: {
+            type: 'string',
+            description: 'Optional: ID of frame to arrange objects within. If provided, resizes and arranges objects to fit within this frame\'s bounds.',
           },
         },
         required: ['objectIds'],
@@ -480,6 +583,160 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
         },
         required: ['frameId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'createSWOTAnalysis',
+      description:
+        'Create a SWOT analysis or structured matrix with sticky notes arranged in a grid. Creates quadrants number of sticky notes (default 4 for 2x2 matrix) with optional shapes and frame wrapping. All objects are created in a single tool call and arranged in matrix form.',
+      parameters: {
+        type: 'object',
+        properties: {
+          quadrants: {
+            type: 'number',
+            description: 'Number of quadrants (default 4 for 2x2 matrix). Supports 4, 6, 9, etc. for different grid sizes.',
+          },
+          shape: {
+            type: 'string',
+            enum: ['rect', 'circle', 'triangle', 'star'],
+            description: 'Optional shape to create instead of sticky notes',
+          },
+          x: {
+            type: 'number',
+            description: 'Starting X position (random if not specified)',
+          },
+          y: {
+            type: 'number',
+            description: 'Starting Y position (random if not specified)',
+          },
+          color: {
+            type: 'string',
+            description: 'Color for objects (random if not specified). Use hex for shapes, color names for sticky notes.',
+          },
+          withFrame: {
+            type: 'boolean',
+            description: 'Whether to wrap the matrix with a frame (default true)',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'createUserJourneyMap',
+      description:
+        'Create a user journey map with labeled stages connected by lines. The AI generates appropriate stage names based on the user\'s request (e.g., "Awareness", "Consideration", "Purchase", "Retention", "Advocacy"). Creates colored rectangles for each stage with text labels and connects them with lines to show flow.',
+      parameters: {
+        type: 'object',
+        properties: {
+          stages: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of stage names/labels for the journey (e.g., ["Awareness", "Consideration", "Purchase", "Retention", "Advocacy"]). The AI should generate appropriate stage names based on context.',
+          },
+          x: {
+            type: 'number',
+            description: 'Starting X position (uses viewport center if not specified)',
+          },
+          y: {
+            type: 'number',
+            description: 'Starting Y position (uses viewport center if not specified)',
+          },
+          orientation: {
+            type: 'string',
+            enum: ['horizontal', 'vertical'],
+            description: 'Layout orientation (default horizontal)',
+          },
+        },
+        required: ['stages'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'createRetrospectiveBoard',
+      description:
+        'Create a complete retrospective board with frames and sticky notes in ONE call. Creates vertical columns (frames) with sticky notes inside each. Default: 3 columns ("What Went Well", "What Didn\'t", "Action Items") with 3 sticky notes per column. You should generate appropriate example content for each note based on the column type.',
+      parameters: {
+        type: 'object',
+        properties: {
+          columns: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of column names (default: ["What Went Well", "What Didn\'t", "Action Items"])',
+          },
+          notesPerColumn: {
+            type: 'number',
+            description: 'Number of sticky notes per column (default 3)',
+          },
+          noteContents: {
+            type: 'array',
+            items: {
+              type: 'array',
+              items: { type: 'string' },
+            },
+            description: 'Optional 2D array of note contents [column][note]. Generate example content for each note based on the column type. Example: [["Team collaboration", "Met deadlines"], ["Communication issues", "Technical debt"], ["Improve meetings", "Add tests"]]',
+          },
+          x: {
+            type: 'number',
+            description: 'Starting X position (uses viewport center if not specified)',
+          },
+          y: {
+            type: 'number',
+            description: 'Starting Y position (uses viewport center if not specified)',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'createProsConsBoard',
+      description:
+        'Create a Pros and Cons board with two columns of sticky notes in ONE call. You MUST generate contextually appropriate pros and cons based on the topic the user provides. For example, "pros and cons of remote work" should generate relevant pros like "flexibility" and cons like "isolation".',
+      parameters: {
+        type: 'object',
+        properties: {
+          topic: {
+            type: 'string',
+            description: 'The topic to analyze (e.g., "remote work", "electric cars", "AI in education")',
+          },
+          prosCount: {
+            type: 'number',
+            description: 'Number of pros to generate (default 3)',
+          },
+          consCount: {
+            type: 'number',
+            description: 'Number of cons to generate (default 3)',
+          },
+          prosContent: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of pros - YOU MUST generate these based on the topic. Example for "remote work": ["Flexible schedule", "No commute", "Better work-life balance"]',
+          },
+          consContent: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of cons - YOU MUST generate these based on the topic. Example for "remote work": ["Social isolation", "Communication challenges", "Harder to disconnect"]',
+          },
+          x: {
+            type: 'number',
+            description: 'Starting X position (uses viewport center if not specified)',
+          },
+          y: {
+            type: 'number',
+            description: 'Starting Y position (uses viewport center if not specified)',
+          },
+        },
+        required: ['prosContent', 'consContent'],
       },
     },
   },

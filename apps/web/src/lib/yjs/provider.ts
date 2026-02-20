@@ -152,6 +152,12 @@ export class YjsProvider {
     return Array.from(this.objects.values());
   }
 
+  clearObjects() {
+    this.ydoc.transact(() => {
+      this.objects.clear();
+    });
+  }
+
   // ── Awareness helpers ────────────────────────────────────
 
   /**

@@ -17,6 +17,7 @@ export interface BoardObjectSummary {
   color?: string;
   text?: string;
   name?: string;
+  containedObjectIds?: string[]; // For frames: IDs of objects inside
 }
 
 export interface BoardStateSummary {
@@ -77,23 +78,27 @@ function summarizeObject(obj: WhiteboardObject): BoardObjectSummary {
     summary.name = obj.name;
   }
 
+  // Include containedObjectIds for frames
+  if (obj.type === 'frame' && 'containedObjectIds' in obj && Array.isArray(obj.containedObjectIds)) {
+    summary.containedObjectIds = obj.containedObjectIds;
+  }
+
   return summary;
 }
 
 /**
- * Produces a compact board state summary. Caps at 200 objects to keep
- * the prompt within reasonable token limits.
+ * Produces a compact board state summary.
+ * 
+ * Sends ALL objects to the LLM for complete board awareness.
+ * Uses compact format to minimize token usage.
  */
 export function summarizeBoardState(
   objects: WhiteboardObject[],
 ): BoardStateSummary {
-  const MAX_OBJECTS = 200;
-  const subset =
-    objects.length > MAX_OBJECTS ? objects.slice(0, MAX_OBJECTS) : objects;
-
   return {
     objectCount: objects.length,
-    objects: subset.map(summarizeObject),
+    objects: objects.map(summarizeObject),
+    // allObjectIds no longer needed since we send all objects
   };
 }
 
@@ -115,15 +120,14 @@ export function boardStateToPromptString(
     if (obj.color) parts.push(`color=${obj.color}`);
     if (obj.text) parts.push(`text="${obj.text}"`);
     if (obj.name) parts.push(`name="${obj.name}"`);
+    if (obj.containedObjectIds && obj.containedObjectIds.length > 0) {
+      parts.push(`contains=[${obj.containedObjectIds.join(', ')}]`);
+    }
     return parts.join(' ');
   });
 
   let result = `Board has ${summary.objectCount} object(s):\n`;
   result += lines.join('\n');
-
-  if (summary.objectCount > summary.objects.length) {
-    result += `\n... and ${summary.objectCount - summary.objects.length} more objects (truncated)`;
-  }
 
   return result;
 }

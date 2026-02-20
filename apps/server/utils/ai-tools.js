@@ -499,7 +499,7 @@ export function buildAIContext(boardState, selectedIds = [], selectionArea = nul
         const { x, y, width, height } = selectionArea;
         areaNote = ` The user has selected a region (bounding box) at (${Math.round(x)}, ${Math.round(y)}) with width ${Math.round(width)}px and height ${Math.round(height)}px. Operate ONLY within this box — when formatting, spacing, or arranging in a grid, place objects inside this region.`;
       }
-      selectionContext = `\n\n## User Selection (IMPORTANT)\nThe user has ${validIds.length} object(s) selected: ${validIds.join(', ')}.${areaNote}\nWhen the user says "them", "these", "format them", "space them", "arrange them in a grid", "organize these", "how many", "count these", "analyze these", or similar, they mean THESE selected objects. Use moveObject (and optionally resizeObject) to arrange/format ONLY these objects within the selection box. For grids: calculate positions within the box and issue moveObject for each selected object. For analysis: when calling analyzeObjects, pass objectIds: [${validIds.join(', ')}] to analyze only the selected objects.`;
+      selectionContext = `\n\n## User Selection (IMPORTANT)\nThe user has ${validIds.length} object(s) selected: ${validIds.join(', ')}.${areaNote}\nWhen the user says "them", "these", "format them", "space them", "arrange them in a grid", "organize these", "how many", "count these", "analyze these", or similar, they mean THESE selected objects. For arranging in grid: call arrangeInGrid with objectIds of selected objects (the tool will automatically use the selection area bounds). For analysis: when calling analyzeObjects, pass objectIds: [${validIds.join(', ')}] to analyze only the selected objects.`;
     }
   }
 

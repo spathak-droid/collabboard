@@ -128,6 +128,10 @@ export async function executeTask(openai, task, boardState, context, previousRes
         .map(([key, count]) => {
           const [color, ...typeParts] = key.split('_');
           const type = typeParts.join('_');
+          // Skip "none" color - just show type
+          if (color === 'none') {
+            return `${count} ${type}${count !== 1 ? 's' : ''}`;
+          }
           return `${count} ${color} ${type}${count !== 1 ? 's' : ''}`;
         })
         .join(', ');

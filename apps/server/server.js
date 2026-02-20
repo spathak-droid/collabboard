@@ -23,7 +23,7 @@ import dotenv from 'dotenv';
 import { AI_SYSTEM_PROMPT, AI_TOOLS, buildAIContext } from './utils/ai-tools.js';
 import { orchestrateAgents, continueOrchestration } from './utils/agent-orchestrator.js';
 import { createGeminiClient } from './utils/gemini-adapter.js';
-import { routeCommand, executeSingleAgent, executeMiniAgent, classifyUserIntent, executeFromIntent } from './utils/command-router.js';
+import { routeCommand, executeSingleAgent, executeMiniAgent, classifyUserIntent, executeFromIntent, needsComplexSupervisor, executeComplexSupervisor } from './utils/command-router.js';
 import { detectMiniAgent } from './utils/mini-agents.js';
 
 dotenv.config();
@@ -161,14 +161,93 @@ function executeAnalyzeObjectsServerSide(objectIds, boardState) {
     line: 'connector',
     frame: 'frame',
   };
+  
+  // Helper to convert hex color to human-readable name
+  function hexToColorName(hex) {
+    if (!hex || typeof hex !== 'string') return 'gray';
+    
+    // Normalize hex
+    const cleanHex = hex.replace(/^#/, '').toUpperCase();
+    
+    // Color mapping from common hex values to names
+    const colorMap = {
+      'FFF59D': 'yellow',  // Sticky yellow
+      'F48FB1': 'pink',    // Sticky pink
+      '81D4FA': 'blue',    // Sticky blue
+      'A5D6A7': 'green',   // Sticky green
+      'FFCC80': 'orange',  // Sticky orange
+      'EF4444': 'red',
+      'EF5444': 'red',
+      '3B82F6': 'blue',
+      '10B981': 'green',
+      'EAB308': 'yellow',
+      'F97316': 'orange',
+      'EC4899': 'pink',
+      'A855F7': 'purple',
+      '6B7280': 'gray',
+      '000000': 'black',
+      'FFFFFF': 'white',
+      'FFF': 'white',
+      'E5E7EB': 'light gray',
+    };
+    
+    // Direct lookup
+    if (colorMap[cleanHex]) {
+      return colorMap[cleanHex];
+    }
+    
+    // Convert to RGB for heuristic matching
+    let r, g, b;
+    if (cleanHex.length === 3) {
+      r = parseInt(cleanHex[0] + cleanHex[0], 16);
+      g = parseInt(cleanHex[1] + cleanHex[1], 16);
+      b = parseInt(cleanHex[2] + cleanHex[2], 16);
+    } else if (cleanHex.length === 6) {
+      r = parseInt(cleanHex.slice(0, 2), 16);
+      g = parseInt(cleanHex.slice(2, 4), 16);
+      b = parseInt(cleanHex.slice(4, 6), 16);
+    } else {
+      return 'gray';
+    }
+    
+    // Simple heuristic-based color name detection
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    
+    // Grayscale detection
+    if (max - min < 30) {
+      if (max < 50) return 'black';
+      if (max > 200) return 'white';
+      return 'gray';
+    }
+    
+    // Color detection by dominant channel
+    if (r > g && r > b) {
+      if (g > b + 30) return 'orange';
+      if (b > 100) return 'pink';
+      return 'red';
+    }
+    if (g > r && g > b) {
+      if (r > b + 30) return 'yellow';
+      return 'green';
+    }
+    if (b > r && b > g) {
+      if (r > 100) return 'purple';
+      if (g > 100) return 'cyan';
+      return 'blue';
+    }
+    
+    return 'gray';
+  }
 
   for (const obj of objectsToAnalyze) {
     const type = typeMap[obj.type] || obj.type;
     let color = 'none';
 
-    // Get color from object - use raw values, let AI interpret
+    // Get color from object and convert to human-readable name
     if (obj.type === 'sticky' && obj.color) {
-      color = obj.color;
+      // Sticky notes have named colors
+      color = hexToColorName(obj.color);
     } else if (obj.type === 'circle' || obj.type === 'rect' || obj.type === 'triangle' || obj.type === 'star') {
       // For shapes, check both fill and stroke
       // Use fill if it's a visible color (not white/transparent), otherwise use stroke
@@ -182,13 +261,15 @@ function executeAnalyzeObjectsServerSide(objectIds, boardState) {
         obj.fill !== '#fff';
       
       if (isFillVisible) {
-        color = obj.fill;
-      } else if (obj.stroke) {
-        // Use stroke if fill is white/transparent or missing
-        color = obj.stroke;
+        color = hexToColorName(obj.fill);
+      } else if (obj.stroke && obj.stroke !== '#000000' && obj.stroke !== 'black') {
+        // Use stroke if fill is white/transparent and stroke is not black (default)
+        color = hexToColorName(obj.stroke);
       } else if (obj.fill) {
         // Fallback to fill even if white
-        color = obj.fill;
+        color = hexToColorName(obj.fill);
+      } else {
+        color = 'gray'; // Default for shapes without color
       }
     } else if (obj.type === 'frame' || obj.type === 'line') {
       color = 'none';
@@ -287,6 +368,10 @@ const callOpenAI = traceable(
           .map(([key, count]) => {
             const [color, ...typeParts] = key.split('_');
             const type = typeParts.join('_');
+            // Skip "none" color - just show type
+            if (color === 'none') {
+              return `${count} ${type}${count !== 1 ? 's' : ''}`;
+            }
             return `${count} ${color} ${type}${count !== 1 ? 's' : ''}`;
           })
           .join(', ');
@@ -453,14 +538,108 @@ async function handleAIMessage(ws, data) {
           
           if (intent && !intent.isMultiStep) {
             // Execute directly from intent (bypass all agents!)
-            const toolCalls = executeFromIntent(intent, { objects: boardState?.objects || [], selectedIds });
+            let toolCalls = executeFromIntent(intent, { objects: boardState?.objects || [], selectedIds });
             
             if (toolCalls && toolCalls.length > 0) {
               console.log(`✅ Intent classifier generated ${toolCalls.length} tool calls directly`);
               
+              // Generate a proper summary message based on operation and quantity
+              let summary = '';
+              const quantity = intent.quantity || 1;
+              
+              if (intent.operation === 'CREATE') {
+                // Map object types to human-readable names
+                const objectTypeNames = {
+                  'shape': intent.shapeType || 'shape',
+                  'sticky': 'sticky note',
+                  'frame': 'frame',
+                  'text': 'text',
+                  'textBubble': 'text bubble',
+                };
+                
+                const typeName = objectTypeNames[intent.objectType] || intent.objectType;
+                
+                if (quantity > 1) {
+                  // Plural form
+                  const pluralNames = {
+                    'circle': 'circles',
+                    'rect': 'rectangles',
+                    'rectangle': 'rectangles',
+                    'triangle': 'triangles',
+                    'star': 'stars',
+                    'sticky note': 'sticky notes',
+                    'frame': 'frames',
+                    'text': 'text objects',
+                    'text bubble': 'text bubbles',
+                  };
+                  
+                  const pluralName = pluralNames[typeName] || typeName + 's';
+                  summary = `I've created ${quantity} ${pluralName}`;
+                  
+                  // Add grid info if rows/columns specified
+                  if (intent.rows && intent.columns) {
+                    summary += ` in a ${intent.rows}x${intent.columns} grid`;
+                  } else {
+                    summary += ' in a grid layout';
+                  }
+                } else {
+                  // Singular form
+                  const article = ['a', 'e', 'i', 'o', 'u'].includes(typeName[0]?.toLowerCase()) ? 'an' : 'a';
+                  summary = `I've created ${article} ${typeName}`;
+                }
+              } else if (intent.operation === 'ANALYZE') {
+                // Execute analyzeObjects server-side
+                const analyzeCall = toolCalls.find(tc => tc.name === 'analyzeObjects');
+                if (analyzeCall && executeAnalyzeObjectsServerSide) {
+                  console.log('📊 Executing analyzeObjects (intent classifier)');
+                  
+                  const objectIdsToAnalyze = analyzeCall.arguments.objectIds || [];
+                  const analysisResult = executeAnalyzeObjectsServerSide(objectIdsToAnalyze, boardState);
+                  
+                  // Generate detailed breakdown with color names
+                  const breakdown = Object.entries(analysisResult.countByTypeAndColor)
+                    .sort((a, b) => b[1] - a[1]) // Sort by count descending
+                    .map(([key, count]) => {
+                      const [color, ...typeParts] = key.split('_');
+                      const type = typeParts.join('_');
+                      // Skip "none" color - just show type
+                      if (color === 'none') {
+                        return `${count} ${type}${count !== 1 ? 's' : ''}`;
+                      }
+                      return `${count} ${color} ${type}${count !== 1 ? 's' : ''}`;
+                    })
+                    .join(', ');
+                  
+                  summary = `Found ${analysisResult.totalObjects} object${analysisResult.totalObjects !== 1 ? 's' : ''}: ${breakdown}`;
+                  
+                  // Remove analyzeObjects from toolCalls (server-side only)
+                  toolCalls = toolCalls.filter(tc => tc.name !== 'analyzeObjects');
+                }
+              } else if (intent.operation === 'UPDATE') {
+                // UPDATE operation summary
+                const count = toolCalls.length;
+                summary = `I've updated ${count} object${count !== 1 ? 's' : ''}`;
+              } else if (intent.operation === 'CHANGE_COLOR') {
+                // Color change summary
+                const count = toolCalls.length;
+                summary = `I've changed the color of ${count} object${count !== 1 ? 's' : ''}`;
+              } else if (intent.operation === 'DELETE') {
+                // Delete summary
+                const deleteCall = toolCalls.find(tc => tc.name === 'deleteObject');
+                const count = deleteCall?.arguments?.objectIds?.length || 0;
+                summary = `I've deleted ${count} object${count !== 1 ? 's' : ''}`;
+              } else if (intent.operation === 'MOVE') {
+                // Move summary
+                const count = toolCalls.length;
+                summary = `I've moved ${count} object${count !== 1 ? 's' : ''}`;
+              } else {
+                // Fallback for other operations
+                summary = `I've ${intent.operation.toLowerCase()}d ${quantity > 1 ? quantity + ' ' : ''}${intent.objectType}${quantity > 1 ? 's' : ''}`;
+              }
+              
               result = {
                 toolCalls,
-                summary: `I've ${intent.operation.toLowerCase()}d ${intent.quantity || ''} ${intent.objectType}${intent.quantity > 1 ? 's' : ''}`,
+                summary,
                 needsFollowUp: false,
                 progressSent: false,
               };
@@ -577,6 +756,24 @@ async function handleAIMessage(ws, data) {
           boardState,
           context,
           executeAnalyzeObjectsServerSide
+        );
+        
+        // Format result to match orchestrator output
+        result = {
+          toolCalls: result.toolCalls || [],
+          summary: result.message || result.summary,
+          needsFollowUp: false,
+          progressSent: false,
+        };
+      } else if (route.type === 'complex') {
+        // Level 1.5: Complex Supervisor (uses GPT-4o-mini for reasoning, ~500-800ms)
+        console.log(`🧠 COMPLEX SUPERVISOR ROUTE: ${route.reason}`);
+        
+        result = await executeComplexSupervisor(
+          openai,
+          message,
+          boardState,
+          context
         );
         
         // Format result to match orchestrator output

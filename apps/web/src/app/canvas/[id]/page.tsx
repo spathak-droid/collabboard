@@ -32,6 +32,7 @@ import { STICKY_COLORS } from '@/types/canvas';
 import { supabase, updateBoard, fetchBoardMembers, ensureBoardAccess, fetchOnlineUserUids, type BoardMember } from '@/lib/supabase/client';
 import { getUserColor } from '@/lib/utils/colors';
 import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextBubbleShape, AnchorPosition } from '@/types/canvas';
 
 const isEditableElement = (target: EventTarget | null): boolean => {
@@ -216,6 +217,7 @@ export default function BoardPage() {
     updateCursor,
     getBroadcastRate,
     setBoardTitle: yjsSetBoardTitle,
+    clearObjects,
   } = useYjs({
     boardId,
     userId: user?.uid || '',
@@ -618,6 +620,16 @@ export default function BoardPage() {
       deselectAll();
     }
   }, [selectedIds, deselectAll, deleteObjectsByIds]);
+
+  const handleClearBoard = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const confirmed = window.confirm(
+      'This will remove everything on the board for everyone. Are you sure you want to clear the canvas?'
+    );
+    if (!confirmed) return;
+    clearObjects();
+    deselectAll();
+  }, [clearObjects, deselectAll, isOwner]);
 
   // ── Connector logic ──
   const objectsMap = useMemo(() => {
@@ -1088,6 +1100,16 @@ export default function BoardPage() {
             Objects: <strong>{objects.length}</strong>
           </div>
           <span className="text-gray-300">|</span>
+          <>
+            <button
+              onClick={handleClearBoard}
+              className="flex h-8 w-8 items-center justify-center rounded-md border border-rose-200 bg-white text-rose-600 transition hover:border-rose-300 hover:bg-rose-50"
+              title="Clear board"
+            >
+              <DeleteOutlineIcon sx={{ fontSize: 20 }} />
+            </button>
+            <span className="text-gray-300">|</span>
+          </>
           <LatencyStatusButton
             connectionStatus={connectionStatus}
             awareness={awareness}

@@ -8,10 +8,10 @@
  */
 
 import { CREATE_AGENT, MODIFY_AGENT, DELETE_AGENT, ORGANIZE_AGENT, ANALYZE_AGENT } from './agent-system.js';
-import { detectMiniAgent, executeMiniAgent } from './mini-agents.js';
+import { detectMiniAgent, executeMiniAgent, needsComplexSupervisor, executeComplexSupervisor } from './mini-agents.js';
 import { classifyUserIntent, executeFromIntent } from './intent-classifier.js';
 
-export { executeMiniAgent, classifyUserIntent, executeFromIntent }; // Re-export for server.js
+export { executeMiniAgent, classifyUserIntent, executeFromIntent, needsComplexSupervisor, executeComplexSupervisor }; // Re-export for server.js
 
 /**
  * Detect if command requires multi-step orchestration
@@ -61,6 +61,11 @@ export function routeCommand(userMessage, hasSelection = false, useIntentClassif
   // Skip for multi-step commands detected early
   if (useIntentClassifier && !requiresOrchestration(userMessage)) {
     return { type: 'intent', reason: 'Using intent classifier for direct execution' };
+  }
+  
+  // Level 0.5: Try complex supervisor (for domain-specific spatial layouts)
+  if (needsComplexSupervisor(userMessage)) {
+    return { type: 'complex', reason: 'Complex command requiring domain knowledge and spatial reasoning' };
   }
   
   // Level 1: Try mini-agent (ultra-fast path)
@@ -187,6 +192,10 @@ export async function executeSingleAgent(openai, agent, userMessage, boardState,
         .map(([key, count]) => {
           const [color, ...typeParts] = key.split('_');
           const type = typeParts.join('_');
+          // Skip "none" color - just show type
+          if (color === 'none') {
+            return `${count} ${type}${count !== 1 ? 's' : ''}`;
+          }
           return `${count} ${color} ${type}${count !== 1 ? 's' : ''}`;
         })
         .join(', ');

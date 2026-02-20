@@ -91,6 +91,7 @@ export default function BoardPage() {
     createObjectsBatch,
     updateObject,
     deleteObjects,
+    clearObjects,
     updateCursor,
     broadcastLiveDrag,
     clearLiveDrag,
@@ -453,10 +454,12 @@ export default function BoardPage() {
     createObjectsBatch,
     updateObject,
     deleteObjects,
+    clearObjects,
     objects,
     userId: user?.uid || '',
     selectedIds,
     selectionArea: selectionAreaForAI,
+    viewport: { position, scale },
   });
   const frameManagement = useFrameManagement(objects);
   const manipulation = useObjectManipulation(objects, objectsMap, updateObject);
@@ -610,7 +613,8 @@ export default function BoardPage() {
       for (const obj of source) {
         idMap.set(obj.id, generateId());
         allObjectsToClone.push(obj);
-        if (obj.type === 'frame') {
+        // Only include contained objects if this is an AI container frame
+        if (obj.type === 'frame' && obj.isAIContainer) {
           const frame = obj as FrameType;
           for (const containedId of frame.containedObjectIds || []) {
             if (!idMap.has(containedId)) {
@@ -1059,7 +1063,8 @@ export default function BoardPage() {
 
     if (activeTool === 'frame') {
       // In frame mode, use the drag rectangle bounds directly
-      containedObjectIds = initialIds.length > 0 ? getConnectedObjectIds(initialIds, objects) : [];
+      // User-drawn frames don't auto-contain objects - they're just shapes
+      containedObjectIds = [];
       minX = rect.x;
       minY = rect.y;
       maxX = rect.x + rect.width;
@@ -1153,11 +1158,11 @@ export default function BoardPage() {
     const idsToDeleteSet = new Set<string>();
     const containedInSelectedFrames = new Set<string>();
 
-    // First pass: identify frames and mark their contained objects
+    // First pass: identify AI container frames and mark their contained objects
     selectedIds.forEach((id: string) => {
       const obj = objectsMap.get(id);
-      if (obj?.type === 'frame') {
-        // Mark all contained objects as being deleted with their frame
+      if (obj?.type === 'frame' && obj.isAIContainer) {
+        // Only mark contained objects for deletion if this is an AI container
         obj.containedObjectIds?.forEach((containedId: string) => {
           containedInSelectedFrames.add(containedId);
         });
@@ -1168,13 +1173,16 @@ export default function BoardPage() {
     selectedIds.forEach((id: string) => {
       const obj = objectsMap.get(id);
       if (obj?.type === 'frame') {
-        // When deleting a frame, also delete all contained objects
+        // When deleting a frame, delete the frame itself
         idsToDeleteSet.add(id);
-        obj.containedObjectIds?.forEach((containedId: string) => {
-          idsToDeleteSet.add(containedId);
-        });
+        // Only delete contained objects if this is an AI container
+        if (obj.isAIContainer) {
+          obj.containedObjectIds?.forEach((containedId: string) => {
+            idsToDeleteSet.add(containedId);
+          });
+        }
       } else {
-        // For non-frame objects, only delete if they're not contained in a selected frame
+        // For non-frame objects, only delete if they're not contained in a selected AI container frame
         // (if they are, they'll be deleted with the frame above)
         if (!containedInSelectedFrames.has(id)) {
           idsToDeleteSet.add(id);
@@ -1539,9 +1547,6 @@ export default function BoardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
           </button>
-          <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-md flex items-center justify-center">
-            <span className="text-white text-xs font-bold">C</span>
-          </div>
           <input
             type="text"
             value={boardTitle}

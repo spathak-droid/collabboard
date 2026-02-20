@@ -220,6 +220,10 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
     providerRef.current?.deleteObjectsBatch(ids);
   }, []);
 
+  const clearObjects = useCallback(() => {
+    providerRef.current?.clearObjects();
+  }, []);
+
   const updateCursor = useCallback((x: number, y: number) => {
     providerRef.current?.updateCursor(x, y);
   }, []);
@@ -267,5 +271,6 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
     clearLivePosition,
     setBoardTitle,
     getBroadcastRate,
+    clearObjects,
   };
 };

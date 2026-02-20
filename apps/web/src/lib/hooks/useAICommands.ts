@@ -30,16 +30,19 @@ interface UseAICommandsOptions {
   createObjectsBatch: (objects: WhiteboardObject[]) => void;
   updateObject: (id: string, data: Partial<WhiteboardObject>) => void;
   deleteObjects: (ids: string[]) => void;
+  clearObjects?: () => void; // Optional: ultra-fast clear using Yjs Map.clear()
   objects: WhiteboardObject[];
   userId: string;
   /** Currently selected object IDs — when user says "them", "these", "format them", use these */
   selectedIds?: string[];
   /** Bounding box of the selected area — AI should operate within this region */
   selectionArea?: { x: number; y: number; width: number; height: number } | null;
+  /** Current viewport state for viewport-aware positioning (directions, visible area) */
+  viewport?: { position: { x: number; y: number }; scale: number };
 }
 
 export function useAICommands(options: UseAICommandsOptions) {
-  const { boardId, createObject, createObjectsBatch, updateObject, deleteObjects, objects, userId, selectedIds = [], selectionArea = null } =
+  const { boardId, createObject, createObjectsBatch, updateObject, deleteObjects, clearObjects, objects, userId, selectedIds = [], selectionArea = null, viewport } =
     options;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -71,10 +74,14 @@ export function useAICommands(options: UseAICommandsOptions) {
   updateObjectRef.current = updateObject;
   const deleteObjectsRef = useRef(deleteObjects);
   deleteObjectsRef.current = deleteObjects;
+  const clearObjectsRef = useRef(clearObjects);
+  clearObjectsRef.current = clearObjects;
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
   const selectionAreaRef = useRef(selectionArea);
   selectionAreaRef.current = selectionArea;
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
   
   // Track the original message for follow-up calls
   const originalMessageRef = useRef<string>('');
@@ -128,6 +135,7 @@ export function useAICommands(options: UseAICommandsOptions) {
           createObjectsBatch: createObjectsBatchRef.current,
           updateObject: updateObjectRef.current,
           deleteObjects: deleteObjectsRef.current,
+          clearObjects: clearObjectsRef.current,
           objects: objectsRef.current,
           userId: userIdRef.current,
         };
@@ -135,6 +143,12 @@ export function useAICommands(options: UseAICommandsOptions) {
         // Execute the actions for this step
         const executionResult = executeToolCalls(actions, ops, {
           selectionArea: selectionAreaRef.current ?? undefined,
+          viewport: viewportRef.current ? {
+            position: viewportRef.current.position,
+            scale: viewportRef.current.scale,
+            width: typeof window !== 'undefined' ? window.innerWidth : 1920,
+            height: typeof window !== 'undefined' ? window.innerHeight : 1080,
+          } : undefined,
         });
         
         // Generate response for this step
@@ -189,6 +203,7 @@ export function useAICommands(options: UseAICommandsOptions) {
           createObjectsBatch: createObjectsBatchRef.current,
           updateObject: updateObjectRef.current,
           deleteObjects: deleteObjectsRef.current,
+          clearObjects: clearObjectsRef.current,
           objects: objectsRef.current,
           userId: userIdRef.current,
         };
@@ -200,6 +215,12 @@ export function useAICommands(options: UseAICommandsOptions) {
         if (actions && actions.length > 0) {
           executionResult = executeToolCalls(actions, ops, {
             selectionArea: selectionAreaRef.current ?? undefined,
+            viewport: viewportRef.current ? {
+              position: viewportRef.current.position,
+              scale: viewportRef.current.scale,
+              width: typeof window !== 'undefined' ? window.innerWidth : 1920,
+              height: typeof window !== 'undefined' ? window.innerHeight : 1080,
+            } : undefined,
           });
           actionSummary = executionResult.summary;
           createdIds = executionResult.createdIds;
@@ -230,6 +251,12 @@ export function useAICommands(options: UseAICommandsOptions) {
               })),
               selectedIds: selectedIds.length > 0 ? selectedIds : undefined,
               selectionArea: selectionAreaRef.current ?? undefined,
+              viewport: viewportRef.current ? {
+                position: viewportRef.current.position,
+                scale: viewportRef.current.scale,
+                width: typeof window !== 'undefined' ? window.innerWidth : 1920,
+                height: typeof window !== 'undefined' ? window.innerHeight : 1080,
+              } : undefined,
               toolExecutionResults: {
                 summary: actionSummary,
                 createdIds,
@@ -373,11 +400,17 @@ export function useAICommands(options: UseAICommandsOptions) {
         conversationHistory,
         selectedIds: selectedIds.length > 0 ? selectedIds : undefined,
         selectionArea: selectionArea ?? undefined,
+        viewport: viewport ? {
+          position: viewport.position,
+          scale: viewport.scale,
+          width: typeof window !== 'undefined' ? window.innerWidth : 1920,
+          height: typeof window !== 'undefined' ? window.innerHeight : 1080,
+        } : undefined,
       }));
 
       setIsProcessing(true);
     },
-    [isProcessing, objects, messages, selectedIds, selectionArea],
+    [isProcessing, objects, messages, selectedIds, selectionArea, viewport],
   );
 
   const clearMessages = useCallback(() => {

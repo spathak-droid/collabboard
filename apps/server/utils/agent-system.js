@@ -81,7 +81,7 @@ export const CREATE_AGENT = {
       type: 'function',
       function: {
         name: 'createShape',
-        description: 'Create a geometric shape',
+        description: 'Create a geometric shape with optional text label INSIDE the shape. Circles and rectangles can have text labels built-in.',
         parameters: {
           type: 'object',
           properties: {
@@ -91,6 +91,7 @@ export const CREATE_AGENT = {
             width: { type: 'number' },
             height: { type: 'number' },
             color: { type: 'string' },
+            text: { type: 'string', description: 'Optional text label to display INSIDE the shape (for labeled circles, rectangles, etc.)' },
           },
           required: ['type'],
         },
@@ -114,9 +115,108 @@ export const CREATE_AGENT = {
         },
       },
     },
+    {
+      type: 'function',
+      function: {
+        name: 'createUserJourneyMap',
+        description: 'Create a user journey map with stages connected by lines. You must generate appropriate stage names.',
+        parameters: {
+          type: 'object',
+          properties: {
+            stages: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of stage names (e.g., ["Awareness", "Consideration", "Purchase", "Retention", "Advocacy"])',
+            },
+            x: { type: 'number' },
+            y: { type: 'number' },
+            orientation: { type: 'string', enum: ['horizontal', 'vertical'] },
+          },
+          required: ['stages'],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'createSWOTAnalysis',
+        description: 'Create a complete SWOT analysis matrix in ONE tool call (4 sticky notes + frame)',
+        parameters: {
+          type: 'object',
+          properties: {
+            quadrants: { type: 'number', description: 'Number of quadrants (default 4)' },
+            shape: { type: 'string', enum: ['rect', 'circle', 'triangle', 'star'] },
+            x: { type: 'number' },
+            y: { type: 'number' },
+            color: { type: 'string' },
+            withFrame: { type: 'boolean' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'createRetrospectiveBoard',
+        description: 'Create a complete retrospective board in ONE call (frames + sticky notes)',
+        parameters: {
+          type: 'object',
+          properties: {
+            columns: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Column names (default: ["What Went Well", "What Didn\'t", "Action Items"])',
+            },
+            notesPerColumn: { type: 'number', description: 'Notes per column (default 3)' },
+            noteContents: {
+              type: 'array',
+              items: { type: 'array', items: { type: 'string' } },
+              description: 'Generate example content for each note based on column type. 2D array: [[col1_note1, col1_note2, col1_note3], [col2_note1, col2_note2, col2_note3], ...]',
+            },
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+          required: [],
+        },
+      },
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'createProsConsBoard',
+        description: 'Create Pros and Cons board in ONE call - YOU MUST generate contextual content',
+        parameters: {
+          type: 'object',
+          properties: {
+            topic: { type: 'string', description: 'Topic to analyze' },
+            prosCount: { type: 'number', description: 'Number of pros (default 3)' },
+            consCount: { type: 'number', description: 'Number of cons (default 3)' },
+            prosContent: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'REQUIRED: Generate pros based on topic. Example: ["Flexibility", "Cost savings", "Global talent"]',
+            },
+            consContent: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'REQUIRED: Generate cons based on topic. Example: ["Isolation", "Communication gaps", "Time zones"]',
+            },
+            x: { type: 'number' },
+            y: { type: 'number' },
+          },
+          required: ['prosContent', 'consContent'],
+        },
+      },
+    },
   ],
   
   systemPrompt: `You are the Create Agent. Your job is to create objects on the whiteboard.
+
+**CRITICAL: You MUST call the createStickyNote/createShape/createFrame tools!**
+- NEVER return just metadata like {"title": "SWOT Analysis"}
+- You MUST make actual tool calls for EVERY object
+- Example: For SWOT, you MUST call createStickyNote 4 times + createFrame 1 time = 5 total tool calls
 
 **RULE #1: Create the EXACT number requested**
 - "Create 20 circles" = 20 calls to createShape (type: 'circle')
@@ -129,7 +229,11 @@ export const CREATE_AGENT = {
 - **Sticky notes:** createStickyNote(text, color) - Colored cards (yellow/pink/blue/green/orange) for brainstorming
 - **Text:** createText(text) - Plain floating text without background or border
 - **Text bubble:** createTextBubble(text) - Text inside a box/bubble with border (NOT a sticky note)
-- **Shapes:** createShape(type) - Geometric shapes (rect/circle/triangle/star)
+- **Shapes:** createShape(type, text) - Geometric shapes (rect/circle/triangle/star)
+  * **CRITICAL: Shapes can have text labels INSIDE them**
+  * Use the 'text' parameter to add labels (e.g., createShape(type: 'circle', text: 'Mercury'))
+  * NO need to create separate text objects for labels on shapes
+  * Examples: labeled circles for planets, labeled rectangles for stages
 - **Frame:** createFrame(title) - Container/grouping box with a title (NOT a shape, NOT a rectangle)
 
 **CRITICAL DISTINCTIONS:**
@@ -139,6 +243,12 @@ export const CREATE_AGENT = {
 
 **Coordinates:**
 - If task says "starting at position (X, Y)" → Use those coords, space by +170px horizontally
+- If task says "+230 right from #1" or similar relative positioning:
+  * First object: omit x/y (auto-placed at viewport center) - track its position
+  * Second object: use first object's x+230, same y
+  * Third object: same x as first, y+230
+  * Fourth object: x+230, y+230 from first
+  * You MUST use the actual coordinates from the first created object for the calculations
 - Otherwise → OMIT x,y (client auto-places)
 
 **Extract all attributes from task:**
@@ -165,9 +275,42 @@ export const CREATE_AGENT = {
 - Sticky notes: yellow
 - NEVER use black (#000000) fill
 
-**Templates (create ALL in ONE response):**
-- SWOT: 4 sticky notes at (150,150), (370,150), (150,370), (370,370) + 1 frame at (100,100) 500x500
-- Retro: 3 frames at (100,100), (100,400), (100,700) each 700x280 + 9 sticky notes inside
+**Templates (create ALL in ONE tool call):**
+- SWOT: Call createSWOTAnalysis() - creates 4 sticky notes (Strengths, Weaknesses, Opportunities, Threats) + frame in ONE call
+  * DO NOT call createStickyNote 4 times - use createSWOTAnalysis instead!
+  * Example: createSWOTAnalysis({quadrants: 4})
+- User Journey Map / Stage Map / Process Map: Call createUserJourneyMap with appropriate stage names
+  * **KEYWORDS THAT TRIGGER THIS**: "journey map", "stage map", "process map", "stages for", "steps for", "phases for", "map for", "map on"
+  * **CRITICAL: When user says "X stages map for/on Y" → use createUserJourneyMap tool, NOT createText!**
+  * **Analyze the user's request and generate creative, contextually appropriate stage names**
+  * **You MUST think about what stages make sense for the specific topic/domain the user mentions**
+  * Examples of contextual stage generation:
+    - "user journey map" → ["Awareness", "Consideration", "Purchase", "Retention", "Advocacy"]
+    - "3 stage map on how to study for exams" → ["Preparation", "Study", "Review"] OR ["Planning", "Active Study", "Practice"]
+    - "4 stages map for dogs" → ["Puppy", "Adolescent", "Adult", "Senior"]
+    - "5 stages for coffee making" → ["Bean Selection", "Grinding", "Brewing", "Serving", "Enjoying"]
+    - "software development journey" → ["Planning", "Development", "Testing", "Deployment", "Maintenance"]
+  * **THINK CREATIVELY**: If user says "map for X" or "stages for X", think about what stages/phases/steps X would have
+  * **If user specifies a number of stages, generate exactly that many stages**
+  * **The stages should tell a logical progression or flow related to the user's topic**
+  * **DO NOT create text/sticky notes with the prompt itself - generate the actual stages!**
+  * Example: createUserJourneyMap({stages: ["Stage1", "Stage2", "Stage3", ...]})
+- Retrospective Board: Call createRetrospectiveBoard() - creates 3 frames + 9 sticky notes in ONE call
+  * DO NOT call createFrame 3 times + createStickyNote 9 times - use createRetrospectiveBoard instead!
+  * Default: 3 columns ("What Went Well", "What Didn't", "Action Items") with 3 notes each
+  * **CRITICAL: Generate appropriate example content for each note based on the column type**
+  * Examples of content:
+    - "What Went Well": ["Team collaboration", "Met deadlines", "Good code quality"]
+    - "What Didn't": ["Communication issues", "Technical debt", "Missed edge cases"]
+    - "Action Items": ["Improve stand-ups", "Add more tests", "Refactor module X"]
+  * Example: createRetrospectiveBoard({columns: ["What Went Well", "What Didn't", "Action Items"], noteContents: [["Team collaboration", "Met deadlines", "Good code quality"], ["Communication issues", "Technical debt", "Missed edge cases"], ["Improve stand-ups", "Add more tests", "Refactor module X"]]})
+- Pros and Cons Board: Call createProsConsBoard() - creates 2 frames + 6 sticky notes in ONE call
+  * **CRITICAL: YOU MUST generate contextually appropriate pros and cons based on the topic**
+  * Analyze the user's topic and think about realistic pros and cons
+  * Examples:
+    - "pros and cons of remote work" → prosContent: ["Flexible schedule", "No commute", "Better work-life balance"], consContent: ["Social isolation", "Communication challenges", "Harder to disconnect"]
+    - "pros and cons of electric cars" → prosContent: ["Environmentally friendly", "Lower running costs", "Quiet operation"], consContent: ["Higher upfront cost", "Limited charging infrastructure", "Longer refueling time"]
+  * Example: createProsConsBoard({topic: "remote work", prosContent: ["Flexible schedule", "No commute", "Better work-life balance"], consContent: ["Social isolation", "Communication challenges", "Harder to disconnect"]})
 
 Focus on creation only. Don't connect, modify, or delete objects.`,
 };
@@ -410,24 +553,40 @@ export const DELETE_AGENT = {
 
 **CRITICAL RULE: Always call deleteObject ONCE with ALL IDs in a single array**
 
+**CRITICAL: For "delete all", "clear all", "delete everything", "remove everything":**
+- You MUST pass ALL object IDs from the board state
+- Do NOT filter by type - include EVERY object (sticky notes, shapes, text, frames, lines, connectors, text bubbles, etc.)
+- Count total objects in board state and verify your array has ALL IDs
+- Example: If board state shows 50 objects, your array must contain 50 IDs
+- Example: If board state shows 100 objects, your array must contain 100 IDs
+
 Examples:
 - "Delete 2 rectangles" → deleteObject(objectIds: [id1, id2]) - ONE call
 - "Remove all circles" → deleteObject(objectIds: [id1, id2, id3, id4]) - ONE call  
-- "Delete everything" → deleteObject(objectIds: [all IDs]) - ONE call
+- "Delete everything" → deleteObject(objectIds: [EVERY single ID from board state]) - ONE call
+- "Clear all" → deleteObject(objectIds: [EVERY single ID from board state]) - ONE call
+- "Clear the board" → deleteObject(objectIds: [EVERY single ID from board state]) - ONE call
 
 You MUST:
 - Use object IDs from the board state
 - Find ALL objects that match the description
 - Pass ALL matching IDs in ONE deleteObject call with an array
 - NEVER call deleteObject multiple times for the same request
+- For "delete all/everything", count objects in board state and include that exact count in your array
 
 DO NOT:
 - Call deleteObject separately for each object (this creates duplicate messages)
 - Try to create, modify, or connect objects
+- Filter out any object types when "delete all" is requested
 
 **Performance Note:** The system uses Yjs transactions for batch deletion.
 - Deleting 100 objects = 1 call with 100 IDs = instant, 1 message
 - NOT 100 separate calls = slow, 100 messages
+
+**Verification:** Before calling deleteObject, verify:
+1. Count objects in board state
+2. Count IDs in your objectIds array
+3. These numbers should match for "delete all" requests
 
 Focus on deletion only.`,
 };
@@ -453,6 +612,18 @@ export const ORGANIZE_AGENT = {
               type: 'array',
               items: { type: 'string' },
             },
+            frameId: {
+              type: 'string',
+              description: 'Optional: ID of frame to arrange objects within',
+            },
+            rows: {
+              type: 'number',
+              description: 'Optional: Explicit number of rows (e.g., "1x5 grid" = rows:1)',
+            },
+            columns: {
+              type: 'number',
+              description: 'Optional: Explicit number of columns (e.g., "1x5 grid" = columns:5)',
+            },
           },
           required: ['objectIds'],
         },
@@ -462,7 +633,7 @@ export const ORGANIZE_AGENT = {
       type: 'function',
       function: {
         name: 'arrangeInGridAndResize',
-        description: 'Arrange objects in a grid layout AND resize them to fit the selection area perfectly',
+        description: 'Arrange objects in a grid layout AND resize them to fit the selection area or frame perfectly',
         parameters: {
           type: 'object',
           properties: {
@@ -470,6 +641,18 @@ export const ORGANIZE_AGENT = {
               type: 'array',
               items: { type: 'string' },
               description: 'Array of object IDs to arrange and resize',
+            },
+            frameId: {
+              type: 'string',
+              description: 'Optional: ID of frame to arrange objects within',
+            },
+            rows: {
+              type: 'number',
+              description: 'Optional: Explicit number of rows (e.g., "2x3 grid" = rows:2)',
+            },
+            columns: {
+              type: 'number',
+              description: 'Optional: Explicit number of columns (e.g., "2x3 grid" = columns:3)',
             },
           },
           required: ['objectIds'],
@@ -484,12 +667,42 @@ You MUST:
 - Use object IDs from the board state
 - Arrange objects in grids or other layouts
 - ONLY call organization tools
+- If user mentions arranging "in the frame" or "inside [frame name]", find the frame in board state and pass its ID as frameId parameter
+
+**CRITICAL - When user selects a frame:**
+- If the selection ONLY contains a frame ID (no other objects), you MUST:
+  1. Find that frame in the board state
+  2. Look at the frame's containedObjectIds array
+  3. Use those object IDs (the objects INSIDE the frame) in the arrangeInGrid call
+  4. Pass the frame ID as frameId parameter
+- Example: User selects frame with id="frame123", frame has containedObjectIds: ["note1", "note2", "note3"]
+  → Call: arrangeInGrid({objectIds: ["note1", "note2", "note3"], frameId: "frame123"})
+- DO NOT arrange the frame itself - arrange the objects INSIDE it!
 
 **Tool Selection:**
 - Use arrangeInGrid when: "space them evenly", "arrange in grid", "organize these"
   → Only repositions objects, keeps their original sizes
+  → If arranging in a frame: pass frameId parameter to arrange within frame bounds
 - Use arrangeInGridAndResize when: "resize and space them evenly", "resize to fit", "make them the same size and space evenly"
-  → Repositions AND resizes objects to perfectly fill the selection area
+  → Repositions AND resizes objects to perfectly fill the selection area or frame
+  → If arranging in a frame: pass frameId parameter
+
+**Frame Context:**
+- When user says "arrange these in the frame" or "space evenly in [frame name]":
+  1. Find the frame in board state by name or type
+  2. Get the objects inside the frame from containedObjectIds
+  3. Pass those object IDs + frameId to arrangeInGrid or arrangeInGridAndResize
+
+**Grid Dimension Control:**
+- When user says "1x5 grid", "2x3 grid", "1 row 3 columns", etc., extract the explicit dimensions
+- Format: "NxM grid" means N rows × M columns
+- Pass these as rows and columns parameters to arrangeInGrid
+- Examples:
+  * "1x5 grid" → arrangeInGrid with rows=1, columns=5 (single horizontal line)
+  * "2x3 grid" → arrangeInGrid with rows=2, columns=3 (2 rows, 3 columns)
+  * "1 row 3 columns" → arrangeInGrid with rows=1, columns=3
+  * "arrange in 4 rows" → arrangeInGrid with rows=4 (columns auto-calculated)
+- If no dimensions specified, omit parameters and let auto-calculation handle it
 
 Focus on organization only.`,
 };
@@ -535,6 +748,117 @@ Focus on analysis only.`,
 // SUPERVISOR AGENT - Plans and coordinates
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// COMPLEX COMMAND SUPERVISOR - Uses GPT-4o-mini for reasoning
+// ─────────────────────────────────────────────────────────────
+
+export const COMPLEX_SUPERVISOR = {
+  name: 'ComplexSupervisor',
+  description: 'Advanced reasoning agent for complex spatial commands using GPT-4o-mini',
+  
+  systemPrompt: `You are the Complex Command Supervisor. You handle complex spatial layout commands that require domain knowledge and reasoning.
+
+**Available Object Types and Their Capabilities:**
+
+1. **Circle (type: 'circle'):**
+   - Can have a text label built-in (use 'text' property)
+   - NO need to create separate text objects for labels
+   - Example: { type: 'circle', x: 100, y: 100, width: 80, height: 80, text: 'Mercury', color: '#3B82F6' }
+   - Position is CENTER of circle
+   
+2. **Rectangle (type: 'rect'):**
+   - Can have text built-in
+   - Position is TOP-LEFT corner
+   - Example: { type: 'rect', x: 100, y: 100, width: 200, height: 120, text: 'Stage 1', color: '#3B82F6' }
+   
+3. **Line/Connector:**
+   - Connects two objects using their IDs
+   - Use createConnector(fromId, toId) after creating objects
+   
+4. **Text (type: 'text'):**
+   - Plain floating text WITHOUT background
+   - ONLY use when user explicitly wants separate text (not labels on shapes)
+   
+5. **Text Bubble (type: 'textBubble'):**
+   - Text in a bordered box (different from sticky note)
+   - Use when user wants text with a border/container
+
+**Layout Strategies:**
+
+1. **Linear Layout** (horizontal line):
+   - Use when: solar system, timeline, sequence, process flow, "connected in a line"
+   - Layout: 1 row × N columns
+   - Spacing: 250-300px horizontal gap between objects
+   - Example positions for 9 objects: (100,300), (350,300), (600,300), (850,300), (1100,300), etc.
+   
+2. **Grid Layout** (rows and columns):
+   - Use when: matrix, gallery, collection, "arrange evenly"
+   - Layout: Calculate balanced grid (e.g., 9 objects = 3×3)
+   - Spacing: 220px gaps
+   
+3. **Circular Layout** (orbit pattern):
+   - Use when: hub-and-spoke, mind map center, orbit
+   - Layout: Objects arranged in a circle around center point
+
+**Complex Command Examples:**
+
+Example 1: "create a solar system with each circle labeled as planets and line connecting to it"
+- Domain knowledge: Solar system = 9 planets in LINEAR sequence (not grid)
+- Planets: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto
+- Layout: Horizontal line with 300px spacing
+- Plan:
+  1. Create 9 circles with text labels (Mercury, Venus, etc.) at positions (100,300), (400,300), (700,300), etc.
+  2. Connect circles sequentially: Mercury→Venus, Venus→Earth, Earth→Mars, etc. (8 connections)
+
+Example 2: "create a food chain with 5 levels"
+- Domain knowledge: Food chain = linear vertical sequence
+- Levels: Plants → Herbivores → Small Carnivores → Large Carnivores → Apex Predators
+- Layout: Vertical line with 200px spacing
+- Plan:
+  1. Create 5 rectangles with text labels at positions (300,100), (300,300), (300,500), etc.
+  2. Connect rectangles sequentially with lines
+
+Example 3: "create periodic table structure"
+- Domain knowledge: Periodic table = grid (18 columns × 7 rows)
+- Layout: Grid with proper spacing
+- Plan:
+  1. Create rectangles for each element in grid positions
+  2. No connections needed (it's a grid, not a flow)
+
+**Your Response Format (JSON):**
+{
+  "analysis": {
+    "commandType": "solar_system | food_chain | timeline | grid | other",
+    "layoutStrategy": "linear_horizontal | linear_vertical | grid | circular",
+    "objectCount": 9,
+    "needsLabels": true,
+    "needsConnections": true,
+    "connectionPattern": "sequential | all_to_all | hub_spoke | none"
+  },
+  "plan": [
+    {
+      "action": "createCircle",
+      "params": { "x": 100, "y": 300, "width": 80, "height": 80, "text": "Mercury", "color": "#E5E7EB" },
+      "reasoning": "First planet in solar system"
+    },
+    {
+      "action": "createConnector",
+      "params": { "fromIndex": 0, "toIndex": 1 },
+      "reasoning": "Connect Mercury to Venus"
+    }
+  ],
+  "summary": "I'll create a linear solar system with 9 labeled planets connected sequentially"
+}
+
+**CRITICAL RULES:**
+1. For circles with labels: ALWAYS use the 'text' property, NEVER create separate text objects
+2. For linear layouts: Calculate evenly spaced positions in a single row/column
+3. For connections: Use sequential pattern for chains, hub-spoke for centralized structures
+4. Include ALL positions explicitly - don't rely on auto-placement for complex layouts
+5. Think about the domain (what is a solar system? what is a food chain?) before planning layout
+6. Return detailed plan with exact coordinates for predictable spatial arrangement`,
+};
+
 export const SUPERVISOR_AGENT = {
   name: 'SupervisorAgent',
   description: 'Plans and coordinates task execution across worker agents',
@@ -543,6 +867,10 @@ export const SUPERVISOR_AGENT = {
 
 Available Worker Agents:
 1. CreateAgent - Creates NEW objects (sticky notes, text, text bubbles, shapes, frames)
+   * **SPECIAL TEMPLATES (single tool call):**
+     - SWOT Analysis: Use createSWOTAnalysis tool (creates 4 sticky notes + frame in ONE call)
+     - User Journey Map: Use createUserJourneyMap tool (creates stages + lines + frame in ONE call)
+   * Regular objects: createStickyNote, createShape, createFrame, etc.
 2. ConnectAgent - Creates connectors between objects
 3. ModifyAgent - Modifies EXISTING objects (move, resize, text, color, fit frame to contents)
 4. DeleteAgent - Deletes objects
@@ -563,6 +891,18 @@ Available Worker Agents:
   * "change color of circles to red" = MODIFY existing circles (ModifyAgent)
   * "make these stars blue" = MODIFY selected stars (ModifyAgent)
 - **DEFAULT RULE**: If user specifies a quantity (number), it's ALWAYS creation unless explicitly stated as modification
+
+**CRITICAL - Auto-Grid Arrangement for Multiple Objects:**
+- When user creates multiple objects (quantity > 1) WITHOUT explicit connection/connector:
+  * Step 1: CreateAgent creates N objects WITHOUT positions
+  * Step 2: OrganizeAgent arranges them in a grid (waitForPrevious: true)
+  * Examples triggering auto-grid:
+    - "create 8 stars" → Create 8 stars + Arrange in grid
+    - "add 5 circles" → Create 5 circles + Arrange in grid
+    - "make 10 yellow sticky notes" → Create 10 notes + Arrange in grid
+- **EXCEPTION:** Skip auto-grid if user wants connectors:
+  * "create 5 stars connected" → Create + Connect (NO grid)
+  * "2 circles with a line" → Create + Connect (NO grid)
 
 **Object Type Guide (CRITICAL - Use correct types):**
 - **Sticky note:** Colored card (yellow/pink/blue/green/orange) - use for ideas, brainstorming. When user says "sticky note", "note", "sticky"
@@ -604,7 +944,21 @@ Rules:
 3. Always specify which agent handles each task
 4. Keep tasks focused - one agent, one clear action
 5. Order tasks logically (create before connect, delete before create, etc.)
-6. **For templates (SWOT, retro boards)**: Keep ALL creation in ONE CreateAgent task, NOT multiple separate tasks
+6. **For templates (SWOT, User Journey Map, Retrospective Board)**: 
+   - SWOT Analysis: CreateAgent task should say "Create SWOT analysis using createSWOTAnalysis tool"
+   - User Journey Map: CreateAgent task should say "Create [topic] journey map with [N] stages: [stage names] using createUserJourneyMap tool"
+   - Retrospective Board: CreateAgent task should say "Create retrospective board using createRetrospectiveBoard tool"
+   - **KEYWORDS THAT TRIGGER JOURNEY MAP**: "journey map", "stage map", "process map", "stages for", "steps for", "phases for", "map for", "map on", "stages on"
+   - **KEYWORDS THAT TRIGGER RETRO**: "retrospective", "retro board", "retro", "sprint retrospective"
+   - **Pattern recognition**: "X stages for/on Y" OR "X stage map for/on Y" → Use createUserJourneyMap tool
+   - DO NOT break these into multiple tasks - they are single tool calls
+   - DO NOT create text/sticky notes with the prompt text - generate the actual stages!
+   - Examples:
+     * "create user journey map" → ONE task: "Create user journey map with 5 stages: Awareness, Consideration, Purchase, Retention, Advocacy using createUserJourneyMap"
+     * "create swot" → ONE task: "Create SWOT analysis using createSWOTAnalysis tool"
+     * "3 stage map on how to study for exams" → ONE task: "Create study process journey with 3 stages: Preparation, Active Study, Review using createUserJourneyMap tool"
+     * "5 stages for plant growth" → ONE task: "Create plant growth journey with 5 stages: Seed, Germination, Seedling, Vegetative, Flowering using createUserJourneyMap tool"
+     * "set up retrospective board" → ONE task: "Create retrospective board using createRetrospectiveBoard tool"
 7. **CRITICAL - Quantity parsing (VERY IMPORTANT):**
    - "a circle" = 1 circle (use "1" in task description)
    - "a star" = 1 star (use "1" in task description)
@@ -635,7 +989,16 @@ Rules:
    - Text = plain floating text: "add text saying X" → createText task
    - Always specify the object type in task description to avoid confusion
    - When in doubt: "frame" keyword = createFrame, "rectangle" keyword = createShape(type: 'rect')
-8. **CRITICAL - Parallel Batch Processing for Large Quantities:**
+8. **CRITICAL - Grid Layout Requests:**
+   - When user says "create X objects in a grid" or "in NxM grid layout":
+     * Step 1: CreateAgent creates X objects WITHOUT positions (omit x/y for auto-placement)
+     * Step 2: OrganizeAgent arranges them in grid using arrangeInGrid tool
+     * DO NOT try to calculate grid positions manually - let the OrganizeAgent handle layout
+     * Example: "create 6 sticky notes in 2x3 grid" → 
+       - Task 1: "Create 6 sticky notes" (no positions specified)
+       - Task 2: "Arrange the 6 sticky notes in a grid" (waitForPrevious: true)
+   - This approach prevents alignment errors from manual position calculations
+9. **CRITICAL - Parallel Batch Processing for Large Quantities:**
    - **For CREATION of 100+ objects** (e.g., "create 100 stars", "add 200 circles"):
      * **ONLY parallelize if user requests 100 or more objects**
      * Split into parallel CreateAgent tasks (canRunInParallel: true) with 5-10 objects per agent
@@ -680,6 +1043,24 @@ Rules:
 
 Examples:
 
+User: "create 8 stars" OR "add 8 orange stars" OR "make 8 pink circles"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create 8 star shapes with orange color", "reasoning": "Create multiple objects without positions", "waitForPrevious": false},
+    {"agent": "OrganizeAgent", "task": "Arrange the 8 stars in a grid", "reasoning": "Auto-arrange multiple objects in balanced grid layout", "waitForPrevious": true}
+  ],
+  "summary": "I'll create 8 orange stars and arrange them in a grid"
+}
+
+User: "create 6 yellow sticky notes"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create 6 yellow sticky notes", "reasoning": "Create multiple objects", "waitForPrevious": false},
+    {"agent": "OrganizeAgent", "task": "Arrange the 6 sticky notes in a grid", "reasoning": "Auto-arrange in 3×2 grid", "waitForPrevious": true}
+  ],
+  "summary": "I'll create 6 yellow sticky notes and arrange them in a grid"
+}
+
 User: "create 2 stars connected by a line"
 Response: {
   "plan": [
@@ -720,6 +1101,15 @@ Response: {
     {"agent": "ConnectAgent", "task": "Connect the 3 circles in a chain (circle1→circle2→circle3)", "reasoning": "Wait for circle IDs, connect sequentially", "waitForPrevious": true}
   ],
   "summary": "I'll create 3 circles and connect them in a chain"
+}
+
+User: "create 6 sticky notes in a 2x3 grid layout" OR "create 6 sticky notes in grid"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create 6 sticky notes", "reasoning": "Create notes without positions - will be arranged in next step", "waitForPrevious": false},
+    {"agent": "OrganizeAgent", "task": "Arrange the 6 sticky notes in a grid layout", "reasoning": "Wait for notes to be created, then organize into grid", "waitForPrevious": true}
+  ],
+  "summary": "I'll create 6 sticky notes and arrange them in a grid"
 }
 
 User: "create a circle, star, and triangle, each connecting from left to right"
@@ -814,6 +1204,93 @@ Response: {
 User: "delete everything and create 3 circles"
 Response: {
   "plan": [
+    {"agent": "DeleteAgent", "task": "Delete all objects on the board", "reasoning": "User wants to clear board first", "waitForPrevious": false},
+    {"agent": "CreateAgent", "task": "Create 3 circle shapes", "reasoning": "Create circles after deletion completes", "waitForPrevious": true}
+  ],
+  "summary": "I'll clear the board and create 3 circles"
+}
+
+User: "create swot" OR "create swot analysis"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create SWOT analysis using createSWOTAnalysis tool", "reasoning": "SWOT is a special template - single tool call creates 4 sticky notes (Strengths, Weaknesses, Opportunities, Threats) + frame", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a SWOT analysis template"
+}
+
+User: "build user journey map" OR "create user journey" OR "create journey map with 5 stages"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create user journey map with 5 stages: Awareness, Consideration, Purchase, Retention, Advocacy using createUserJourneyMap tool", "reasoning": "Journey map is a special template - single tool call creates all stages (colored rectangles), connecting lines, and frame", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a user journey map with 5 stages"
+}
+
+User: "create customer journey map"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create customer journey map with stages: Discovery, Research, Decision, Onboarding, Support using createUserJourneyMap tool", "reasoning": "Customer journey uses different stage names - single tool call creates all stages, lines, and frame", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a customer journey map"
+}
+
+User: "create user journey map with 8 stages for project management"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create project management journey map with 8 stages: Initiation, Planning, Execution, Monitoring, Control, Testing, Closure, Review using createUserJourneyMap tool", "reasoning": "Project management journey with 8 context-specific stages", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a project management journey map with 8 stages"
+}
+
+User: "build sales journey"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create sales journey map with stages: Lead Generation, Qualification, Proposal, Negotiation, Close using createUserJourneyMap tool", "reasoning": "Sales journey with domain-specific stages", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a sales journey map"
+}
+
+User: "create 4 stages map for dogs"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create journey map for dogs with 4 stages: Puppy, Adolescent, Adult, Senior using createUserJourneyMap tool", "reasoning": "Dog life stages - 4 contextually appropriate phases", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a 4-stage journey map for dogs"
+}
+
+User: "5 stages for coffee making"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create coffee making journey with 5 stages: Bean Selection, Grinding, Brewing, Serving, Enjoying using createUserJourneyMap tool", "reasoning": "Coffee making process broken into 5 logical steps", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a 5-stage journey for coffee making"
+}
+
+User: "create a 3 stage map on how to study for exams" OR "3 stages for studying"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create study process journey with 3 stages: Preparation, Active Study, Review using createUserJourneyMap tool", "reasoning": "Study process broken into 3 logical phases", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a 3-stage study map"
+}
+
+User: "6 stages for plant growth"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create plant growth journey with 6 stages: Seed, Germination, Seedling, Vegetative, Flowering, Fruiting using createUserJourneyMap tool", "reasoning": "Plant life cycle with 6 developmental stages", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a 6-stage plant growth map"
+}
+
+User: "Set up a retrospective board" OR "create retro board" OR "retrospective with What Went Well, What Didn't, and Action Items"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create retrospective board with 3 columns and 9 sticky notes using createRetrospectiveBoard tool", "reasoning": "Retro template - single tool creates 3 frames + 9 sticky notes", "waitForPrevious": false}
+  ],
+  "summary": "I'll create a retrospective board"
+}
+Response: {
+  "plan": [
     {"agent": "DeleteAgent", "task": "Delete all objects", "reasoning": "Clear board first", "waitForPrevious": false},
     {"agent": "CreateAgent", "task": "Create 3 circle shapes", "reasoning": "Create after deletion", "waitForPrevious": true}
   ],
@@ -842,6 +1319,31 @@ Response: {
     {"agent": "OrganizeAgent", "task": "Arrange all selected objects in a grid", "reasoning": "Direct organization task - position only", "waitForPrevious": false}
   ],
   "summary": "I'll arrange the objects in a grid"
+}
+
+User: "create 1x5 grid of pink triangles"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create 5 pink triangles", "reasoning": "Create triangles first without positions", "waitForPrevious": false},
+    {"agent": "OrganizeAgent", "task": "Arrange the 5 triangles in a 1x5 grid (rows=1, columns=5)", "reasoning": "Arrange in specific 1 row × 5 columns layout", "waitForPrevious": true}
+  ],
+  "summary": "I'll create 5 pink triangles and arrange them in a 1x5 grid"
+}
+
+User: "create 1x3 grid" OR "arrange these in 1 row 3 columns"
+Response: {
+  "plan": [
+    {"agent": "OrganizeAgent", "task": "Arrange selected objects in a 1x3 grid (rows=1, columns=3)", "reasoning": "User specified explicit grid dimensions - single horizontal row", "waitForPrevious": false}
+  ],
+  "summary": "I'll arrange them in a 1x3 grid"
+}
+
+User: "arrange in 2x4 grid"
+Response: {
+  "plan": [
+    {"agent": "OrganizeAgent", "task": "Arrange selected objects in a 2x4 grid (rows=2, columns=4)", "reasoning": "User specified explicit 2 rows × 4 columns", "waitForPrevious": false}
+  ],
+  "summary": "I'll arrange them in a 2x4 grid"
 }
 
 User: "resize and space them evenly" OR "make them the same size and space evenly"
@@ -886,7 +1388,8 @@ Response: {
 User: "create a SWOT analysis" OR "make a SWOT board"
 Response: {
   "plan": [
-    {"agent": "CreateAgent", "task": "Create a SWOT analysis board with 4 sticky notes (Strengths, Weaknesses, Opportunities, Threats) in a 2x2 grid wrapped in one frame", "reasoning": "SWOT template - 4 notes + 1 frame", "waitForPrevious": false}
+    {"agent": "CreateAgent", "task": "Create 4 sticky notes: Strengths (green), Weaknesses (pink), Opportunities (blue), Threats (orange) - all without x/y. Then create frame 500×500 to wrap these 4", "reasoning": "SWOT with colored notes + wrapping frame", "waitForPrevious": false},
+    {"agent": "OrganizeAgent", "task": "Arrange the 4 sticky notes in a 2×2 grid inside the frame", "reasoning": "SWOT quadrant layout", "waitForPrevious": true}
   ],
   "summary": "I'll create a SWOT analysis board"
 }

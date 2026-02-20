@@ -23,7 +23,8 @@ import dotenv from 'dotenv';
 import { AI_SYSTEM_PROMPT, AI_TOOLS, buildAIContext } from './utils/ai-tools.js';
 import { orchestrateAgents, continueOrchestration } from './utils/agent-orchestrator.js';
 import { createGeminiClient } from './utils/gemini-adapter.js';
-import { routeCommand, executeSingleAgent, executeMiniAgent } from './utils/command-router.js';
+import { routeCommand, executeSingleAgent, executeMiniAgent, classifyUserIntent, executeFromIntent } from './utils/command-router.js';
+import { detectMiniAgent } from './utils/mini-agents.js';
 
 dotenv.config();
 
@@ -442,7 +443,130 @@ async function handleAIMessage(ws, data) {
       // Smart routing: Choose optimal execution path
       const route = routeCommand(message, selectedIds?.length > 0);
       
-      if (route.type === 'mini') {
+      if (route.type === 'intent') {
+        // Level 0: Intent Classifier (ULTRA-FAST, <300ms, direct execution)
+        console.log(`⚡⚡⚡ INTENT CLASSIFIER: ${route.reason}`);
+        
+        try {
+          // Classify intent
+          const intent = await classifyUserIntent(openai, message);
+          
+          if (intent && !intent.isMultiStep) {
+            // Execute directly from intent (bypass all agents!)
+            const toolCalls = executeFromIntent(intent, { objects: boardState?.objects || [], selectedIds });
+            
+            if (toolCalls && toolCalls.length > 0) {
+              console.log(`✅ Intent classifier generated ${toolCalls.length} tool calls directly`);
+              
+              result = {
+                toolCalls,
+                summary: `I've ${intent.operation.toLowerCase()}d ${intent.quantity || ''} ${intent.objectType}${intent.quantity > 1 ? 's' : ''}`,
+                needsFollowUp: false,
+                progressSent: false,
+              };
+            } else {
+              // Intent classifier couldn't handle it - fall through to mini-agent
+              console.log('⚠️  Intent classifier returned no tool calls, falling through to mini-agent');
+              const miniRoute = { type: 'mini', agent: detectMiniAgent(message, selectedIds?.length > 0) };
+              if (miniRoute.agent) {
+                result = await executeMiniAgent(
+                  openai,
+                  miniRoute.agent,
+                  message,
+                  boardState,
+                  context,
+                  executeAnalyzeObjectsServerSide
+                );
+                result = {
+                  toolCalls: result.toolCalls || [],
+                  summary: result.message || result.summary,
+                  needsFollowUp: false,
+                  progressSent: false,
+                };
+              } else {
+                // Fall through to orchestration
+                result = await orchestrateAgents(
+                  openai,
+                  message,
+                  boardState,
+                  context,
+                  executeAnalyzeObjectsServerSide,
+                  progressCallback
+                );
+              }
+            }
+          } else if (intent && intent.isMultiStep) {
+            // Multi-step - use orchestrator
+            console.log('🎯 Multi-step detected by intent classifier, using orchestrator');
+            result = await orchestrateAgents(
+              openai,
+              message,
+              boardState,
+              context,
+              executeAnalyzeObjectsServerSide,
+              progressCallback
+            );
+          } else {
+            // Classification failed - fall through to mini-agent
+            console.log('⚠️  Intent classification failed, falling through');
+            const miniRoute = { type: 'mini', agent: detectMiniAgent(message, selectedIds?.length > 0) };
+            if (miniRoute.agent) {
+              result = await executeMiniAgent(
+                openai,
+                miniRoute.agent,
+                message,
+                boardState,
+                context,
+                executeAnalyzeObjectsServerSide
+              );
+              result = {
+                toolCalls: result.toolCalls || [],
+                summary: result.message || result.summary,
+                needsFollowUp: false,
+                progressSent: false,
+              };
+            } else {
+              result = await orchestrateAgents(
+                openai,
+                message,
+                boardState,
+                context,
+                executeAnalyzeObjectsServerSide,
+                progressCallback
+              );
+            }
+          }
+        } catch (error) {
+          console.error('❌ Intent classifier error:', error.message);
+          // Fall through to mini-agent on error
+          const miniRoute = { type: 'mini', agent: detectMiniAgent(message, selectedIds?.length > 0) };
+          if (miniRoute.agent) {
+            result = await executeMiniAgent(
+              openai,
+              miniRoute.agent,
+              message,
+              boardState,
+              context,
+              executeAnalyzeObjectsServerSide
+            );
+            result = {
+              toolCalls: result.toolCalls || [],
+              summary: result.message || result.summary,
+              needsFollowUp: false,
+              progressSent: false,
+            };
+          } else {
+            result = await orchestrateAgents(
+              openai,
+              message,
+              boardState,
+              context,
+              executeAnalyzeObjectsServerSide,
+              progressCallback
+            );
+          }
+        }
+      } else if (route.type === 'mini') {
         // Level 1: Mini-agent (ultra-fast, ~300-500ms)
         console.log(`⚡⚡ MINI-AGENT ROUTE: ${route.reason}`);
         

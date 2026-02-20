@@ -49,6 +49,7 @@ type BoardRow = {
   createdAt: number;
   lastModified: number;
   sharedWithMe: boolean;
+  thumbnail?: string;
 };
 
 const timeAgo = (timestamp: number): string => {
@@ -357,6 +358,7 @@ export default function DashboardPage() {
         createdAt: new Date(board.created_at).getTime(),
         lastModified: new Date(board.last_modified).getTime(),
         sharedWithMe: !isOwner,
+        thumbnail: board.thumbnail,
       };
     });
   }, [boards, user?.uid, boardMembersMap, globalOnlineUids]);
@@ -412,85 +414,98 @@ export default function DashboardPage() {
       <div className="neon-orb right-[-3rem] top-20 h-80 w-80 bg-blue-300/40" />
       <div className="neon-orb bottom-[-5rem] left-[40%] h-72 w-72 bg-emerald-300/35" />
 
-      <header className="relative z-20 mx-auto w-full max-w-[1200px] pb-4">
-        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-transparent px-4 py-2.5 shadow-[0_20px_60px_-38px_rgba(0,67,156,0.3)]">
-          <BrandLogo size="sm" showText={false} logoClassName="h-12 w-auto drop-shadow-none" />
-          <div className="flex items-center gap-3">
-            {/* TODO: Uncomment when Resend domain is verified
-            <button
-              onClick={() => setShowInviteModal(true)}
-              className="flex items-center gap-2 rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-200"
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
-              </svg>
-              Invite Members
-            </button>
-            */}
-            <UserMenu displayName={user.displayName} email={user.email} onSignOut={handleSignOut} />
+      <header className="relative z-20 mx-auto flex w-full max-w-[1200px] items-center justify-between rounded-3xl border border-slate-200/70 bg-white/90 px-6 py-4 shadow-[0_25px_80px_-40px_rgba(15,23,42,0.55)] backdrop-blur-3xl">
+        <div className="flex items-center gap-3">
+          <BrandLogo size="md" showText={false} logoClassName="h-14 w-auto drop-shadow-none" />
+          <div>
+            <p className="text-lg font-semibold text-slate-900">Collabry</p>
+            <p className="text-xs text-slate-500">Your workspace</p>
           </div>
+        </div>
+        <div className="flex flex-1 items-center justify-end gap-3">
+          <div className="relative w-full max-w-xs">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search boards or collaborators..."
+              className="w-full rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-2.5 pr-10 text-sm text-slate-700 outline-none transition focus:border-cyan-500 focus:bg-white"
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-4.35-4.35m1.45-5.65a6 6 0 11-12 0 6 6 0 0112 0z"
+                />
+              </svg>
+            </span>
+          </div>
+          <UserMenu displayName={user.displayName} email={user.email} onSignOut={handleSignOut} />
         </div>
       </header>
 
       <main className="relative z-10 mx-auto w-full max-w-[1200px]">
-        <section className="rounded-xl border border-slate-200 bg-transparent p-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-xl font-semibold text-slate-900">Boards</h2>
+        <section className="mt-8 space-y-6 rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-[0_35px_120px_-45px_rgba(15,23,42,0.65)]">
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200/70 pb-4">
+            <div>
+              <p className="text-3xl font-semibold text-slate-900">Your Boards</p>
+              <p className="mt-1 max-w-xl text-sm text-slate-500">
+                Collaborate, brainstorm, and organize your ideas in real-time.
+              </p>
+            </div>
             <button
               onClick={() => setShowNewBoardModal(true)}
               disabled={creating}
-              className="rounded-lg bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-2xl bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              + Create New
+              + New Board
             </button>
           </div>
 
           {error && (
-            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">
               {error}
             </div>
           )}
 
-          <div className="mb-4 grid gap-2 lg:grid-cols-[1.5fr_auto_auto]">
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search boards, owners..."
-              className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-cyan-500"
-            />
-            <select
-              value={visibilityFilter}
-              onChange={(event) => setVisibilityFilter(event.target.value as BoardVisibilityFilter)}
-              className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-cyan-500"
-            >
-              <option value="all">All boards</option>
-              <option value="owned">Owned by me</option>
-              <option value="shared">Shared with me</option>
-            </select>
-            <select
-              value={sortBy}
-              onChange={(event) => setSortBy(event.target.value as BoardSort)}
-              className="rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm text-slate-700 outline-none transition-colors focus:border-cyan-500"
-            >
-              <option value="last_modified">Last modified</option>
-              <option value="created">Last created</option>
-              <option value="alphabetical">Alphabetical</option>
-            </select>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex flex-wrap gap-3">
+              <div className="flex flex-col gap-1 text-xs text-slate-500">
+                <span className="font-semibold uppercase tracking-[0.3em] text-slate-400">Filter</span>
+                <select
+                  value={visibilityFilter}
+                  onChange={(event) => setVisibilityFilter(event.target.value as BoardVisibilityFilter)}
+                  className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-cyan-500 focus:bg-white"
+                >
+                  <option value="all">All boards</option>
+                  <option value="owned">Owned by me</option>
+                  <option value="shared">Shared with me</option>
+                </select>
+              </div>
+              <div className="flex flex-col gap-1 text-xs text-slate-500">
+                <span className="font-semibold uppercase tracking-[0.3em] text-slate-400">Sort</span>
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value as BoardSort)}
+                  className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-cyan-500 focus:bg-white"
+                >
+                  <option value="last_modified">Last modified</option>
+                  <option value="created">Last created</option>
+                  <option value="alphabetical">Alphabetical</option>
+                </select>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              Showing {visibleBoards.length} of {allBoards.length} boards
+            </p>
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-slate-200/80 bg-transparent">
-            <div className="grid grid-cols-12 border-b border-slate-200 bg-transparent px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              <div className="col-span-4">Board</div>
-              <div className="col-span-3">Collaborators</div>
-              <div className="col-span-2">Last Modified</div>
-              <div className="col-span-2">Owner</div>
-              <div className="col-span-1"></div>
-            </div>
-
+          <div className="flex flex-col gap-4">
             {visibleBoards.length === 0 ? (
-              <div className="bg-transparent px-4 py-8 text-center text-sm text-slate-500">
+              <div className="rounded-2xl border border-dashed border-slate-200/70 bg-slate-50/60 px-4 py-6 text-center text-sm text-slate-500">
                 {boards.length === 0
-                  ? 'No boards yet. Click "+ Create New" to get started!'
+                  ? 'No boards yet. Create one to save a snapshot of your canvas.'
                   : 'No boards match your current filters.'}
               </div>
             ) : (
@@ -502,95 +517,118 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={board.id}
-                    className="grid w-full grid-cols-12 items-center border-b border-slate-200/60 bg-transparent px-4 py-3 text-left transition-colors hover:bg-cyan-50/40 last:border-b-0"
+                    className="group flex flex-col gap-4 rounded-[26px] border border-slate-200/70 bg-white/90 p-4 shadow-[0_20px_80px_-40px_rgba(15,23,42,0.45)] transition hover:shadow-[0_30px_100px_-40px_rgba(15,23,42,0.55)] lg:flex-row lg:items-stretch"
                   >
-                    <button
-                      onClick={() => handleOpenBoard(board.id)}
-                      className="col-span-4 text-left"
-                    >
-                      <p className="text-sm font-semibold text-slate-900">{board.title}</p>
-                    </button>
-                    <div className="col-span-3">
-                      {board.collaborators.length === 0 ? (
-                        <span className="text-[11px] text-slate-400">—</span>
+                    <div className="relative h-40 w-full flex-shrink-0 overflow-hidden rounded-2xl border border-slate-200/70 bg-slate-100 shadow-inner lg:w-52 lg:h-auto">
+                      {board.thumbnail ? (
+                        <img
+                          src={board.thumbnail}
+                          alt={`${board.title} snapshot`}
+                          className="h-full w-full object-cover"
+                        />
                       ) : (
-                        <div 
-                          className="relative"
-                          ref={(el) => {
-                            collaboratorsDropdownRefs.current[board.id] = el;
-                          }}
-                        >
+                        <div className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wide text-slate-400">
+                          No snapshot yet
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-1 flex-col justify-between gap-3">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center justify-between gap-3">
                           <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenCollaboratorsDropdown(
-                                openCollaboratorsDropdown === board.id ? null : board.id
-                              );
-                            }}
-                            className="flex items-center hover:opacity-80 transition-opacity"
+                            onClick={() => handleOpenBoard(board.id)}
+                            className="text-left"
                           >
-                            <div className="flex -space-x-1.5">
-                              {visibleCollabs.map((c, i) => (
-                                <div
-                                  key={c.uid}
-                                  className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-[10px] font-bold text-white shadow-sm"
-                                  style={{
-                                    backgroundColor: c.color,
-                                    zIndex: MAX_AVATARS - i,
-                                  }}
-                                  title={c.name}
-                                >
-                                  {c.name.charAt(0).toUpperCase()}
-                                </div>
-                              ))}
-                              {overflow > 0 && (
-                                <div
-                                  className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-gray-200 text-[10px] font-bold text-gray-600 shadow-sm"
-                                  style={{ zIndex: 0 }}
-                                >
-                                  +{overflow}
-                                </div>
-                              )}
-                            </div>
-                            <span className="ml-2 text-[11px] text-slate-500">
-                              {board.collaborators.length}
-                            </span>
+                            <p className="text-lg font-semibold text-slate-900">{board.title}</p>
                           </button>
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
+                            {timeAgo(board.lastModified)}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-500">
+                          Owned by {board.ownerName}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="relative"
+                            ref={(el) => {
+                              collaboratorsDropdownRefs.current[board.id] = el;
+                            }}
+                          >
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenCollaboratorsDropdown(
+                                  openCollaboratorsDropdown === board.id ? null : board.id
+                                );
+                              }}
+                              className="flex items-center gap-2 transition hover:opacity-80"
+                            >
+                              <div className="flex -space-x-1.5">
+                                {visibleCollabs.map((c, i) => (
+                                  <div
+                                    key={c.uid}
+                                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold text-white shadow-sm"
+                                    style={{
+                                      backgroundColor: c.color,
+                                      zIndex: MAX_AVATARS - i,
+                                    }}
+                                    title={c.name}
+                                  >
+                                    {c.name.charAt(0).toUpperCase()}
+                                  </div>
+                                ))}
+                                {overflow > 0 && (
+                                  <div
+                                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-gray-200 text-[10px] font-semibold text-gray-600 shadow-sm"
+                                    style={{ zIndex: 0 }}
+                                  >
+                                    +{overflow}
+                                  </div>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-slate-500">
+                                {board.collaborators.length} collaborators
+                              </span>
+                            </button>
+                          </div>
 
                           {/* Collaborators Dropdown */}
                           {openCollaboratorsDropdown === board.id && dropdownPosition && (
-                            <div 
+                            <div
                               data-collaborators-dropdown
-                              className="fixed z-[100] bg-white rounded-lg shadow-xl border border-gray-200 py-2 px-1 min-w-[220px] max-w-[calc(100vw-32px)] animate-in fade-in slide-in-from-top-2 duration-150"
+                              className="fixed z-[100] w-[220px] rounded-xl border border-gray-200 bg-white shadow-xl animate-in fade-in slide-in-from-top-2 duration-150"
                               style={{
                                 top: `${dropdownPosition.top}px`,
                                 left: `${dropdownPosition.left}px`,
                               }}
                             >
-                              <div className="px-2.5 pb-1.5 mb-1 border-b border-gray-100 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+                              <div className="px-3 pb-2 pt-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-gray-400">
                                 Collaborators — {board.collaborators.length}
                               </div>
                               <div className="max-h-60 overflow-y-auto">
                                 {board.collaborators.map((c) => (
                                   <div
                                     key={c.uid}
-                                    className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
+                                    className="flex items-center gap-2 px-3 py-2 transition hover:bg-gray-50"
                                   >
                                     <div
-                                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white"
-                                      style={{
-                                        backgroundColor: c.color,
-                                      }}
+                                      className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+                                      style={{ backgroundColor: c.color }}
                                     >
                                       {c.name.charAt(0).toUpperCase()}
                                     </div>
                                     <div className="flex flex-col min-w-0">
-                                      <span className="text-xs text-gray-800 truncate leading-tight">
+                                      <span className="text-sm font-semibold text-slate-700 truncate">
                                         {c.name}
-                                        {c.uid === user?.uid && (
-                                          <span className="text-gray-400 ml-1 text-[10px]">(You)</span>
-                                        )}
                                       </span>
+                                      {c.isOnline && (
+                                        <span className="text-[11px] text-emerald-500">
+                                          Online
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
                                 ))}
@@ -598,31 +636,33 @@ export default function DashboardPage() {
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                    <div className="col-span-2 text-xs text-slate-500">{timeAgo(board.lastModified)}</div>
-                    <div className="col-span-2 text-xs text-slate-700">{board.ownerName}</div>
-                    <div className="col-span-1 flex items-center justify-end gap-1">
-                      {board.ownerUid === user?.uid ? (
-                        <>
+                        <div className="flex items-center gap-3">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setDeleteTarget({ id: board.id, title: board.title });
+                              setInviteTarget({ id: board.id, title: board.title });
                             }}
-                            className="rounded p-1 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                            title="Delete board"
+                            className="rounded-full border border-slate-200 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
                           >
-                            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
+                            Share
                           </button>
-                        </>
-                      ) : (
-                        <span className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-600">
-                          Collab
-                        </span>
-                      )}
+                          {board.ownerUid === user?.uid ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteTarget({ id: board.id, title: board.title });
+                              }}
+                              className="rounded-full border border-red-200 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.3em] text-red-500 transition hover:border-red-300 hover:text-red-600"
+                            >
+                              Delete
+                            </button>
+                          ) : (
+                            <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600">
+                              Collab
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );

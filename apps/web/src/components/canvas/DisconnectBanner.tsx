@@ -16,23 +16,16 @@ export const DisconnectBanner = ({ status }: DisconnectBannerProps) => {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  if (!mounted || status.status === 'connected') {
+  const shouldShowBanner = status.status === 'disconnected';
+
+  if (!mounted || !shouldShowBanner) {
     return null;
   }
   
   return (
-    <div
-      className={`fixed top-0 left-0 right-0 p-3 text-center text-white z-50 ${
-        status.status === 'disconnected' ? 'bg-yellow-500' : 'bg-blue-500'
-      }`}
-    >
-      {status.status === 'disconnected' && (
-        <>
-          ⚠️ Disconnected from server. Reconnecting...
-          {status.message && <span className="ml-2 text-sm">({status.message})</span>}
-        </>
-      )}
-      {status.status === 'connecting' && '🔄 Connecting to server...'}
+    <div className="fixed top-0 left-0 right-0 p-3 text-center text-white z-50 bg-yellow-500">
+      ⚠️ Disconnected from server. Reconnecting...
+      {status.message && <span className="ml-2 text-sm">({status.message})</span>}
     </div>
   );
 };

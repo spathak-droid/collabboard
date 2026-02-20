@@ -1,6 +1,7 @@
 /**
  * Smart Command Router
  * Determines routing priority:
+ * 0. Intent Classifier (ULTRA-FAST, <300ms) - Analyzes intent and executes directly
  * 1. Mini-agents (ultra-fast, <500ms) for simple single-operation commands
  * 2. Single worker agents (fast, ~800ms) for moderately complex commands
  * 3. Full orchestration (slower, ~1500ms+) for multi-step operations
@@ -8,8 +9,9 @@
 
 import { CREATE_AGENT, MODIFY_AGENT, DELETE_AGENT, ORGANIZE_AGENT, ANALYZE_AGENT } from './agent-system.js';
 import { detectMiniAgent, executeMiniAgent } from './mini-agents.js';
+import { classifyUserIntent, executeFromIntent } from './intent-classifier.js';
 
-export { executeMiniAgent }; // Re-export for server.js
+export { executeMiniAgent, classifyUserIntent, executeFromIntent }; // Re-export for server.js
 
 /**
  * Detect if command requires multi-step orchestration
@@ -52,9 +54,15 @@ export function requiresOrchestration(userMessage) {
 
 /**
  * Route command to best execution path
- * Returns: { type: 'mini' | 'single' | 'orchestrate', agent?: Agent, reason: string }
+ * Returns: { type: 'intent' | 'mini' | 'single' | 'orchestrate', agent?: Agent, intent?: object, reason: string }
  */
-export function routeCommand(userMessage, hasSelection = false) {
+export function routeCommand(userMessage, hasSelection = false, useIntentClassifier = true) {
+  // Level 0: Try intent classifier (fastest - direct execution)
+  // Skip for multi-step commands detected early
+  if (useIntentClassifier && !requiresOrchestration(userMessage)) {
+    return { type: 'intent', reason: 'Using intent classifier for direct execution' };
+  }
+  
   // Level 1: Try mini-agent (ultra-fast path)
   const miniAgent = detectMiniAgent(userMessage, hasSelection);
   if (miniAgent) {

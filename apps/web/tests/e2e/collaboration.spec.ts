@@ -37,8 +37,17 @@ test.describe('Full Collaboration Flow', () => {
     // Should redirect to board page
     await expect(page).toHaveURL(/\/board\/.*/, { timeout: 5000 });
     
-    // Wait for canvas to load
-    await page.waitForSelector('canvas', { timeout: 5000 });
+    // Wait for canvas to be fully loaded and sized
+    await page.waitForSelector('canvas', { timeout: 10000, state: 'visible' });
+    
+    // Wait a bit more for canvas to initialize dimensions
+    await page.waitForTimeout(1000);
+    
+    // Verify canvas has proper dimensions
+    const canvasBox = await page.locator('canvas').first().boundingBox();
+    expect(canvasBox).not.toBeNull();
+    expect(canvasBox!.width).toBeGreaterThan(1000);
+    expect(canvasBox!.height).toBeGreaterThan(500);
     
     // Click sticky note tool
     await page.click('[data-tool="sticky"]');

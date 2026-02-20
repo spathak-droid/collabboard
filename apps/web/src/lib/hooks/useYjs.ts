@@ -56,9 +56,15 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
 
     const provider = new YjsProvider();
     providerRef.current = provider;
+    
+    // Store unsubscribe functions
+    let unsubObjects: (() => void) | null = null;
+    let unsubStatus: (() => void) | null = null;
+    let unsubAwareness: (() => void) | null = null;
+    let unsubMeta: (() => void) | null = null;
 
     // --- object change listener ---
-    const unsubObjects = provider.onObjectsChange(() => {
+    unsubObjects = provider.onObjectsChange(() => {
       const newObjects = provider.getAllObjects();
       setObjects(newObjects);
       setHasUnsavedChanges(true);
@@ -67,63 +73,13 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
     // Get snapshot from cache if not provided as prop
     const snapshot = preloadedSnapshot ?? getCachedSnapshot(boardId);
 
-    // Connect — HocuspocusProvider connects synchronously in the constructor
+    // Connect — Async to handle pending offline updates
     // Preloaded snapshot is applied before connecting for instant rendering
     const userColor = getUserColor(userId);
-    provider.connect(boardId, { id: userId, name: userNameRef.current, color: userColor }, snapshot);
-
-    // --- connection status listener (needs hocuspocus instance) ---
-    const unsubStatus = provider.onStatusChange(({ status }) => {
-      setConnectionStatus({ status });
-    });
-
-    // --- expose awareness instance for Cursors component ---
-    if (provider.hocuspocus?.awareness) {
-      setAwareness(provider.hocuspocus.awareness);
-    }
-
-    // --- awareness (online users) listener ---
-    // Only update React state when user list changes (join/leave),
-    // NOT on every cursor move. This prevents full-page re-renders.
-    let lastUserIds = '';
-    const updateOnlineUsers = () => {
-      const states = provider.getAwarenessStates();
-      const users: AwarenessState[] = [];
-      states.forEach((state) => {
-        if (state.user) {
-          users.push(state as AwarenessState);
-        }
-      });
-
-      // Only trigger React re-render if user list changed
-      const currentUserIds = users.map((u) => u.user.id).sort().join(',');
-      if (currentUserIds !== lastUserIds) {
-        lastUserIds = currentUserIds;
-        setOnlineUsers(users);
-      }
-    };
-
-    const unsubAwareness = provider.onAwarenessChange(updateOnlineUsers);
-    updateOnlineUsers();
-
-    // --- board metadata (title) listener ---
-    const unsubMeta = provider.onMetaChange(() => {
-      const title = provider.getMeta('title');
-      if (title !== undefined) {
-        setBoardTitleState(title);
-      }
-    });
-    // Load initial title if already in the Y.Doc
-    const initialTitle = provider.getMeta('title');
-    if (initialTitle !== undefined) {
-      setBoardTitleState(initialTitle);
-    }
-
-    // Load initial objects (may be empty until server syncs the snapshot)
-    setObjects(provider.getAllObjects());
-
+    
     // --- AUTO-SAVE: Save snapshot every 30 seconds (per PRD requirement) ---
     let saveTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let initialSaveTimeout: ReturnType<typeof setTimeout> | null = null;
     let hasChanges = false;
     let hasSavedInitial = false;
 
@@ -140,11 +96,6 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
         console.error('[Yjs Auto-save] Failed to save initial snapshot:', error);
       }
     };
-
-    // Save initial snapshot after a short delay (allow server sync to complete first)
-    const initialSaveTimeout = setTimeout(() => {
-      saveInitialSnapshot();
-    }, 2000); // 2 seconds after connection
 
     // Mark changes when objects change
     const markChanges = () => {
@@ -172,9 +123,75 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
         scheduleSave();
       }, 30000); // 30 seconds
     };
+    
+    // Use async IIFE to handle await inside useEffect
+    (async () => {
+      try {
+        await provider.connect(boardId, { id: userId, name: userNameRef.current, color: userColor }, snapshot);
+        
+        // Setup listeners after connection
+        // --- connection status listener (needs hocuspocus instance) ---
+        unsubStatus = provider.onStatusChange(({ status }) => {
+          setConnectionStatus({ status });
+        });
 
-    // Start auto-save cycle
-    scheduleSave();
+        // --- expose awareness instance for Cursors component ---
+        if (provider.hocuspocus?.awareness) {
+          setAwareness(provider.hocuspocus.awareness);
+        }
+
+        // --- awareness (online users) listener ---
+        // Only update React state when user list changes (join/leave),
+        // NOT on every cursor move. This prevents full-page re-renders.
+        let lastUserIds = '';
+        const updateOnlineUsers = () => {
+          const states = provider.getAwarenessStates();
+          const users: AwarenessState[] = [];
+          states.forEach((state) => {
+            if (state.user) {
+              users.push(state as AwarenessState);
+            }
+          });
+
+          // Only trigger React re-render if user list changed
+          const currentUserIds = users.map((u) => u.user.id).sort().join(',');
+          if (currentUserIds !== lastUserIds) {
+            lastUserIds = currentUserIds;
+            setOnlineUsers(users);
+          }
+        };
+
+        unsubAwareness = provider.onAwarenessChange(updateOnlineUsers);
+        updateOnlineUsers();
+
+        // --- board metadata (title) listener ---
+        unsubMeta = provider.onMetaChange(() => {
+          const title = provider.getMeta('title');
+          if (title !== undefined) {
+            setBoardTitleState(title);
+          }
+        });
+        // Load initial title if already in the Y.Doc
+        const initialTitle = provider.getMeta('title');
+        if (initialTitle !== undefined) {
+          setBoardTitleState(initialTitle);
+        }
+
+        // Load initial objects (may be empty until server syncs the snapshot)
+        setObjects(provider.getAllObjects());
+        
+        // Save initial snapshot after a short delay (allow server sync to complete first)
+        initialSaveTimeout = setTimeout(() => {
+          saveInitialSnapshot();
+        }, 2000); // 2 seconds after connection
+
+        // Start auto-save cycle
+        scheduleSave();
+      } catch (error) {
+        console.error('[Yjs] Failed to connect:', error);
+        setConnectionStatus({ status: 'disconnected', message: 'Connection failed' });
+      }
+    })();
 
     return () => {
       if (initialSaveTimeout) {
@@ -189,10 +206,10 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
           console.error('[Yjs Auto-save] Failed to save final snapshot on unmount:', error);
         });
       }
-      unsubObjects();
-      unsubStatus();
-      unsubAwareness();
-      unsubMeta();
+      if (unsubObjects) unsubObjects();
+      if (unsubStatus) unsubStatus();
+      if (unsubAwareness) unsubAwareness();
+      if (unsubMeta) unsubMeta();
       provider.disconnect();
       providerRef.current = null;
     };
@@ -244,6 +261,18 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
     providerRef.current?.clearLivePosition(objectId);
   }, []);
 
+  const broadcastSelectionTransform = useCallback((selectedIds: string[], dx: number, dy: number) => {
+    providerRef.current?.broadcastSelectionTransform(selectedIds, dx, dy);
+  }, []);
+
+  const clearSelectionTransform = useCallback(() => {
+    providerRef.current?.clearSelectionTransform();
+  }, []);
+
+  const updateObjectsBatch = useCallback((updates: Array<{ id: string; data: Partial<WhiteboardObject> }>) => {
+    providerRef.current?.updateObjectsBatch(updates);
+  }, []);
+
   const setBoardTitle = useCallback((title: string) => {
     providerRef.current?.setMeta('title', title);
   }, []);
@@ -262,6 +291,7 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
     createObject,
     createObjectsBatch,
     updateObject,
+    updateObjectsBatch,
     deleteObject,
     deleteObjects,
     updateCursor,
@@ -269,6 +299,8 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
     clearLiveDrag,
     broadcastLivePosition,
     clearLivePosition,
+    broadcastSelectionTransform,
+    clearSelectionTransform,
     setBoardTitle,
     getBroadcastRate,
     clearObjects,

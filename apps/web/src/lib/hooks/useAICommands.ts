@@ -57,6 +57,7 @@ export function useAICommands(options: UseAICommandsOptions) {
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxReconnectAttempts = 3;
   const pendingMessage = useRef<string | null>(null);
+  const isConnectingRef = useRef(false); // Guard to prevent duplicate connections
 
   const nextId = () => {
     messageIdCounter.current += 1;
@@ -87,9 +88,38 @@ export function useAICommands(options: UseAICommandsOptions) {
   const originalMessageRef = useRef<string>('');
   const boardIdRef = useRef(boardId);
 
+  // Track if component is mounted to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
   // Connect WebSocket with auto-reconnect logic
   const connectWebSocket = useCallback(() => {
     if (!boardId) return;
+    
+    // Guard: prevent duplicate connections (React Strict Mode protection)
+    if (isConnectingRef.current || (wsRef.current && wsRef.current.readyState === WebSocket.CONNECTING)) {
+      console.log('[AI WS] Connection already in progress, skipping duplicate');
+      return;
+    }
+    
+    // If already connected, don't reconnect
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log('[AI WS] Already connected, skipping duplicate');
+      return;
+    }
+    
+    isConnectingRef.current = true;
+
+    // Close existing connection before creating new one
+    if (wsRef.current) {
+      wsRef.current.onopen = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+        wsRef.current.close();
+      }
+      wsRef.current = null;
+    }
 
     const baseUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:1234';
     const url = `${baseUrl}/ai/${boardId}`;
@@ -97,6 +127,9 @@ export function useAICommands(options: UseAICommandsOptions) {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (!isMountedRef.current) return;
+      
+      isConnectingRef.current = false;
       console.log('[AI WS] Connected');
       setIsConnected(true);
       setIsReconnecting(false);
@@ -111,6 +144,8 @@ export function useAICommands(options: UseAICommandsOptions) {
     };
 
     ws.onmessage = (event) => {
+      if (!isMountedRef.current) return;
+      
       let data;
       try {
         data = JSON.parse(event.data);
@@ -295,6 +330,8 @@ export function useAICommands(options: UseAICommandsOptions) {
     };
 
     ws.onclose = () => {
+      if (!isMountedRef.current) return;
+      
       console.log('[AI WS] Disconnected');
       setIsConnected(false);
       
@@ -307,7 +344,9 @@ export function useAICommands(options: UseAICommandsOptions) {
         reconnectAttempts.current += 1;
         
         reconnectTimeout.current = setTimeout(() => {
-          connectWebSocket();
+          if (isMountedRef.current) {
+            connectWebSocket();
+          }
         }, delay);
       } else {
         console.log('[AI WS] Max reconnect attempts reached');
@@ -316,6 +355,8 @@ export function useAICommands(options: UseAICommandsOptions) {
     };
 
     ws.onerror = (err) => {
+      if (!isMountedRef.current) return;
+      isConnectingRef.current = false;
       console.error('[AI WS] Error:', err);
       setIsConnected(false);
     };
@@ -325,19 +366,29 @@ export function useAICommands(options: UseAICommandsOptions) {
   useEffect(() => {
     if (!boardId) return;
     
+    isMountedRef.current = true;
     connectWebSocket();
 
     return () => {
+      isMountedRef.current = false;
+      isConnectingRef.current = false; // Reset guard on cleanup
       if (reconnectTimeout.current) {
         clearTimeout(reconnectTimeout.current);
       }
       if (wsRef.current) {
-        wsRef.current.close();
+        // Clean up all event handlers before closing
+        wsRef.current.onopen = null;
+        wsRef.current.onmessage = null;
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        
+        if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+          wsRef.current.close();
+        }
         wsRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boardId]);
+  }, [boardId, connectWebSocket]);
 
   /**
    * Manual reconnect function

@@ -56,6 +56,12 @@ export class CursorSyncClient {
   }
 
   connect(): void {
+    // Guard: prevent duplicate connections
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      console.log('🖱️  Cursor sync already connected/connecting, skipping duplicate');
+      return;
+    }
+    
     // The serverUrl is already determined by the hook
     // Just use it directly to connect to /cursor/{boardId} path
     const baseUrl = this.config.serverUrl;

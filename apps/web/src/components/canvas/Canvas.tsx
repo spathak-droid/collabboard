@@ -300,6 +300,17 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
       container.style.cursor = 'crosshair';
     }
   }, [activeTool, isPanning, stageRef]);
+  
+  // Cleanup Konva Stage on unmount to prevent "Several Konva instances" warning
+  useEffect(() => {
+    const stage = stageRef.current;
+    return () => {
+      // Konva cleanup is handled by react-konva, but we ensure proper teardown
+      if (stage) {
+        stage.destroyChildren();
+      }
+    };
+  }, [stageRef]);
 
   return (
     <div 

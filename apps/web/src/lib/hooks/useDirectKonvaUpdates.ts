@@ -37,10 +37,19 @@ interface CursorServerLivePosition {
   points?: number[];
 }
 
+interface WhiteboardObject {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  [key: string]: any;
+}
+
 interface DirectKonvaUpdatesProps {
   awareness: AwarenessLike | null;
   currentUserId: string;
   stageRef: React.RefObject<Konva.Stage | null>;
+  objectsMap: Map<string, WhiteboardObject>;
   /** Optional: live positions from cursor server (ultra-low latency when used) */
   cursorServerLivePositions?: React.RefObject<Map<string, CursorServerLivePosition>>;
 }
@@ -49,6 +58,7 @@ export function useDirectKonvaUpdates({
   awareness,
   currentUserId,
   stageRef,
+  objectsMap,
   cursorServerLivePositions,
 }: DirectKonvaUpdatesProps) {
   const lastUpdateTime = useRef(performance.now());
@@ -136,7 +146,42 @@ export function useDirectKonvaUpdates({
         let hasUpdates = false;
         const updatedNodes = new Set<Konva.Node>();
 
-        // Apply from Yjs awareness
+        // Priority 1: Apply selection transforms (for multi-object moves with 10+ objects)
+        // This dramatically reduces network overhead by applying a single transform to all selected objects
+        if (awareness) {
+          const states = awareness.getStates();
+          states.forEach((state) => {
+            const userId = (state.user as any)?.id;
+            if (userId === currentUserId) return;
+
+            const selTransform = (state as any).selectionTransform;
+            if (selTransform && selTransform.selectedIds?.length > 0) {
+              selTransform.selectedIds.forEach((objectId: string) => {
+                const nodes = stage.find(`#${objectId}`);
+                if (nodes.length === 0) return;
+                const node = nodes[0];
+                if (!node || updatedNodes.has(node)) return;
+                
+                // Get base position from Yjs CRDT
+                const baseObj = objectsMap.get(objectId);
+                if (!baseObj) return;
+                
+                // Apply math transform: finalPos = basePos + delta
+                const transformedPos = {
+                  x: baseObj.x + selTransform.dx,
+                  y: baseObj.y + selTransform.dy,
+                };
+                
+                if (applyPositionToNode(node, transformedPos, updatedNodes)) {
+                  hasUpdates = true;
+                }
+              });
+            }
+          });
+        }
+
+        // Priority 2: Apply individual live positions (for small selections <10 objects)
+        // Skip nodes already updated by selection transform
         if (awareness) {
           const states = awareness.getStates();
           states.forEach((state) => {
@@ -180,7 +225,7 @@ export function useDirectKonvaUpdates({
     return () => {
       cancelAnimationFrame(rafId);
     };
-  }, [awareness, currentUserId, stageRef, cursorServerLivePositions]);
+  }, [awareness, currentUserId, stageRef, objectsMap, cursorServerLivePositions]);
 
   // Hook doesn't need to expose anything - it works automatically!
   return {};

@@ -37,6 +37,7 @@ import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
 import { ConnectionDots } from '@/components/canvas/objects/ConnectionDots';
 import { findNearestAnchor, resolveLinePoints } from '@/lib/utils/connectors';
 import { calculateAutoFit } from '@/lib/utils/autoFit';
+import { getVisibleObjects, getViewport, type Viewport } from '@/lib/utils/viewportCulling';
 import { STICKY_COLORS } from '@/types/canvas';
 import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextShape, TextBubbleShape, Frame as FrameType, AnchorPosition } from '@/types/canvas';
 // Refactored hooks
@@ -90,11 +91,14 @@ export default function BoardPage() {
     createObject,
     createObjectsBatch,
     updateObject,
+    updateObjectsBatch,
     deleteObjects,
     clearObjects,
     updateCursor,
     broadcastLiveDrag,
     clearLiveDrag,
+    broadcastSelectionTransform,
+    clearSelectionTransform,
     getBroadcastRate,
     hasUnsavedChanges,
   } = useYjs({
@@ -177,11 +181,20 @@ export default function BoardPage() {
     return () => document.removeEventListener('pointermove', handlePointerMove);
   }, [position, scale, cursorSyncConnected, sendFastCursor, updateCursor]);
 
+  // Build an objects map for resolving connector positions
+  const objectsMap = useMemo(() => {
+    const map = new Map<string, WhiteboardObject>();
+    for (const obj of objects) map.set(obj.id, obj);
+    return map;
+  }, [objects]);
+
   // Direct Konva updates for remote live drag (Yjs awareness + cursor server)
+  // Must be after objectsMap is defined
   useDirectKonvaUpdates({
     awareness,
     currentUserId: user?.uid || '',
     stageRef,
+    objectsMap,
     cursorServerLivePositions: cursorServerLivePositions,
   });
 
@@ -416,13 +429,6 @@ export default function BoardPage() {
     }
     // For frame tool, we want to keep previewPosition active for cursor feedback
   }, [activeTool]);
-
-  // Build an objects map for resolving connector positions
-  const objectsMap = useMemo(() => {
-    const map = new Map<string, WhiteboardObject>();
-    for (const obj of objects) map.set(obj.id, obj);
-    return map;
-  }, [objects]);
 
   // Use refactored hooks
   const { getObjectBounds, getConnectedObjectIds, intersectsRect } = useObjectBounds();
@@ -859,11 +865,27 @@ export default function BoardPage() {
   // Object manipulation functions moved to useObjectManipulation hook
 
   // Render frames behind all other objects so inner-object clicks are not stolen.
+  // Apply viewport culling for performance with 500+ objects
   const renderObjects = useMemo(() => {
     const frames = objects.filter((obj: WhiteboardObject) => obj.type === 'frame');
     const others = objects.filter((obj: WhiteboardObject) => obj.type !== 'frame');
-    return [...frames, ...others];
-  }, [objects]);
+    
+    // Create viewport from current canvas state
+    const viewport = getViewport(
+      position,
+      scale,
+      { 
+        width: typeof window !== 'undefined' ? window.innerWidth : 1920,
+        height: typeof window !== 'undefined' ? window.innerHeight : 1080
+      }
+    );
+    
+    // Apply viewport culling to non-frame objects (frames always render)
+    // Padding of 200px ensures objects slightly outside viewport are still rendered
+    const visibleOthers = getVisibleObjects(others, viewport, 200);
+    
+    return [...frames, ...visibleOthers];
+  }, [objects, position, scale]);
 
   // Frames are visual containers only - objects can move independently
 
@@ -1347,38 +1369,97 @@ export default function BoardPage() {
       y: newY,
     });
     
+    // Optimization: Use group transform for 10+ objects to reduce network overhead
+    const MULTI_SELECT_THRESHOLD = 10;
+    const useGroupTransform = selectedIds.length >= MULTI_SELECT_THRESHOLD;
+    
     // Build temp map with live positions for all selected objects
     const tempMap = new Map(objectsMap);
     const selectedObjects = objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id));
-    selectedObjects.forEach((obj) => {
-      const initialPos = selectionAreaDragStartRef.current.get(obj.id);
-      if (!initialPos) return;
+    
+    if (useGroupTransform) {
+      // Group transform strategy: Update local positions, broadcast once
+      selectedObjects.forEach((obj) => {
+        const initialPos = selectionAreaDragStartRef.current.get(obj.id);
+        if (!initialPos) return;
 
-      if (obj.type === 'line') {
-        const line = obj as LineShape;
-        const newPoints = [
-          initialPos.points![0] + dx,
-          initialPos.points![1] + dy,
-          initialPos.points![2] + dx,
-          initialPos.points![3] + dy,
-        ];
-        manipulation.liveDragRef.current.set(obj.id, {
-          x: 0,
-          y: 0,
-          points: newPoints,
-        } as any);
-        tempMap.set(obj.id, { ...obj, x: 0, y: 0, points: newPoints } as WhiteboardObject);
-        if (cursorSyncConnected) sendCursorServerLiveDrag(obj.id, 0, 0, { points: newPoints });
-        broadcastLiveDrag(obj.id, 0, 0, { points: newPoints } as any);
-      } else {
-        const newX = initialPos.x + dx;
-        const newY = initialPos.y + dy;
-        manipulation.liveDragRef.current.set(obj.id, { x: newX, y: newY });
-        tempMap.set(obj.id, { ...obj, x: newX, y: newY } as WhiteboardObject);
-        if (cursorSyncConnected) sendCursorServerLiveDrag(obj.id, newX, newY);
-        broadcastLiveDrag(obj.id, newX, newY);
+        if (obj.type === 'line') {
+          const newPoints = [
+            initialPos.points![0] + dx,
+            initialPos.points![1] + dy,
+            initialPos.points![2] + dx,
+            initialPos.points![3] + dy,
+          ];
+          manipulation.liveDragRef.current.set(obj.id, {
+            x: 0,
+            y: 0,
+            points: newPoints,
+          } as any);
+          tempMap.set(obj.id, { ...obj, x: 0, y: 0, points: newPoints } as WhiteboardObject);
+        } else {
+          const newX = initialPos.x + dx;
+          const newY = initialPos.y + dy;
+          manipulation.liveDragRef.current.set(obj.id, { x: newX, y: newY });
+          tempMap.set(obj.id, { ...obj, x: newX, y: newY } as WhiteboardObject);
+        }
+      });
+      
+      // Single broadcast for entire selection (50x fewer network messages!)
+      broadcastSelectionTransform(selectedIds, dx, dy);
+      
+      // Still broadcast to cursor server individually (ultra-low latency path)
+      if (cursorSyncConnected) {
+        selectedObjects.forEach((obj) => {
+          const initialPos = selectionAreaDragStartRef.current.get(obj.id);
+          if (!initialPos) return;
+          
+          if (obj.type === 'line') {
+            const newPoints = [
+              initialPos.points![0] + dx,
+              initialPos.points![1] + dy,
+              initialPos.points![2] + dx,
+              initialPos.points![3] + dy,
+            ];
+            sendCursorServerLiveDrag(obj.id, 0, 0, { points: newPoints });
+          } else {
+            const newX = initialPos.x + dx;
+            const newY = initialPos.y + dy;
+            sendCursorServerLiveDrag(obj.id, newX, newY);
+          }
+        });
       }
-    });
+    } else {
+      // Small selection strategy: Individual broadcasts (existing behavior)
+      selectedObjects.forEach((obj) => {
+        const initialPos = selectionAreaDragStartRef.current.get(obj.id);
+        if (!initialPos) return;
+
+        if (obj.type === 'line') {
+          const line = obj as LineShape;
+          const newPoints = [
+            initialPos.points![0] + dx,
+            initialPos.points![1] + dy,
+            initialPos.points![2] + dx,
+            initialPos.points![3] + dy,
+          ];
+          manipulation.liveDragRef.current.set(obj.id, {
+            x: 0,
+            y: 0,
+            points: newPoints,
+          } as any);
+          tempMap.set(obj.id, { ...obj, x: 0, y: 0, points: newPoints } as WhiteboardObject);
+          if (cursorSyncConnected) sendCursorServerLiveDrag(obj.id, 0, 0, { points: newPoints });
+          broadcastLiveDrag(obj.id, 0, 0, { points: newPoints } as any);
+        } else {
+          const newX = initialPos.x + dx;
+          const newY = initialPos.y + dy;
+          manipulation.liveDragRef.current.set(obj.id, { x: newX, y: newY });
+          tempMap.set(obj.id, { ...obj, x: newX, y: newY } as WhiteboardObject);
+          if (cursorSyncConnected) sendCursorServerLiveDrag(obj.id, newX, newY);
+          broadcastLiveDrag(obj.id, newX, newY);
+        }
+      });
+    }
 
     // Broadcast connected lines (connect to selected shapes but may not be selected)
     const selectedIdsSet = new Set(selectedIds);
@@ -1397,7 +1478,7 @@ export default function BoardPage() {
     }
 
     manipulation.setDragTick((t) => t + 1);
-  }, [selectionArea, selectedIds, objects, objectsMap, manipulation, cursorSyncConnected, sendCursorServerLiveDrag, broadcastLiveDrag]);
+  }, [selectionArea, selectedIds, objects, objectsMap, manipulation, cursorSyncConnected, sendCursorServerLiveDrag, broadcastLiveDrag, broadcastSelectionTransform]);
 
   // Handle selection area drag end - finalize positions
   const handleSelectionAreaDragEnd = useCallback(() => {
@@ -1405,6 +1486,7 @@ export default function BoardPage() {
       selectionAreaDragStartRef.current.clear();
       selectionAreaInitialPosRef.current = null;
       selectionAreaLivePosRef.current = null;
+      clearSelectionTransform(); // Clear any group transform
       return;
     }
     
@@ -1413,36 +1495,78 @@ export default function BoardPage() {
     const finalDx = finalPos.x - selectionAreaInitialPosRef.current.x;
     const finalDy = finalPos.y - selectionAreaInitialPosRef.current.y;
     
+    // Clear group transform broadcast
+    clearSelectionTransform();
+    
     // Finalize all selected objects and clear live drag for connected lines
     const selectedObjects = objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id));
     const selectedIdsSet = new Set(selectedIds);
-    selectedObjects.forEach((obj) => {
-      const initialPos = selectionAreaDragStartRef.current.get(obj.id);
-      if (!initialPos) return;
+    
+    // Optimization: Use batch update for 10+ objects
+    const MULTI_SELECT_THRESHOLD = 10;
+    const useBatchUpdate = selectedObjects.length >= MULTI_SELECT_THRESHOLD;
+    
+    if (useBatchUpdate) {
+      // Batch CRDT updates for performance
+      const updates: Array<{ id: string; data: Partial<WhiteboardObject> }> = [];
+      
+      selectedObjects.forEach((obj) => {
+        const initialPos = selectionAreaDragStartRef.current.get(obj.id);
+        if (!initialPos) return;
 
-      manipulation.liveDragRef.current.delete(obj.id);
-      clearLiveDrag(obj.id);
-      clearCursorServerLiveDrag(obj.id);
+        manipulation.liveDragRef.current.delete(obj.id);
+        clearLiveDrag(obj.id);
+        clearCursorServerLiveDrag(obj.id);
 
-      if (obj.type === 'line') {
-        // For lines, update points array
-        const line = obj as LineShape;
-        const newPoints = [
-          initialPos.points![0] + finalDx,
-          initialPos.points![1] + finalDy,
-          initialPos.points![2] + finalDx,
-          initialPos.points![3] + finalDy,
-        ];
-        updateObject(obj.id, { points: newPoints });
-      } else {
-        // For other objects, update x and y
-        updateObject(obj.id, { 
-          x: initialPos.x + finalDx, 
-          y: initialPos.y + finalDy,
-          modifiedAt: Date.now()
-        });
-      }
-    });
+        if (obj.type === 'line') {
+          const newPoints = [
+            initialPos.points![0] + finalDx,
+            initialPos.points![1] + finalDy,
+            initialPos.points![2] + finalDx,
+            initialPos.points![3] + finalDy,
+          ];
+          updates.push({ id: obj.id, data: { points: newPoints } });
+        } else {
+          updates.push({ 
+            id: obj.id, 
+            data: { 
+              x: initialPos.x + finalDx, 
+              y: initialPos.y + finalDy,
+              modifiedAt: Date.now()
+            } 
+          });
+        }
+      });
+      
+      // Single Yjs transaction for all updates (1 network message instead of N)
+      updateObjectsBatch(updates);
+    } else {
+      // Small selection: Individual updates (existing behavior)
+      selectedObjects.forEach((obj) => {
+        const initialPos = selectionAreaDragStartRef.current.get(obj.id);
+        if (!initialPos) return;
+
+        manipulation.liveDragRef.current.delete(obj.id);
+        clearLiveDrag(obj.id);
+        clearCursorServerLiveDrag(obj.id);
+
+        if (obj.type === 'line') {
+          const newPoints = [
+            initialPos.points![0] + finalDx,
+            initialPos.points![1] + finalDy,
+            initialPos.points![2] + finalDx,
+            initialPos.points![3] + finalDy,
+          ];
+          updateObject(obj.id, { points: newPoints });
+        } else {
+          updateObject(obj.id, { 
+            x: initialPos.x + finalDx, 
+            y: initialPos.y + finalDy,
+            modifiedAt: Date.now()
+          });
+        }
+      });
+    }
 
     // Clear live drag for connected lines (may have been broadcast but not selected)
     for (const obj of objects) {
@@ -1473,7 +1597,7 @@ export default function BoardPage() {
     selectionAreaDragStartRef.current.clear();
     selectionAreaInitialPosRef.current = null;
     selectionAreaLivePosRef.current = null;
-  }, [selectionArea, selectedIds, objects, updateObject, manipulation, clearLiveDrag, clearCursorServerLiveDrag]);
+  }, [selectionArea, selectedIds, objects, updateObject, updateObjectsBatch, manipulation, clearLiveDrag, clearSelectionTransform, clearCursorServerLiveDrag]);
 
   // ── Build collaborator list (only users currently viewing this board) ──
   type CollabUser = {

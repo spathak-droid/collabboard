@@ -3,6 +3,8 @@
  * Shown when user is offline and page is not in cache
  */
 
+'use client';
+
 export default function OfflinePage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">

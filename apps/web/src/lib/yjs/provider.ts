@@ -205,7 +205,8 @@ export class YjsProvider {
       for (const { id, data } of updates) {
         const existing = this.objects.get(id);
         if (existing) {
-          this.objects.set(id, { ...existing, ...data });
+          const updated = { ...existing, ...data } as WhiteboardObject;
+          this.objects.set(id, updated);
         }
       }
     });

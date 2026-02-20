@@ -97,14 +97,7 @@ export async function POST(request: NextRequest) {
   ];
 
   try {
-    // Log request for tracing
     const requestId = crypto.randomUUID();
-    console.log(`[AI Commands] Request ${requestId}:`, {
-      model: 'gpt-4o-mini',
-      messageCount: messages.length,
-      hasTools: !!AI_TOOLS,
-      userMessage: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
-    });
 
     const startTime = Date.now();
     const response = await openai.chat.completions.create({
@@ -115,13 +108,6 @@ export async function POST(request: NextRequest) {
       temperature: 0.3,
     });
     const duration = Date.now() - startTime;
-
-    // Log response for tracing
-    console.log(`[AI Commands] Response ${requestId}:`, {
-      duration: `${duration}ms`,
-      tokens: response.usage?.total_tokens,
-      toolCalls: response.choices[0]?.message?.tool_calls?.length || 0,
-    });
 
     const choice = response.choices[0];
     if (!choice) {

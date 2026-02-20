@@ -35,9 +35,6 @@ export const Frame = ({
   const [nameText, setNameText] = useState(data.name || 'frame1');
   const textRef = useRef<Konva.Text>(null);
   
-  // Debug: Log when Frame receives new props
-  console.log('[Frame] Rendering with data:', { id: data.id, x: data.x, y: data.y, width: data.width, height: data.height });
-  
   // Update name text when data.name changes
   useEffect(() => {
     setNameText(data.name || 'frame1');

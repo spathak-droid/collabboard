@@ -85,7 +85,6 @@ export function useAICommands(options: UseAICommandsOptions) {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('[AI WS] Connected');
       setIsConnected(true);
     };
 
@@ -170,12 +169,6 @@ export function useAICommands(options: UseAICommandsOptions) {
           supervisorPlan?: any;
         };
 
-        // DEBUG: Log color changes received from server
-        const colorChanges = actions.filter(a => a.name === 'changeColor');
-        if (colorChanges.length > 0) {
-          console.log('[CLIENT RECEIVE] changeColor actions:', JSON.stringify(colorChanges, null, 2));
-        }
-
         const ops: BoardOperations = {
           createObject: createObjectRef.current,
           createObjectsBatch: createObjectsBatchRef.current,
@@ -199,7 +192,6 @@ export function useAICommands(options: UseAICommandsOptions) {
           // Force immediate UI update for modified objects
           // The Yjs observer will fire, but we want to ensure React re-renders immediately
           if (executionResult.modifiedIds && executionResult.modifiedIds.length > 0) {
-            console.log(`[AI] Modified ${executionResult.modifiedIds.length} objects, forcing UI update`);
             // Request animation frame to ensure Konva redraws after React updates
             requestAnimationFrame(() => {
               // The Yjs observer should have already triggered setObjects()
@@ -210,8 +202,6 @@ export function useAICommands(options: UseAICommandsOptions) {
 
         // If requires follow-up, send execution results back to server
         if (requiresFollowUp && remainingTasks) {
-          console.log('[AI] Requires follow-up, sending execution results back to server');
-          
           // Wait a tiny bit for objects to sync, then send follow-up
           setTimeout(() => {
             const updatedBoardState = summarizeBoardState(objectsRef.current);
@@ -263,7 +253,6 @@ export function useAICommands(options: UseAICommandsOptions) {
     };
 
     ws.onclose = () => {
-      console.log('[AI WS] Disconnected');
       setIsConnected(false);
     };
 

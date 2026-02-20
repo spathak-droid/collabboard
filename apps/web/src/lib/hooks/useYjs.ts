@@ -50,9 +50,6 @@ export const useYjs = ({ boardId, userId, userName }: UseYjsOptions) => {
     // --- object change listener ---
     const unsubObjects = provider.onObjectsChange(() => {
       const newObjects = provider.getAllObjects();
-      console.log('[useYjs] Objects changed, updating React state. Frame object:', 
-        newObjects.find(o => o.type === 'frame')
-      );
       setObjects(newObjects);
       setHasUnsavedChanges(true);
     });

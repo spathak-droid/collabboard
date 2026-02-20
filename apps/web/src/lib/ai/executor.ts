@@ -779,8 +779,6 @@ export function executeToolCalls(
 
       case 'changeColor': {
         const args = call.arguments as ChangeColorArgs;
-        console.log('[changeColor] Received args:', JSON.stringify(args));
-        console.log('[changeColor] Color value:', args.color, 'Length:', args.color?.length);
         
         const target = ops.objects.find((o) => o.id === args.objectId);
         if (!target) {
@@ -792,20 +790,17 @@ export function executeToolCalls(
 
         if (target.type === 'sticky') {
           const resolvedColor = resolveStickyColor(args.color);
-          console.log(`[changeColor] Sticky: ${args.color} → ${resolvedColor} (Length: ${resolvedColor.length})`);
           ops.updateObject(args.objectId, {
             color: resolvedColor,
           } as Partial<WhiteboardObject>);
         } else if (target.type === 'frame') {
           const resolvedColor = resolveShapeColor(args.color);
-          console.log(`[changeColor] Frame: ${args.color} → ${resolvedColor} (Length: ${resolvedColor.length})`);
           // Frames: fill is the background color
           ops.updateObject(args.objectId, {
             fill: resolvedColor,
           } as Partial<WhiteboardObject>);
         } else if ('fill' in target) {
           const resolvedColor = resolveShapeColor(args.color);
-          console.log(`[changeColor] Shape: ${args.color} → ${resolvedColor} (Length: ${resolvedColor.length})`);
           ops.updateObject(args.objectId, {
             fill: resolvedColor,
           } as Partial<WhiteboardObject>);
@@ -1002,7 +997,6 @@ export function executeToolCalls(
           `Resized frame to fit ${containedObjects.length} object(s) with ${padding}px padding (${Math.round(newWidth)}×${Math.round(newHeight)})`,
         );
         
-        console.log(`[fitFrameToContents] Resized frame ${args.frameId} to ${Math.round(newWidth)}×${Math.round(newHeight)}`);
         break;
       }
 

@@ -11,7 +11,6 @@ export class CanvasPerformanceMonitor {
 
   static enable() {
     this.enabled = true;
-    console.log('[CanvasPerf] Performance monitoring enabled');
   }
 
   static disable() {
@@ -35,15 +34,12 @@ export class CanvasPerformanceMonitor {
   static printStats() {
     if (!this.enabled || this.renderCounts.size === 0) return;
 
-    console.group('[CanvasPerf] Render Counts (last 5s)');
     const sorted = Array.from(this.renderCounts.entries()).sort((a, b) => b[1] - a[1]);
     
     for (const [component, count] of sorted) {
-      const color = count > 100 ? 'color: red' : count > 50 ? 'color: orange' : 'color: green';
-      console.log(`%c${component}: ${count} renders`, color);
+      // Performance stats logged (disabled)
     }
     
-    console.groupEnd();
     this.renderCounts.clear();
   }
 

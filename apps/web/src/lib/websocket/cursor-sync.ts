@@ -74,15 +74,12 @@ export class CursorSyncClient {
     }
     
     const wsUrl = `${wsProtocol}//${host}/cursor/${this.config.boardId}?userId=${encodeURIComponent(this.config.userId)}&userName=${encodeURIComponent(this.config.userName)}`;
-    
-    console.log('🖱️  Connecting to cursor sync:', wsUrl);
 
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {
       // Reset disconnecting flag on successful connection
       this.isDisconnecting = false;
-      console.log('🖱️  Cursor sync connected');
       this.isConnected = true;
       this.reconnectAttempts = 0;
       this.startHeartbeat();
@@ -135,7 +132,6 @@ export class CursorSyncClient {
       // Only attempt reconnect if we're not intentionally disconnecting
       if (!this.isDisconnecting) {
         const closeReason = event.code === 1006 ? 'Connection closed abnormally (check server status)' : `Connection closed (code: ${event.code})`;
-        console.log(`🖱️  Cursor sync disconnected: ${closeReason}`);
         this.isConnected = false;
         this.stopHeartbeat();
         this.config.onDisconnect?.();
@@ -202,8 +198,6 @@ export class CursorSyncClient {
 
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.min(this.reconnectAttempts, 5);
-
-    console.log(`🖱️  Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
     setTimeout(() => {
       this.connect();

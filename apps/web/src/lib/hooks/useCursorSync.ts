@@ -42,10 +42,6 @@ export function useCursorSync(options: UseCursorSyncOptions) {
     const now = Date.now();
     const latency = now - cursor.timestamp;
     
-    // Log only once every 100 updates to avoid spam
-    if (Math.random() < 0.01) {
-      console.log(`🖱️  Railway latency: ${latency}ms`);
-    }
     
     // Update ref only - no React re-render
     cursorsRef.current.set(cursor.userId, cursor);

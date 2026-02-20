@@ -197,7 +197,6 @@ export default function DashboardPage() {
     if (cachedBoards && cachedBoards.length > 0) {
       setBoards(cachedBoards);
       setBoardsLoading(false);
-      console.log(`[Dashboard] Loaded ${cachedBoards.length} boards from cache`);
     }
 
     let cancelled = false;
@@ -393,9 +392,9 @@ export default function DashboardPage() {
       <div className="neon-orb right-[-3rem] top-20 h-80 w-80 bg-blue-300/40" />
       <div className="neon-orb bottom-[-5rem] left-[40%] h-72 w-72 bg-emerald-300/35" />
 
-      <header className="relative z-20 mx-auto w-full max-w-[1320px] pb-5">
+      <header className="relative z-20 mx-auto w-full max-w-[1200px] pb-5">
         <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-transparent px-5 py-4 shadow-[0_20px_60px_-38px_rgba(0,67,156,0.3)]">
-          <BrandLogo size="xl" showText={false} logoClassName="h-24 w-auto drop-shadow-none" />
+          <BrandLogo size="sm" showText={false} logoClassName="h-10 w-auto drop-shadow-none" />
           <div className="flex items-center gap-3">
             {/* TODO: Uncomment when Resend domain is verified
             <button
@@ -413,10 +412,10 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <main className="relative z-10 mx-auto w-full max-w-[1320px]">
+      <main className="relative z-10 mx-auto w-full max-w-[1200px]">
         <section className="rounded-2xl border border-slate-200 bg-transparent p-5">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-3xl font-semibold text-slate-900">Boards</h2>
+            <h2 className="text-2xl font-semibold text-slate-900">Boards</h2>
             <button
               onClick={() => setShowNewBoardModal(true)}
               disabled={creating}
@@ -489,7 +488,7 @@ export default function DashboardPage() {
                       onClick={() => handleOpenBoard(board.id)}
                       className="col-span-4 text-left"
                     >
-                      <p className="text-lg font-semibold text-slate-900">{board.title}</p>
+                      <p className="text-base font-semibold text-slate-900">{board.title}</p>
                     </button>
                     <div className="col-span-3">
                       {board.collaborators.length === 0 ? (

@@ -39,7 +39,6 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   // Selection
   selectedIds: [],
   setSelected: (ids) => {
-    console.log('[Selector] Selected:', ids);
     set({ selectedIds: ids });
   },
   toggleSelected: (id) =>
@@ -48,11 +47,9 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
       const nextIds = isSelected
         ? state.selectedIds.filter((selectedId) => selectedId !== id)
         : [...state.selectedIds, id];
-      console.log('[Selector] Toggle:', id, '→ selected:', nextIds);
       return { selectedIds: nextIds };
     }),
   clearSelection: () => {
-    console.log('[Selector] Cleared');
     set({ selectedIds: [] });
   },
   

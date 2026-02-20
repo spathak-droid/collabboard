@@ -249,7 +249,6 @@ export default function BoardPage() {
       setScale(autoFit.scale);
       setPosition(autoFit.position);
       hasAutoFittedRef.current = true;
-      console.log(`[Auto-fit] ${objects.length} objects, zoom: ${Math.round(autoFit.scale * 100)}%`);
     } else {
       // Fallback to default scale if auto-fit fails
       setScale(0.3);

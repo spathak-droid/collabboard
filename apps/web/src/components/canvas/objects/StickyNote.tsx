@@ -101,11 +101,6 @@ const StickyNoteComponent = ({
   };
 
   const [startColor, endColor] = getGradientStops(data.color);
-  
-  // DEBUG: Log sticky note color on every render
-  useEffect(() => {
-    console.log(`[StickyNote ${data.id.slice(-6)}] Color: "${data.color}" (length: ${data.color.length})`);
-  }, [data.color, data.id]);
 
   useEffect(() => {
     if (isSelected && transformerRef.current && groupRef.current) {

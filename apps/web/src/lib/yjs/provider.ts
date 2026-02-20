@@ -29,7 +29,6 @@ export class YjsProvider {
     }
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:1234';
-    console.log(`[Yjs] Connecting to ${wsUrl} for board: ${boardId}`);
 
     this.hocuspocus = new HocuspocusProvider({
       url: wsUrl,
@@ -38,13 +37,11 @@ export class YjsProvider {
       // Auth token sent via the Hocuspocus auth protocol (not raw binary)
       token: JSON.stringify({ userId: user.id, userName: user.name }),
       onAuthenticated: () => {
-        console.log('[Yjs] Authenticated with server');
       },
       onAuthenticationFailed: ({ reason }) => {
         console.error(`[Yjs] Auth failed for ${wsUrl}:`, reason);
       },
       onConnect: () => {
-        console.log('[Yjs] Connected to server');
       },
       onDisconnect: () => {
         console.warn('[Yjs] Disconnected from server');
@@ -85,9 +82,7 @@ export class YjsProvider {
     const existing = this.objects.get(id);
     if (existing) {
       const updated = { ...existing, ...data } as WhiteboardObject;
-      console.log('[Yjs Provider] Updating object:', id, 'with data:', data);
       this.objects.set(id, updated);
-      console.log('[Yjs Provider] Object updated, new value:', updated);
     } else {
       console.warn('[Yjs Provider] Cannot update - object not found:', id);
     }

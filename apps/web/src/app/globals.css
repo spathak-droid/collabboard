@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Reset & normalization */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #051126;
@@ -14,6 +21,9 @@
 
 html {
   font-size: 16px; /* Base font size - ensures consistent scaling */
+  -webkit-text-size-adjust: 100%; /* Prevent mobile Safari from auto-adjusting font sizes */
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -22,6 +32,9 @@ body {
   font-family: var(--font-manrope), system-ui, sans-serif;
   min-height: 100vh;
   font-size: 1rem; /* Use rem units for consistent sizing */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
 }
 
 ::selection {

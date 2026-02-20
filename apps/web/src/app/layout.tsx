@@ -17,6 +17,8 @@ const manrope = Manrope({
   weight: ["200", "300", "400", "500", "600", "700", "800"],
   display: "swap",
   fallback: ["system-ui", "arial"],
+  adjustFontFallback: true, // Ensure consistent sizing between fallback and loaded font
+  preload: true, // Preload font to prevent layout shifts
 });
 
 export const metadata: Metadata = {
@@ -38,7 +40,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" style={{ fontSize: '16px' }}>
+      <head>
+        <meta name="theme-color" content="#ffffff" />
+      </head>
       <body
         className={`${manrope.variable} ${geistMono.variable} antialiased`}
       >

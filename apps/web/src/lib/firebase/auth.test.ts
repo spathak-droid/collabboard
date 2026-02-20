@@ -21,6 +21,7 @@ vi.mock('firebase/auth', () => ({
   signInWithPopup: vi.fn(),
   signOut: vi.fn(),
   updateProfile: vi.fn(),
+  sendEmailVerification: vi.fn(),
   onAuthStateChanged: vi.fn(),
   GoogleAuthProvider: vi.fn(),
   GithubAuthProvider: vi.fn(),
@@ -60,6 +61,7 @@ describe('Firebase Auth', () => {
         mockUserCredential as any
       );
       vi.mocked(firebaseAuth.updateProfile).mockResolvedValue(undefined);
+      vi.mocked(firebaseAuth.sendEmailVerification).mockResolvedValue(undefined);
 
       const result = await signUp('test@example.com', 'password123', 'Test User');
 
@@ -71,6 +73,7 @@ describe('Firebase Auth', () => {
       expect(firebaseAuth.updateProfile).toHaveBeenCalledWith(mockUser, {
         displayName: 'Test User',
       });
+      expect(firebaseAuth.sendEmailVerification).toHaveBeenCalledWith(mockUser);
       expect(result).toEqual(mockUser);
     });
 
@@ -94,12 +97,14 @@ describe('Firebase Auth', () => {
         user: mockUser,
       } as any);
       vi.mocked(firebaseAuth.updateProfile).mockResolvedValue(undefined);
+      vi.mocked(firebaseAuth.sendEmailVerification).mockResolvedValue(undefined);
 
       await signUp('test@example.com', 'password123', 'John Doe');
 
       expect(firebaseAuth.updateProfile).toHaveBeenCalledWith(mockUser, {
         displayName: 'John Doe',
       });
+      expect(firebaseAuth.sendEmailVerification).toHaveBeenCalledWith(mockUser);
     });
   });
 

@@ -13,7 +13,8 @@ export interface CreateStickyNoteArgs {
   text: string;
   x?: number;
   y?: number;
-  color?: 'yellow' | 'pink' | 'blue' | 'green' | 'orange' | 'random';
+  color?: 'yellow' | 'pink' | 'blue' | 'green' | 'orange' | 'random' | string;
+  colors?: string[]; // Array of hex colors to cycle through when creating multiple objects
   quantity?: number; // Optional: create multiple sticky notes
   rows?: number; // Optional: explicit grid rows (e.g., "7x2 grid" = rows:7)
   columns?: number; // Optional: explicit grid columns (e.g., "7x2 grid" = columns:2)
@@ -49,6 +50,7 @@ export interface CreateShapeArgs {
   width?: number;
   height?: number;
   color?: string;
+  colors?: string[]; // Array of hex colors to cycle through when creating multiple objects
   text?: string; // Optional text label to display inside the shape
   quantity?: number; // Optional: create multiple shapes
   rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)

@@ -25,7 +25,7 @@ export const INTENT_CLASSIFIER = {
         properties: {
           operation: {
             type: 'string',
-            enum: ['CREATE', 'UPDATE', 'DELETE', 'MOVE', 'RESIZE', 'ROTATE', 'CHANGE_COLOR', 'ARRANGE', 'ANALYZE', 'CONNECT', 'FIT_FRAME_TO_CONTENTS', 'MULTI_STEP', 'UNKNOWN'],
+            enum: ['CREATE', 'UPDATE', 'DELETE', 'MOVE', 'RESIZE', 'ROTATE', 'CHANGE_COLOR', 'ARRANGE', 'ANALYZE', 'CONNECT', 'FIT_FRAME_TO_CONTENTS', 'MULTI_STEP', 'CONVERSATION', 'UNKNOWN'],
             description: 'Primary operation type',
           },
           objectType: {
@@ -52,7 +52,12 @@ export const INTENT_CLASSIFIER = {
           },
           color: {
             type: 'string',
-            description: 'Color as hex code (#EF4444) or name (red, blue, green, yellow, orange, pink, purple)',
+            description: 'Color as hex code (#EF4444), name (red, blue, green), or "random" for varied colors. When user asks for "different colors", "varied colors", "random colors" - return "random"',
+          },
+          colors: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of specific colors when user requests multiple specific colors (e.g., "create 3 red, blue, and green circles" = ["#EF4444", "#3B82F6", "#10B981"]). Leave empty if color is "random"',
           },
           text: {
             type: 'string',
@@ -123,15 +128,28 @@ export const INTENT_CLASSIFIER = {
 - orange → "#F97316"
 - pink → "#EC4899"
 - purple → "#A855F7"
-- For sticky notes: yellow/pink/blue/green/orange (names OK)
+- cyan → "#06B6D4"
+- teal → "#14B8A6"
+- indigo → "#6366F1"
+- lime → "#84CC16"
+- amber → "#F59E0B"
+- For sticky notes: yellow/pink/blue/green/orange (names OK for sticky notes only)
 - For shapes: ALWAYS use hex codes
-- **CRITICAL - Color Variation Keywords (Extract as "random"):**
+
+**CRITICAL - Color Variation Handling:**
+When user requests varied/different/random colors:
   * "random color", "different color", "different colors", "varied colors", "various colors", "all should be different color", "each a different color"
-  * When you see these phrases → SET color: "random" (so executor knows to cycle colors)
-  * Example: "create 5 sticky notes which all should be different color" → color: "random"
-  * Example: "create 9 sticky notes with random color" → color: "random"
-  * Example: "add 6 circles with different colors" → color: "random"
-  * DO NOT convert "random" to a hex code - keep it as the string "random"
+  * SET color: "random" AND colors: ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"] (5 vibrant colors for cycling)
+  * Example: "create 5 sticky notes which all should be different color" → color: "random", colors: ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"]
+  * Example: "create 9 sticky notes with random color" → color: "random", colors: ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"]
+  * Example: "add 6 circles with different colors" → color: "random", colors: ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"]
+  * The "random" string tells executor to cycle, colors array provides the palette
+  
+**Specific Multiple Colors:**
+When user specifies exact colors for multiple objects:
+  * "create 3 circles: one red, one blue, one green" → colors: ["#EF4444", "#3B82F6", "#10B981"]
+  * "create 4 sticky notes: red, blue, green, yellow" → colors: ["#EF4444", "#3B82F6", "#10B981", "#EAB308"]
+  * In this case, DO NOT set color="random", only populate colors array
 
 **QUANTITY PARSING:**
 - "a circle" = 1
@@ -140,11 +158,31 @@ export const INTENT_CLASSIFIER = {
 - "create stars" (no number) = 1
 - "some circles" = 3 (reasonable default)
 - **CRITICAL: Always extract the number when present** (e.g., "create 3 X" → quantity:3)
+- **CRITICAL - Multiple Groups with Different Colors:**
+  * "4 blue stars, 3 pink stars" → quantity: 7, colors: ["#3B82F6", "#3B82F6", "#3B82F6", "#3B82F6", "#EC4899", "#EC4899", "#EC4899"]
+  * "2 red circles, 5 green circles" → quantity: 7, colors: ["#EF4444", "#EF4444", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981"]
+  * "one blue, 3 pink" → quantity: 4, colors: ["#3B82F6", "#EC4899", "#EC4899", "#EC4899"]
+  * Total quantity = sum of all groups
+  * Colors array = repeat each color by its count in order
 - **GRID PATTERNS:**
   * "7x2 grid" or "7×2 grid" → rows:7, columns:2, quantity:14
   * "4x3 grid of circles" → rows:4, columns:3, quantity:12
   * "1 row 5 columns" → rows:1, columns:5, quantity:5
   * "create 8 stars" (no grid) → quantity:8 (no rows/columns, auto-calculated)
+
+**CONVERSATIONAL QUERIES (NOT COMMANDS):**
+- **CONVERSATION**: User is chatting, asking questions, or making conversation (NOT giving whiteboard commands)
+  * Greetings: "hello", "hi", "hey", "good morning"
+  * Questions about you: "who are you?", "what can you do?", "help"
+  * Casual chat: "tell me a joke", "how are you?", "thanks", "thank you"
+  * General questions: "what is X?", "explain Y", "tell me about Z" (when NOT about the board)
+  * If it's a conversation/question and NOT a whiteboard command → operation=CONVERSATION
+  * Examples:
+    - "hello" → operation=CONVERSATION
+    - "tell me a joke" → operation=CONVERSATION
+    - "what can you do?" → operation=CONVERSATION
+    - "thanks!" → operation=CONVERSATION
+    - "how are you?" → operation=CONVERSATION
 
 **OPERATION DETECTION:**
 - **CREATE**: "create", "add", "make", "draw", "generate" + object type
@@ -294,7 +332,8 @@ User: "create 5 sticky notes which all should be different color"
   "operation": "CREATE",
   "objectType": "sticky",
   "quantity": 5,
-  "color": "random"
+  "color": "random",
+  "colors": ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"]
 }
 
 User: "create 9 sticky notes with random color and write I love hotdogs in them"
@@ -303,7 +342,8 @@ User: "create 9 sticky notes with random color and write I love hotdogs in them"
   "objectType": "sticky",
   "quantity": 9,
   "text": "I love hotdogs",
-  "color": "random"
+  "color": "random",
+  "colors": ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"]
 }
 
 User: "add 6 circles with different colors"
@@ -312,7 +352,8 @@ User: "add 6 circles with different colors"
   "objectType": "shape",
   "shapeType": "circle",
   "quantity": 6,
-  "color": "random"
+  "color": "random",
+  "colors": ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"]
 }
 
 User: "create 50 green stars"
@@ -483,7 +524,42 @@ User: "create 3 sticky notes"
   "objectType": "sticky",
   "quantity": 3
 }
-Note: Quantity is explicitly extracted from the command. No color specified = use default (yellow).`,
+Note: Quantity is explicitly extracted from the command. No color specified = use default (yellow).
+
+User: "create 4 blue stars, 3 pink stars"
+{
+  "operation": "CREATE",
+  "objectType": "shape",
+  "shapeType": "star",
+  "quantity": 7,
+  "colors": ["#3B82F6", "#3B82F6", "#3B82F6", "#3B82F6", "#EC4899", "#EC4899", "#EC4899"]
+}
+Note: Total quantity = 4 + 3 = 7. Colors array repeats each color by its count.
+
+User: "add one red circle, 5 green circles"
+{
+  "operation": "CREATE",
+  "objectType": "shape",
+  "shapeType": "circle",
+  "quantity": 6,
+  "colors": ["#EF4444", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981"]
+}
+Note: Total quantity = 1 + 5 = 6. First color once, second color five times.
+
+User: "hello"
+{
+  "operation": "CONVERSATION"
+}
+
+User: "tell me a joke"
+{
+  "operation": "CONVERSATION"
+}
+
+User: "what can you do?"
+{
+  "operation": "CONVERSATION"
+}`,
 };
 
 /**
@@ -533,6 +609,12 @@ export async function classifyUserIntent(openai, userMessage) {
 export function executeFromIntent(intent, boardState) {
   console.log('⚡ Executing directly from intent (agent bypass)');
   
+  // CONVERSATION mode - return null to let the agent respond naturally
+  if (intent.operation === 'CONVERSATION') {
+    console.log('💬 Conversational query detected, routing to chat agent');
+    return null;
+  }
+  
   // Operations that NEED agent with board context - return null to fall through
   if (intent.operation === 'FIT_FRAME_TO_CONTENTS' || 
       intent.operation === 'CONNECT' ||
@@ -550,6 +632,11 @@ export function executeFromIntent(intent, boardState) {
       
       // Convert color name to hex (but preserve "random" as-is)
       const color = intent.color && intent.color !== 'random' ? colorNameToHex(intent.color) : intent.color;
+      
+      // Get color palette for cycling (either from intent.colors or default)
+      const colorPalette = intent.colors && Array.isArray(intent.colors) && intent.colors.length > 0
+        ? intent.colors // Use LLM-provided palette
+        : ['#EF4444', '#3B82F6', '#10B981', '#A855F7', '#F97316']; // Default: red, blue, green, purple, orange
       
       // Check if user has a frame selected (for "create X inside this frame")
       let selectedFrameId = null;
@@ -579,9 +666,17 @@ export function executeFromIntent(intent, boardState) {
         };
         
         // Add color if specified (now converted to hex)
-        // CRITICAL: If color is "random", OMIT it entirely so client cycles through colors
+        // CRITICAL: Pass colors array if provided by intent classifier
         if (color && color !== 'random') {
           args.color = color;
+        }
+        
+        // Pass colors array if provided (for color cycling)
+        if (colorPalette && intent.colors && intent.colors.length > 0) {
+          args.colors = colorPalette;
+        } else if (color === 'random') {
+          // Fallback: if color is "random" but no colors array, use default palette
+          args.colors = colorPalette;
         }
         
         // Add frameId if a frame is selected
@@ -623,9 +718,17 @@ export function executeFromIntent(intent, boardState) {
         };
         
         // Sticky notes can use color names, but normalize them
-        // CRITICAL: If color is "random", OMIT it entirely so client cycles through colors
+        // CRITICAL: Pass colors array if provided by intent classifier
         if (color && color !== 'random') {
           args.color = color;
+        }
+        
+        // Pass colors array if provided (for color cycling)
+        if (colorPalette && intent.colors && intent.colors.length > 0) {
+          args.colors = colorPalette;
+        } else if (color === 'random') {
+          // Fallback: if color is "random" but no colors array, use default palette
+          args.colors = colorPalette;
         }
         
         // Add frameId if a frame is selected

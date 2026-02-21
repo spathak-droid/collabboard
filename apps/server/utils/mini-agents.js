@@ -24,7 +24,8 @@ export const MINI_CREATE = {
             text: { type: 'string' },
             x: { type: 'number' },
             y: { type: 'number' },
-            color: { type: 'string', description: 'Hex color code (e.g., #FFF59D, #F48FB1, #81D4FA, #A5D6A7, #FFCC80)' },
+            color: { type: 'string', description: 'Hex color code (e.g., #FFF59D, #F48FB1, #81D4FA, #A5D6A7, #FFCC80) or "random" for varied colors' },
+            colors: { type: 'array', items: { type: 'string' }, description: 'Array of hex colors to cycle through when creating multiple objects' },
             quantity: { type: 'number', description: 'Number of sticky notes to create (default: 1)' },
             rows: { type: 'number', description: 'Number of rows in grid layout' },
             columns: { type: 'number', description: 'Number of columns in grid layout' },
@@ -47,7 +48,8 @@ export const MINI_CREATE = {
             y: { type: 'number' },
             width: { type: 'number' },
             height: { type: 'number' },
-            color: { type: 'string', description: 'Hex color code (e.g., #EF4444 for red, #3B82F6 for blue)' },
+            color: { type: 'string', description: 'Hex color code (e.g., #EF4444 for red, #3B82F6 for blue) or "random" for varied colors' },
+            colors: { type: 'array', items: { type: 'string' }, description: 'Array of hex colors to cycle through when creating multiple objects' },
             text: { type: 'string' },
             quantity: { type: 'number', description: 'Number of shapes to create (default: 1)' },
             rows: { type: 'number', description: 'Number of rows in grid layout' },
@@ -131,8 +133,10 @@ CRITICAL:
 - "sticky note" → use createStickyNote tool
 - "text bubble" → use createTextBubble tool
 - "text" (plain text) → use createText tool
-- If user specifies a color, convert it to hex code in the color parameter
-- Common hex codes: red="#EF4444", blue="#3B82F6", green="#10B981", purple="#A855F7", orange="#F97316", pink="#EC4899", yellow="#EAB308"
+- **Colors:** If user specifies a color, convert it to hex code in the color parameter
+  * Common hex codes: red="#EF4444", blue="#3B82F6", green="#10B981", purple="#A855F7", orange="#F97316", pink="#EC4899", yellow="#EAB308"
+  * If user asks for "random" or "different" colors, use the colors array parameter
+  * For multiple objects with varied colors, pass colors array (e.g., colors: ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"])
 - **Frame Context:** If user has a frame selected (see User Selection context) and says "create X in/inside this frame", pass the frameId parameter
 
 Examples (SINGLE objects only):

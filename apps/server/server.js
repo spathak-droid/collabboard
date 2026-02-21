@@ -571,7 +571,7 @@ async function handleAIMessage(ws, data) {
           // Classify intent
           const intent = await classifyUserIntent(openai, message);
           
-          if (intent && !intent.isMultiStep) {
+          if (intent && !intent.isMultiStep && intent.operation !== 'CONVERSATION') {
             // Execute directly from intent (bypass all agents!)
             let toolCalls = executeFromIntent(intent, { objects: boardState?.objects || [], selectedIds });
             
@@ -720,6 +720,40 @@ async function handleAIMessage(ws, data) {
               executeAnalyzeObjectsServerSide,
               progressCallback
             );
+          } else if (intent && intent.operation === 'CONVERSATION') {
+            // Conversational query - respond naturally without tools
+            console.log('💬 Conversational query detected, responding naturally');
+            
+            const conversationResponse = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [
+                {
+                  role: 'system',
+                  content: `You are a helpful AI assistant for a collaborative whiteboard application. 
+                  
+You can help users:
+- Create and manipulate objects on the whiteboard (sticky notes, shapes, text, frames, connectors)
+- Organize and arrange objects
+- Analyze the board contents
+- Answer questions about the whiteboard features
+
+When users greet you or make conversation, respond naturally and friendly. Keep responses concise and helpful.
+
+Current board context: ${boardState?.objects?.length || 0} objects on the board.`
+                },
+                { role: 'user', content: message }
+              ],
+              temperature: 0.7,
+            });
+            
+            const responseMessage = conversationResponse.choices[0]?.message?.content || "I'm here to help! You can ask me to create objects, organize your board, or answer questions.";
+            
+            result = {
+              toolCalls: [],
+              summary: responseMessage,
+              needsFollowUp: false,
+              progressSent: false,
+            };
           } else {
             // Classification failed - fall through to mini-agent
             console.log('⚠️  Intent classification failed, falling through');

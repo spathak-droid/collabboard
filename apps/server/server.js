@@ -77,10 +77,14 @@ cursorWss.on('connection', (ws, request, boardId, userId, userName) => {
     const room = cursorRooms.get(boardId);
     if (!room) return;
     
+    // Convert Buffer to string to ensure consistent text encoding
+    // This prevents binary data issues when messages pass through Railway's infrastructure
+    const messageText = data.toString('utf8');
+    
     // Broadcast to all clients in room except sender
     room.forEach((client, clientUserId) => {
       if (clientUserId !== userId && client.ws.readyState === 1) {
-        client.ws.send(data);
+        client.ws.send(messageText);
       }
     });
   });

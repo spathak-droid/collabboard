@@ -465,8 +465,8 @@ export function executeToolCalls(
           
           // Color handling: ONLY cycle colors if explicitly requested via colors array or color="random"
           const hasColorsArray = args.colors && Array.isArray(args.colors) && args.colors.length > 0;
-          const colorArray = hasColorsArray
-            ? args.colors // Use LLM-provided color palette
+          const colorArray: string[] = hasColorsArray
+            ? args.colors! // Use LLM-provided color palette (non-null assertion since we checked hasColorsArray)
             : ['#FFF59D', '#F48FB1', '#81D4FA', '#A5D6A7', '#FFCC80']; // Default: yellow, pink, blue, green, orange
           
           // CRITICAL: Only cycle if colors array provided OR color="random"
@@ -753,8 +753,8 @@ export function executeToolCalls(
           
           // Color handling: ONLY cycle colors if explicitly requested via colors array or color="random"
           const hasColorsArray = args.colors && Array.isArray(args.colors) && args.colors.length > 0;
-          const shapeColorArray = hasColorsArray
-            ? args.colors // Use LLM-provided color palette
+          const shapeColorArray: string[] = hasColorsArray
+            ? args.colors! // Use LLM-provided color palette (non-null assertion since we checked hasColorsArray)
             : ['#EF4444', '#3B82F6', '#10B981', '#A855F7', '#F97316']; // Default: red, blue, green, purple, orange
           
           // CRITICAL: Only cycle if colors array provided OR color="random"

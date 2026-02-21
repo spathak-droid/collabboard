@@ -130,14 +130,15 @@ function getFrameInnerBounds(
     return null;
   }
   
+  const frameObj = frame as Frame;
   const bounds = {
-    x: frame.x + padding,
-    y: frame.y + padding,
-    width: Math.max(frame.width - padding * 2, 100),
-    height: Math.max(frame.height - padding * 2, 100),
+    x: frameObj.x + padding,
+    y: frameObj.y + padding,
+    width: Math.max(frameObj.width - padding * 2, 100),
+    height: Math.max(frameObj.height - padding * 2, 100),
   };
   
-  console.log(`✅ [Frame Bounds] Frame found at (${frame.x}, ${frame.y}), size: ${frame.width}x${frame.height}`);
+  console.log(`✅ [Frame Bounds] Frame found at (${frameObj.x}, ${frameObj.y}), size: ${frameObj.width}x${frameObj.height}`);
   console.log(`   Inner bounds: (${bounds.x}, ${bounds.y}), size: ${bounds.width}x${bounds.height}`);
   
   return bounds;
@@ -731,8 +732,9 @@ export function executeToolCalls(
         if (args.frameId) {
           console.log(`📦 [Client Executor] createShape received frameId: ${args.frameId}`);
           const frame = ops.objects.find(o => o.id === args.frameId && o.type === 'frame');
-          if (frame) {
-            console.log(`   Frame found: ${frame.type} at (${frame.x}, ${frame.y}), size: ${frame.width}x${frame.height}`);
+          if (frame && frame.type === 'frame') {
+            const frameObj = frame as Frame;
+            console.log(`   Frame found: ${frameObj.type} at (${frameObj.x}, ${frameObj.y}), size: ${frameObj.width}x${frameObj.height}`);
           } else {
             console.error(`   ⚠️ Frame ${args.frameId} NOT FOUND in objects!`);
           }
@@ -1423,19 +1425,19 @@ export function executeToolCalls(
 
         // Strategy 1: Use containedObjectIds if available
         let containedObjects: WhiteboardObject[] = [];
-        const frameData = frame as any;
+        const frameObj = frame as Frame;
         
-        if (frameData.containedObjectIds && Array.isArray(frameData.containedObjectIds) && frameData.containedObjectIds.length > 0) {
+        if (frameObj.containedObjectIds && Array.isArray(frameObj.containedObjectIds) && frameObj.containedObjectIds.length > 0) {
           // Use the frame's tracked contained object IDs
           containedObjects = ops.objects.filter((obj) => 
-            frameData.containedObjectIds.includes(obj.id) && obj.type !== 'line'
+            frameObj.containedObjectIds.includes(obj.id) && obj.type !== 'line'
           );
         } else {
           // Strategy 2: Find objects that overlap or are inside the frame bounds
-          const frameX = frame.x;
-          const frameY = frame.y;
-          const frameWidth = frameData.width || 0;
-          const frameHeight = frameData.height || 0;
+          const frameX = frameObj.x;
+          const frameY = frameObj.y;
+          const frameWidth = frameObj.width || 0;
+          const frameHeight = frameObj.height || 0;
           const frameRight = frameX + frameWidth;
           const frameBottom = frameY + frameHeight;
           
@@ -2465,12 +2467,13 @@ function runArrangeInGrid(
     const frame = ops.objects.find((o) => o.id === frameId && o.type === 'frame');
     if (frame && frame.type === 'frame') {
       // Use frame's inner bounds with padding
+      const frameObj = frame as Frame;
       const FRAME_PADDING = 40;
       boundingBox = {
-        x: frame.x + FRAME_PADDING,
-        y: frame.y + FRAME_PADDING,
-        width: Math.max(frame.width - FRAME_PADDING * 2, 100),
-        height: Math.max(frame.height - FRAME_PADDING * 2, 100),
+        x: frameObj.x + FRAME_PADDING,
+        y: frameObj.y + FRAME_PADDING,
+        width: Math.max(frameObj.width - FRAME_PADDING * 2, 100),
+        height: Math.max(frameObj.height - FRAME_PADDING * 2, 100),
       };
     } else {
       return { modifiedIds, summary: `Frame ID "${frameId}" not found` };

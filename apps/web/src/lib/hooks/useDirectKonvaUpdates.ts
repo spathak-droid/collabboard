@@ -9,6 +9,7 @@
 
 import { useEffect, useRef } from 'react';
 import type Konva from 'konva';
+import { getAutoFitFontSize } from '@/lib/utils/autoFitText';
 
 interface LivePosition {
   x: number;
@@ -95,6 +96,30 @@ export function useDirectKonvaUpdates({
       if (Math.abs(currentWidth - livePos.width) > 0.1) {
         targetNode.width(livePos.width);
         hasUpdates = true;
+        
+        // Update Text component font size for Rectangle shapes
+        if (isGroup && livePos.height !== undefined) {
+          const textNode = (node as any).findOne('Text');
+          if (textNode) {
+            // Calculate text area dimensions (matching Rectangle.tsx logic)
+            const textAreaWidth = livePos.width * 0.9;
+            const textAreaHeight = livePos.height * 0.8;
+            const textContent = textNode.text() || ' ';
+            const fontFamily = textNode.fontFamily() || 'Inter';
+            
+            // Use the same auto-fit logic as Rectangle component
+            const fontSize = getAutoFitFontSize(textContent, textAreaWidth, textAreaHeight, fontFamily, {
+              minSize: 12,
+              maxSize: 48,
+            });
+            
+            textNode.fontSize(fontSize);
+            textNode.width(textAreaWidth);
+            textNode.height(textAreaHeight);
+            textNode.x(livePos.width * 0.05);
+            textNode.y(livePos.height * 0.1);
+          }
+        }
       }
     }
     if (livePos.height !== undefined) {
@@ -102,6 +127,30 @@ export function useDirectKonvaUpdates({
       if (Math.abs(currentHeight - livePos.height) > 0.1) {
         targetNode.height(livePos.height);
         hasUpdates = true;
+        
+        // Update Text component font size for Rectangle shapes (if width was already updated)
+        if (isGroup && livePos.width !== undefined) {
+          const textNode = (node as any).findOne('Text');
+          if (textNode) {
+            // Calculate text area dimensions (matching Rectangle.tsx logic)
+            const textAreaWidth = livePos.width * 0.9;
+            const textAreaHeight = livePos.height * 0.8;
+            const textContent = textNode.text() || ' ';
+            const fontFamily = textNode.fontFamily() || 'Inter';
+            
+            // Use the same auto-fit logic as Rectangle component
+            const fontSize = getAutoFitFontSize(textContent, textAreaWidth, textAreaHeight, fontFamily, {
+              minSize: 12,
+              maxSize: 48,
+            });
+            
+            textNode.fontSize(fontSize);
+            textNode.width(textAreaWidth);
+            textNode.height(textAreaHeight);
+            textNode.x(livePos.width * 0.05);
+            textNode.y(livePos.height * 0.1);
+          }
+        }
       }
     }
     if (livePos.radius !== undefined && (targetNode as any).radius) {
@@ -109,6 +158,30 @@ export function useDirectKonvaUpdates({
       if (Math.abs(currentRadius - livePos.radius) > 0.1) {
         (targetNode as any).radius(livePos.radius);
         hasUpdates = true;
+        
+        // Update Text component font size for Circle shapes
+        if (isGroup) {
+          const textNode = (node as any).findOne('Text');
+          if (textNode) {
+            // Calculate text area dimensions (matching Circle.tsx logic)
+            const textAreaWidth = livePos.radius * 1.8;
+            const textAreaHeight = livePos.radius * 1.1;
+            const textContent = textNode.text() || ' ';
+            const fontFamily = textNode.fontFamily() || 'Inter';
+            
+            // Use the same auto-fit logic as Circle component
+            const fontSize = getAutoFitFontSize(textContent, textAreaWidth, textAreaHeight, fontFamily, {
+              minSize: 12,
+              maxSize: 44,
+            });
+            
+            textNode.fontSize(fontSize);
+            textNode.width(textAreaWidth);
+            textNode.height(textAreaHeight);
+            textNode.x(-livePos.radius * 0.9);
+            textNode.y(-livePos.radius * 0.55);
+          }
+        }
       }
     }
     if (livePos.points !== undefined && livePos.points.length >= 4) {

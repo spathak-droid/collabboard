@@ -50,31 +50,62 @@ function openDB(): Promise<IDBDatabase> {
         reject(request.error);
       };
       
-      request.onsuccess = () => resolve(request.result);
+      request.onsuccess = () => {
+        const db = request.result;
+        
+        // Verify the store exists after opening
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          console.warn('[OfflineQueue] Store missing after open, triggering migration');
+          db.close();
+          // Force upgrade by deleting and recreating
+          const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+          deleteRequest.onsuccess = () => {
+            // Retry opening with fresh database
+            const retryRequest = indexedDB.open(DB_NAME, DB_VERSION);
+            retryRequest.onsuccess = () => resolve(retryRequest.result);
+            retryRequest.onerror = () => reject(retryRequest.error);
+            retryRequest.onupgradeneeded = (event) => {
+              handleUpgrade((event.target as IDBOpenDBRequest).result);
+            };
+          };
+          deleteRequest.onerror = () => {
+            console.error('[OfflineQueue] Failed to delete database for migration');
+            reject(deleteRequest.error);
+          };
+        } else {
+          resolve(db);
+        }
+      };
 
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
-
-        // Delete old store if it exists (migration from updates to snapshots)
-        if (db.objectStoreNames.contains('pending-updates')) {
-          db.deleteObjectStore('pending-updates');
-          console.log('[OfflineQueue] Migrated from pending-updates to pending-snapshots');
-        }
-
-        // Create object store if it doesn't exist
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-          store.createIndex('boardId', 'boardId', { unique: true }); // One snapshot per board
-          store.createIndex('timestamp', 'timestamp', { unique: false });
-          store.createIndex('synced', 'synced', { unique: false });
-          console.log('[OfflineQueue] IndexedDB initialized with snapshot storage');
-        }
+        handleUpgrade(db);
       };
     } catch (error) {
       console.error('[OfflineQueue] IndexedDB not available:', error);
       reject(error);
     }
   });
+}
+
+/**
+ * Handle database schema upgrade
+ */
+function handleUpgrade(db: IDBDatabase): void {
+  // Delete old store if it exists (migration from updates to snapshots)
+  if (db.objectStoreNames.contains('pending-updates')) {
+    db.deleteObjectStore('pending-updates');
+    console.log('[OfflineQueue] Migrated from pending-updates to pending-snapshots');
+  }
+
+  // Create object store if it doesn't exist
+  if (!db.objectStoreNames.contains(STORE_NAME)) {
+    const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+    store.createIndex('boardId', 'boardId', { unique: true }); // One snapshot per board
+    store.createIndex('timestamp', 'timestamp', { unique: false });
+    store.createIndex('synced', 'synced', { unique: false });
+    console.log('[OfflineQueue] IndexedDB initialized with snapshot storage');
+  }
 }
 
 /**
@@ -93,6 +124,14 @@ export async function saveOfflineSnapshot(
   
   try {
     const db = await openDB();
+    
+    // Verify the store exists
+    if (!db.objectStoreNames.contains(STORE_NAME)) {
+      console.warn('[OfflineQueue] Store not found during save, skipping');
+      db.close();
+      return;
+    }
+    
     const transaction = db.transaction(STORE_NAME, 'readwrite');
     const store = transaction.objectStore(STORE_NAME);
 
@@ -136,6 +175,21 @@ export async function getPendingSnapshot(boardId: string): Promise<PendingSnapsh
   
   try {
     const db = await openDB();
+    
+    // Verify the store exists before trying to access it
+    if (!db.objectStoreNames.contains(STORE_NAME)) {
+      console.warn('[OfflineQueue] Store not found, reinitializing database');
+      db.close();
+      // Delete and recreate the database
+      await new Promise<void>((resolve, reject) => {
+        const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+        deleteRequest.onsuccess = () => resolve();
+        deleteRequest.onerror = () => reject(deleteRequest.error);
+      });
+      // Try again with fresh database
+      return await getPendingSnapshot(boardId);
+    }
+    
     const transaction = db.transaction(STORE_NAME, 'readonly');
     const store = transaction.objectStore(STORE_NAME);
 
@@ -146,6 +200,19 @@ export async function getPendingSnapshot(boardId: string): Promise<PendingSnapsh
     });
   } catch (error) {
     console.error('[OfflineQueue] Failed to get pending snapshot:', error);
+    // If there's a schema error, clear the database
+    if (error instanceof DOMException && error.name === 'NotFoundError') {
+      console.warn('[OfflineQueue] Clearing corrupted database');
+      try {
+        await new Promise<void>((resolve) => {
+          const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+          deleteRequest.onsuccess = () => resolve();
+          deleteRequest.onerror = () => resolve(); // Ignore delete errors
+        });
+      } catch (deleteError) {
+        console.error('[OfflineQueue] Failed to delete corrupted database:', deleteError);
+      }
+    }
     return null;
   }
 }

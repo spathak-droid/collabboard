@@ -31,6 +31,10 @@ export function useObjectManipulation(
   const liveDragRef = useRef<Map<string, LiveDragPosition>>(new Map());
   const liveTransformRef = useRef<Map<string, LiveTransformPosition>>(new Map());
   const [dragTick, setDragTick] = useState(0);
+  
+  // Throttle dragTick updates during transform to reduce React re-renders
+  const lastDragTickUpdateRef = useRef<number>(0);
+  const DRAG_TICK_THROTTLE = 32; // 32ms = ~30fps (enough for smooth lines, less expensive than 60fps)
 
   /**
    * Update a shape and reposition any connected lines.
@@ -86,7 +90,13 @@ export function useObjectManipulation(
   const handleShapeDragMove = useCallback(
     (shapeId: string, liveX: number, liveY: number) => {
       liveDragRef.current.set(shapeId, { x: liveX, y: liveY });
-      setDragTick((t) => t + 1);
+      
+      // Throttle React re-renders for better performance
+      const now = Date.now();
+      if (now - lastDragTickUpdateRef.current >= DRAG_TICK_THROTTLE) {
+        lastDragTickUpdateRef.current = now;
+        setDragTick((t) => t + 1);
+      }
     },
     []
   );
@@ -108,7 +118,13 @@ export function useObjectManipulation(
         rotation: liveRotation,
         ...dimensions,
       });
-      setDragTick((t) => t + 1);
+      
+      // Throttle React re-renders for better performance
+      const now = Date.now();
+      if (now - lastDragTickUpdateRef.current >= DRAG_TICK_THROTTLE) {
+        lastDragTickUpdateRef.current = now;
+        setDragTick((t) => t + 1);
+      }
     },
     []
   );

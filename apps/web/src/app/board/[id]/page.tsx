@@ -510,6 +510,10 @@ export default function BoardPage() {
     [manipulation.handleShapeDragMove, cursorSyncConnected, sendCursorServerLiveDrag, broadcastLiveDrag, objectsMap, objects]
   );
 
+  // Throttle transform broadcasts to prevent lag (16ms = ~60fps)
+  const lastTransformBroadcastRef = useRef<Map<string, number>>(new Map());
+  const TRANSFORM_BROADCAST_INTERVAL = 16; // 16ms = ~60fps
+
   const handleShapeTransformMoveWithBroadcast = useCallback(
     (
       shapeId: string,
@@ -518,31 +522,41 @@ export default function BoardPage() {
       liveRotation: number,
       dimensions?: { width?: number; height?: number; radius?: number }
     ) => {
+      // Always update local state immediately for smooth local rendering
       manipulation.handleShapeTransformMove(shapeId, liveX, liveY, liveRotation, dimensions);
       
-      // Broadcast transform updates (rotation, scale, position) to viewers in real-time
-      const extra = {
-        rotation: liveRotation,
-        ...dimensions,
-      };
+      // Throttle network broadcasts to prevent lag
+      const now = Date.now();
+      const lastBroadcast = lastTransformBroadcastRef.current.get(shapeId) || 0;
+      const shouldBroadcast = now - lastBroadcast >= TRANSFORM_BROADCAST_INTERVAL;
       
-      if (cursorSyncConnected) sendCursorServerLiveDrag(shapeId, liveX, liveY, extra);
-      broadcastLiveDrag(shapeId, liveX, liveY, extra);
+      if (shouldBroadcast) {
+        lastTransformBroadcastRef.current.set(shapeId, now);
+        
+        // Broadcast transform updates (rotation, scale, position) to viewers in real-time
+        const extra = {
+          rotation: liveRotation,
+          ...dimensions,
+        };
+        
+        if (cursorSyncConnected) sendCursorServerLiveDrag(shapeId, liveX, liveY, extra);
+        broadcastLiveDrag(shapeId, liveX, liveY, extra);
 
-      // Broadcast connected lines so viewers see them update in real-time during rotation/resize
-      const shapeObj = objectsMap.get(shapeId);
-      if (shapeObj) {
-        const tempMap = new Map(objectsMap);
-        tempMap.set(shapeId, { ...shapeObj, x: liveX, y: liveY, rotation: liveRotation, ...dimensions } as WhiteboardObject);
-        for (const obj of objects) {
-          if (obj.type !== 'line') continue;
-          const line = obj as LineShape;
-          const connected = line.startAnchor?.objectId === shapeId || line.endAnchor?.objectId === shapeId;
-          if (!connected) continue;
-          const [x1, y1, x2, y2] = resolveLinePoints(line, tempMap);
-          const points = [x1, y1, x2, y2];
-          if (cursorSyncConnected) sendCursorServerLiveDrag(line.id, 0, 0, { points });
-          broadcastLiveDrag(line.id, 0, 0, { points } as any);
+        // Broadcast connected lines so viewers see them update in real-time during rotation/resize
+        const shapeObj = objectsMap.get(shapeId);
+        if (shapeObj) {
+          const tempMap = new Map(objectsMap);
+          tempMap.set(shapeId, { ...shapeObj, x: liveX, y: liveY, rotation: liveRotation, ...dimensions } as WhiteboardObject);
+          for (const obj of objects) {
+            if (obj.type !== 'line') continue;
+            const line = obj as LineShape;
+            const connected = line.startAnchor?.objectId === shapeId || line.endAnchor?.objectId === shapeId;
+            if (!connected) continue;
+            const [x1, y1, x2, y2] = resolveLinePoints(line, tempMap);
+            const points = [x1, y1, x2, y2];
+            if (cursorSyncConnected) sendCursorServerLiveDrag(line.id, 0, 0, { points });
+            broadcastLiveDrag(line.id, 0, 0, { points } as any);
+          }
         }
       }
     },
@@ -554,6 +568,8 @@ export default function BoardPage() {
       manipulation.updateShapeAndConnectors(shapeId, updates);
       clearLiveDrag(shapeId);
       clearCursorServerLiveDrag(shapeId);
+      // Clear throttle ref for this object
+      lastTransformBroadcastRef.current.delete(shapeId);
       // Clear live drag for connected lines so viewers stop showing stale positions
       for (const obj of objects) {
         if (obj.type !== 'line') continue;

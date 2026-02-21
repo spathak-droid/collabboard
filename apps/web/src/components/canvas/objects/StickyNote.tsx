@@ -37,6 +37,7 @@ const StickyNoteComponent = ({
   const textRef = useRef<Konva.Text>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const [isEditingText, setIsEditingText] = useState(false);
+  const [isTransforming, setIsTransforming] = useState(false);
   
   // Track base dimensions at transform start to prevent compounding scale
   const baseDimensionsRef = useRef<{ width: number; height: number } | null>(null);
@@ -131,6 +132,7 @@ const StickyNoteComponent = ({
   const handleTransformStart = () => {
     // Capture base dimensions before transform starts
     baseDimensionsRef.current = { width: data.width, height: data.height };
+    setIsTransforming(true);
     window.dispatchEvent(new Event('object-transform-start'));
   };
 
@@ -141,6 +143,9 @@ const StickyNoteComponent = ({
       const scaleY = node.scaleY();
       const liveWidth = baseDimensionsRef.current.width * scaleX;
       const liveHeight = baseDimensionsRef.current.height * scaleY;
+      
+      // During transform, let Konva handle the visual scaling
+      // We only need to broadcast the dimensions for multiplayer sync
       onTransformMove(data.id, node.x(), node.y(), node.rotation(), { width: liveWidth, height: liveHeight });
     }
   };
@@ -168,8 +173,9 @@ const StickyNoteComponent = ({
 
     window.dispatchEvent(new Event('object-transform-end'));
     
-    // Clear refs after all updates
+    // Clear refs and state after all updates
     baseDimensionsRef.current = null;
+    setIsTransforming(false);
 
     onUpdate({
       x: finalX,
@@ -315,12 +321,13 @@ const StickyNoteComponent = ({
           fillLinearGradientColorStops={[0, startColor, 1, endColor]}
           stroke={isSelected ? '#2196F3' : undefined}
           strokeWidth={isSelected ? 3 : 0}
-          shadowColor="black"
-          shadowBlur={14}
-          shadowOpacity={0.2}
-          shadowOffsetX={3}
-          shadowOffsetY={4}
+          shadowColor={isTransforming ? undefined : "black"}
+          shadowBlur={isTransforming ? 0 : 14}
+          shadowOpacity={isTransforming ? 0 : 0.2}
+          shadowOffsetX={isTransforming ? 0 : 3}
+          shadowOffsetY={isTransforming ? 0 : 4}
           cornerRadius={12}
+          perfectDrawEnabled={false}
         />
 
         <Line
@@ -331,6 +338,7 @@ const StickyNoteComponent = ({
           ]}
           closed
           fill="rgba(0,0,0,0.12)"
+          perfectDrawEnabled={false}
         />
 
         <Circle
@@ -338,9 +346,10 @@ const StickyNoteComponent = ({
           y={22}
           radius={9}
           fill="#F97316"
-          shadowColor="#111827"
-          shadowBlur={6}
-          shadowOpacity={0.25}
+          shadowColor={isTransforming ? undefined : "#111827"}
+          shadowBlur={isTransforming ? 0 : 6}
+          shadowOpacity={isTransforming ? 0 : 0.25}
+          perfectDrawEnabled={false}
         />
 
         {displayText && !isEditingText ? (
@@ -360,6 +369,7 @@ const StickyNoteComponent = ({
             wrap="word"
             ellipsis={true}
             listening={false}
+            perfectDrawEnabled={false}
           />
         ) : null}
       </Group>

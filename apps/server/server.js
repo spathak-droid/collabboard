@@ -69,9 +69,40 @@ cursorWss.on('connection', (ws, request, boardId, userId, userName) => {
   }
   
   const room = cursorRooms.get(boardId);
+  
+  // Notify new user about existing users (so they can map hashes)
+  const joinMessages = [];
+  room.forEach((client, existingUserId) => {
+    joinMessages.push(JSON.stringify({ 
+      type: 'join', 
+      userId: existingUserId, 
+      userName: client.userName 
+    }));
+  });
+  
+  // Send existing users to new user
+  joinMessages.forEach(msg => {
+    if (ws.readyState === 1) {
+      ws.send(msg);
+    }
+  });
+  
+  // Add new user to room
   room.set(userId, { ws, userName });
   
   console.log(`🖱️  Cursor: ${userName} joined board ${boardId} (${room.size} users)`);
+  
+  // Notify existing users about new user
+  const newUserJoinMsg = JSON.stringify({ 
+    type: 'join', 
+    userId, 
+    userName 
+  });
+  room.forEach((client, clientUserId) => {
+    if (clientUserId !== userId && client.ws.readyState === 1) {
+      client.ws.send(newUserJoinMsg);
+    }
+  });
 
   ws.on('message', (data) => {
     const room = cursorRooms.get(boardId);

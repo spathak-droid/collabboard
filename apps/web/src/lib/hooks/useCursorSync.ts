@@ -32,7 +32,7 @@ export function useCursorSync(options: UseCursorSyncOptions) {
   
   // Ultra-low latency cursor throttle
   const lastSentRef = useRef<{ x: number; y: number; time: number }>({ x: 0, y: 0, time: 0 });
-  const SEND_INTERVAL = 8; // 8ms = ~120fps (optimal for cursor smoothness)
+  const SEND_INTERVAL = 4; // 8ms = ~120fps (optimal for cursor smoothness)
 
   // Throttle live drag per object (avoid flooding during drag)
   const lastLiveDragRef = useRef<Map<string, { x: number; y: number; time: number }>>(new Map());

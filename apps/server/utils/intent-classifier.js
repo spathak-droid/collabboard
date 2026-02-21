@@ -136,8 +136,10 @@ export const INTENT_CLASSIFIER = {
 **QUANTITY PARSING:**
 - "a circle" = 1
 - "50 stars" = 50
+- "3 sticky notes" = 3
 - "create stars" (no number) = 1
 - "some circles" = 3 (reasonable default)
+- **CRITICAL: Always extract the number when present** (e.g., "create 3 X" → quantity:3)
 - **GRID PATTERNS:**
   * "7x2 grid" or "7×2 grid" → rows:7, columns:2, quantity:14
   * "4x3 grid of circles" → rows:4, columns:3, quantity:12
@@ -149,7 +151,10 @@ export const INTENT_CLASSIFIER = {
   * "create 50 green stars" → operation=CREATE, objectType=shape, shapeType=star, quantity=50, color="#10B981"
   * "add a red circle" → operation=CREATE, objectType=shape, shapeType=circle, quantity=1, color="#EF4444"
   * "make 5 yellow sticky notes" → operation=CREATE, objectType=sticky, quantity=5, color="yellow"
-  * **CRITICAL: If command has "create", "add", "make", "draw", or "generate" → operation=CREATE (NOT CHANGE_COLOR)**
+  * **"add a sticky note that says X"** → operation=CREATE, text="X" (NOT UPDATE!)
+  * **"create a circle that says X"** → operation=CREATE, text="X" (NOT UPDATE!)
+  * **CRITICAL: If command STARTS with "create", "add", "make", "draw", or "generate" → operation=CREATE (NOT UPDATE, NOT CHANGE_COLOR)**
+  * **CRITICAL: "add/create X that says Y" = CREATE with text Y (NOT UPDATE)**
   * **CRITICAL: "create X with [color]" = CREATE operation, even if "color" keyword appears**
   * **CRITICAL - Frame Context: If user says "create X inside/in this", "create X in the frame", "create X here" → set targetFilter={useSelection:true}**
   * **CRITICAL - Frame Around Selection: If user says "create frame around/surrounding these/this/selected" → set targetFilter={useSelection:true}**
@@ -165,11 +170,13 @@ export const INTENT_CLASSIFIER = {
     - "create a frame around these" → operation=CREATE, objectType=frame, targetFilter={useSelection:true}
     - "add frame surrounding selected objects" → operation=CREATE, objectType=frame, targetFilter={useSelection:true}
   
-- **UPDATE**: "write", "update text", "change text", "edit text", "set text to"
+- **UPDATE**: "write", "update text", "change text", "edit text", "set text to" (WITHOUT create/add/make at the start)
   * "write 'upcoming' in all pink notes" → operation=UPDATE, text="upcoming", targetFilter={color:'pink', type:'sticky'}
   * "write 'Stars' in both yellow stars" → operation=UPDATE, text="Stars", targetFilter={color:'yellow', type:'star'}
   * "update all rectangles to say hello" → operation=UPDATE, text="hello", targetFilter={type:'rect'}
-  * **CRITICAL: "write X in all Y" or "write X in both Y" = UPDATE operation, NOT CREATE**
+  * **CRITICAL: UPDATE requires targeting EXISTING objects ("in all X", "in both Y", "in the Z")**
+  * **CRITICAL: "write X in all Y" or "write X in both Y" = UPDATE operation (modifies existing objects)**
+  * **CRITICAL: If command STARTS with "add", "create", "make" → NEVER classify as UPDATE, always CREATE**
   * **CRITICAL: Extract the text being written (the first quoted or mentioned text)**
   * **CRITICAL: Parse target filter correctly:**
     - "in all pink notes" → targetFilter={color:'pink', type:'sticky'}
@@ -247,18 +254,20 @@ For these operations, classify them but return isMultiStep=true or operation spe
 
 **CRITICAL RULES:**
 1. **CREATE always wins over CHANGE_COLOR**: If command has "create", "add", "make", "draw", or "generate" → operation=CREATE (even if "color" keyword appears)
-2. If quantity specified → it's CREATE, NOT modification
-3. Color must be converted to hex for shapes
-4. "a" or "one" = quantity:1
-5. Always extract ALL mentioned parameters
-6. For CREATE operations with quantity, operation=CREATE (not CHANGE_COLOR)
-7. **"create X and color them Y" = CREATE with color parameter (NOT multi-step)**
-8. **"create X green" or "create green X" = CREATE with color parameter**
-9. **"create X with [any color phrase]" = CREATE operation (NOT CHANGE_COLOR)**
-10. **"these", "this", "them", "those" = useSelection:true (ignore any object type mentioned)**
-11. **"write X in Y" = UPDATE operation (NOT CREATE) - extract text X, find objects Y**
-12. **"write" keyword ALWAYS means UPDATE, never CREATE (unless writing "on" or "into" a new object)**
-13. **Content generation detected**: If command has "for [topic]", "about [topic]", "on [topic]", "[X] vs [Y]" → set isMultiStep=true (needs agent reasoning)
+2. **CREATE always wins over UPDATE**: If command STARTS with "add", "create", "make" → operation=CREATE (NOT UPDATE), even if "says" or "write" appears later
+3. **"add/create X that says Y" = CREATE with text Y** (NOT UPDATE)
+4. If quantity specified → it's CREATE, NOT modification
+5. Color must be converted to hex for shapes
+6. "a" or "one" = quantity:1
+7. Always extract ALL mentioned parameters
+8. For CREATE operations with quantity, operation=CREATE (not CHANGE_COLOR)
+9. **"create X and color them Y" = CREATE with color parameter (NOT multi-step)**
+10. **"create X green" or "create green X" = CREATE with color parameter**
+11. **"create X with [any color phrase]" = CREATE operation (NOT CHANGE_COLOR)**
+12. **"these", "this", "them", "those" = useSelection:true (ignore any object type mentioned)**
+13. **"write X in Y" = UPDATE operation (modifies existing objects) - ONLY if command does NOT start with create/add/make**
+14. **"write" keyword means UPDATE only when targeting existing objects ("in all X", "in the Y")**
+15. **Content generation detected**: If command has "for [topic]", "about [topic]", "on [topic]", "[X] vs [Y]" → set isMultiStep=true (needs agent reasoning)
 
 Examples:
 
@@ -323,6 +332,26 @@ User: "add a red circle"
   "quantity": 1,
   "color": "#EF4444"
 }
+
+User: "add a yellow sticky note that says 'User Research'"
+{
+  "operation": "CREATE",
+  "objectType": "sticky",
+  "quantity": 1,
+  "color": "yellow",
+  "text": "User Research"
+}
+Note: Command STARTS with "add" → always CREATE, not UPDATE. Extract text from "says 'X'" or "that says X".
+
+User: "create a circle that says 'Hello'"
+{
+  "operation": "CREATE",
+  "objectType": "shape",
+  "shapeType": "circle",
+  "quantity": 1,
+  "text": "Hello"
+}
+Note: Command STARTS with "create" → always CREATE. Shapes can have text labels inside them.
 
 User: "color all circles blue"
 {
@@ -446,7 +475,15 @@ User: "create 5 sticky notes"
   "objectType": "sticky",
   "quantity": 5
 }
-Note: No topic/content generation needed, can execute directly.`,
+Note: No topic/content generation needed, can execute directly.
+
+User: "create 3 sticky notes"
+{
+  "operation": "CREATE",
+  "objectType": "sticky",
+  "quantity": 3
+}
+Note: Quantity is explicitly extracted from the command. No color specified = use default (yellow).`,
 };
 
 /**
@@ -542,7 +579,8 @@ export function executeFromIntent(intent, boardState) {
         };
         
         // Add color if specified (now converted to hex)
-        if (color) {
+        // CRITICAL: If color is "random", OMIT it entirely so client cycles through colors
+        if (color && color !== 'random') {
           args.color = color;
         }
         
@@ -585,7 +623,8 @@ export function executeFromIntent(intent, boardState) {
         };
         
         // Sticky notes can use color names, but normalize them
-        if (color) {
+        // CRITICAL: If color is "random", OMIT it entirely so client cycles through colors
+        if (color && color !== 'random') {
           args.color = color;
         }
         

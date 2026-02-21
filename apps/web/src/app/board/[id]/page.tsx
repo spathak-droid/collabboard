@@ -470,6 +470,38 @@ export default function BoardPage() {
   const frameManagement = useFrameManagement(objects);
   const manipulation = useObjectManipulation(objects, objectsMap, updateObject);
   
+  // Sync remote live positions from cursor server into liveDragRef for React re-renders
+  // This ensures frame names follow the frame during remote drag operations
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!cursorServerLivePositions?.current) return;
+      
+      const positions = cursorServerLivePositions.current;
+      if (positions.size === 0) {
+        return;
+      }
+      
+      let hasUpdates = false;
+      positions.forEach((pos, objectId) => {
+        // Only add if not from current user (avoid duplicates)
+        if (pos.userId !== user?.uid) {
+          const existing = manipulation.liveDragRef.current.get(objectId);
+          if (!existing || existing.x !== pos.x || existing.y !== pos.y) {
+            manipulation.liveDragRef.current.set(objectId, { x: pos.x, y: pos.y });
+            hasUpdates = true;
+          }
+        }
+      });
+      
+      // Trigger re-render to update frame names
+      if (hasUpdates) {
+        manipulation.setDragTick((t: number) => t + 1);
+      }
+    }, 16); // Check every 16ms (~60fps)
+    
+    return () => clearInterval(interval);
+  }, [user?.uid, manipulation, cursorServerLivePositions]);
+  
   // Clear live drag/transform refs when objects change from external sources (AI, other users)
   // This ensures AI updates aren't overridden by stale live drag positions
   useEffect(() => {
@@ -2221,7 +2253,14 @@ export default function BoardPage() {
             const o = objectsMap.get(sid);
             return o?.type === 'line';
           });
-          const showDots = !isTransforming && !isDragging && (activeTool === 'line' || connectorDrawing.isDrawingLine || isSelected(obj.id) || connectorDrawing.hoveredShapeId === obj.id || anyLineSelected);
+          // Don't show dots on selected objects (Transformer handles would be blocked)
+          // Only show dots when: line tool active, drawing a line, or hovering (but not selected)
+          const showDots = !isTransforming && !isDragging && (
+            activeTool === 'line' || 
+            connectorDrawing.isDrawingLine || 
+            (connectorDrawing.hoveredShapeId === obj.id && !isSelected(obj.id)) || 
+            anyLineSelected
+          );
           if (!showDots) return null;
           return (
             <ConnectionDots

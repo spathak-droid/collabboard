@@ -266,15 +266,19 @@ export const CREATE_AGENT = {
 
 **CRITICAL - Color Handling:**
 - **ALWAYS use hex codes for colors**
-- Common colors: red="#EF4444", blue="#3B82F6", green="#10B981", orange="#F97316", purple="#A855F7", pink="#EC4899", yellow="#EAB308"
+- **Available Sticky Note Colors:** #FFF59D (yellow), #F48FB1 (pink), #81D4FA (blue), #A5D6A7 (green), #FFCC80 (orange)
+- **Available Shape Colors:** #EF4444 (red), #3B82F6 (blue), #10B981 (green), #A855F7 (purple), #F97316 (orange), #EC4899 (pink), #EAB308 (yellow)
 - "red circle" → createShape(type: 'circle', color: '#EF4444') - MUST include hex color
 - "blue rectangle" → createShape(type: 'rect', color: '#3B82F6') - MUST include hex color
 - **CRITICAL - Color Variation Requests:**
-  * If task says "random color", "different color", "varied colors", or "different colors" → OMIT color parameter entirely
-  * Let client-side randomize colors when color parameter is omitted
+  * If task says "random color", "different color", "varied colors", "different colors", or "add different color" → OMIT color parameter entirely
+  * Client-side will automatically cycle through colors: ['#FFF59D', '#F48FB1', '#81D4FA', '#A5D6A7', '#FFCC80'] for sticky notes
+  * Client-side will automatically cycle through colors: ['#EF4444', '#3B82F6', '#10B981', '#A855F7', '#F97316'] for shapes
   * Example: "Create 5 sticky notes" (no color in task) → 5 calls to createStickyNote WITHOUT color parameter
   * Example: "Create 9 sticky notes with text 'Hello'" (no specific color) → 9 calls to createStickyNote(text='Hello') WITHOUT color parameter
+  * Example: "Create 5 sticky notes and add different color" → 5 calls to createStickyNote WITHOUT color parameter (client cycles colors)
   * DO NOT pass "random" or "different" as a literal color value - they are NOT valid colors
+  * When you omit the color parameter, the client will assign colors from the array sequentially: object 1 = color[0], object 2 = color[1], etc.
 
 **Frame Context (IMPORTANT):**
 - When user says "create X in/inside this frame" OR user has a frame selected (see User Selection context) → pass frameId parameter
@@ -986,12 +990,14 @@ Rules:
 8. **CRITICAL - Include ALL user-specified attributes in task descriptions:**
    - If user specifies color (e.g., "blue rectangle", "red circle"): Include in task → "Create 1 blue rectangle (shape, type: rect, color: blue)"
    - **CRITICAL COLOR RULE:** ALWAYS include "color: [color]" in the task description when user specifies a SPECIFIC color (red, blue, green, etc.)
-   - **EXCEPTION - Color Variation Requests:** When user asks for "random color", "different color", "different colors", "varied colors", "various colors", or "all should be different color":
+   - **EXCEPTION - Color Variation Requests:** When user asks for "random color", "different color", "different colors", "varied colors", "various colors", "add different color", or "all should be different color":
      * DO NOT include color in the task description
-     * Let the client-side randomize colors automatically
+     * Let the client-side cycle through colors automatically from predefined arrays
+     * Available colors will cycle sequentially: sticky notes ['yellow', 'pink', 'blue', 'green', 'orange'], shapes ['red', 'blue', 'green', 'purple', 'orange']
      * Example: "create 5 sticky notes which all should be different color" → task: "Create 5 sticky notes" (NO color specified)
      * Example: "create 9 sticky notes with random color" → task: "Create 9 sticky notes" (NO color specified)
      * Example: "add 6 circles with different colors" → task: "Create 6 circles" (NO color specified)
+     * Example: "create 5 sticky notes and add different color" → task: "Create 5 sticky notes" (NO color specified)
    - If user specifies position (e.g., "at 100, 200"): Include in task → "Create 1 blue rectangle at position (100, 200)"
    - If user specifies size: Include in task → "Create 1 rectangle 300x200 at (100, 200)"
    - If user specifies text: Include in task → "Create 1 sticky note with text 'Hello' in yellow"

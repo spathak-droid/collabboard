@@ -463,9 +463,9 @@ export function executeToolCalls(
             preferredPos.y
           );
           
-          // Color handling: If no color specified OR color="random", cycle through colors
+          // Color handling: ONLY cycle colors when explicitly requested with "random"
           const colorArray = ['#FFF59D', '#F48FB1', '#81D4FA', '#A5D6A7', '#FFCC80']; // yellow, pink, blue, green, orange
-          const shouldCycleColors = (!args.color || args.color === 'random') && quantity > 1;
+          const shouldCycleColors = (args.color === 'random') && quantity > 1;
           const singleColor = args.color && args.color !== 'random' ? resolveStickyColor(args.color) : resolveStickyColor();
           
           // Create all sticky notes with calculated positions
@@ -746,9 +746,9 @@ export function executeToolCalls(
           const width = args.width ?? 150;
           const height = args.height ?? 150;
           
-          // Color handling: If no color specified OR color="random", cycle through colors
+          // Color handling: ONLY cycle colors when explicitly requested with "random"
           const shapeColorArray = ['#EF4444', '#3B82F6', '#10B981', '#A855F7', '#F97316']; // red, blue, green, purple, orange
-          const shouldCycleColors = (!args.color || args.color === 'random') && quantity > 1;
+          const shouldCycleColors = (args.color === 'random') && quantity > 1;
           const singleColor = args.color && args.color !== 'random' ? resolveShapeColor(args.color) : resolveShapeColor();
           
           // Calculate grid positions - use frame bounds if frameId provided

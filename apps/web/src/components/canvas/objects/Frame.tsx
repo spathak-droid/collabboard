@@ -33,6 +33,7 @@ export const Frame = ({
   const baseDimensionsRef = useRef<{ width: number; height: number } | null>(null);
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameText, setNameText] = useState(data.name || 'frame1');
+  const [dragTick, setDragTick] = useState(0);
   const textRef = useRef<Konva.Text>(null);
   
   // Update name text when data.name changes
@@ -53,6 +54,7 @@ export const Frame = ({
 
   const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
     onDragMove?.(data.id, e.target.x(), e.target.y());
+    setDragTick(t => t + 1); // Trigger re-render to update text position
   };
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
@@ -127,19 +129,22 @@ export const Frame = ({
       return;
     }
 
-    const stage = groupRef.current?.getStage();
+    const stage = textRef.current?.getStage();
     if (!stage) return;
 
     const containerRect = stage.container().getBoundingClientRect();
     const stagePos = stage.position();
     const stageScale = stage.scaleX();
 
-    const curX = groupRef.current?.x() ?? data.x;
-    const curY = groupRef.current?.y() ?? data.y;
+    // Use Group's actual position (which may be mid-drag) or fall back to data
+    const frameX = groupRef.current?.x() ?? data.x;
+    const frameY = groupRef.current?.y() ?? data.y;
+    const textX = frameX + 8;
+    const textY = frameY - 18;
 
     // Frames cannot be rotated, so position is straightforward
-    const editorX = containerRect.left + stagePos.x + (curX + 8) * stageScale;
-    const editorY = containerRect.top + stagePos.y + (curY - 18) * stageScale;
+    const editorX = containerRect.left + stagePos.x + textX * stageScale;
+    const editorY = containerRect.top + stagePos.y + textY * stageScale;
     const editorWidth = Math.max(100, (nameText.length + 5) * 8 * stageScale);
     const editorHeight = 20 * stageScale;
 
@@ -243,26 +248,29 @@ export const Frame = ({
           cornerRadius={4}
           perfectDrawEnabled={false}
         />
-        {/* Frame name at the top */}
-        <Text
-          ref={textRef}
-          x={8}
-          y={-18}
-          text={nameText}
-          fontSize={14}
-          fontFamily="Inter, sans-serif"
-          fill="#3b82f6"
-          fontStyle="bold"
-          rotation={0}
-          offsetX={0}
-          offsetY={0}
-          onDblClick={handleNameDoubleClick}
-          onClick={(e) => {
-            e.cancelBubble = true;
-          }}
-          perfectDrawEnabled={false}
-        />
       </Group>
+
+      {/* Frame name rendered outside the transform Group to avoid scaling issues */}
+      {/* Position follows the Group's actual x/y during drag */}
+      <Text
+        ref={textRef}
+        x={(groupRef.current?.x() ?? data.x) + 8}
+        y={(groupRef.current?.y() ?? data.y) - 18}
+        text={nameText}
+        fontSize={14}
+        fontFamily="Inter, sans-serif"
+        fill="#3b82f6"
+        fontStyle="bold"
+        rotation={0}
+        offsetX={0}
+        offsetY={0}
+        onDblClick={handleNameDoubleClick}
+        onClick={(e) => {
+          e.cancelBubble = true;
+        }}
+        listening={true}
+        perfectDrawEnabled={false}
+      />
 
       {isSelected && (
         <Transformer

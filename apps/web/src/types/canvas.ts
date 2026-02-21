@@ -122,7 +122,7 @@ export interface Frame extends BaseObject {
   height: number;
   stroke: string; // Frame border color
   strokeWidth: number;
-  fill?: string; // Optional background fill (default transparent)
+  fill?: string | null; // Optional background fill (default transparent)
   containedObjectIds: string[]; // IDs of objects inside this frame
   name?: string; // Frame name (default: frame1, frame2, etc.)
   isAIContainer?: boolean; // True if AI created this for grouping/organizing objects, false/undefined for user-drawn frames

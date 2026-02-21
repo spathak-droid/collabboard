@@ -505,9 +505,13 @@ export default function BoardPage() {
   // Clear live drag/transform refs when objects change from external sources (AI, other users)
   // This ensures AI updates aren't overridden by stale live drag positions
   useEffect(() => {
-    // When objects change, clear ALL live drag/transform overlays
-    // This is necessary because AI updates and external user updates should take precedence
-    // over any stale local drag/transform state
+    // #region agent log
+    const hadDrag = manipulation.liveDragRef.current.size > 0;
+    const hadTransform = manipulation.liveTransformRef.current.size > 0;
+    if (hadDrag || hadTransform) {
+      fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'page.tsx:useEffect-clearRefs',message:'Clearing live refs on objects change',data:{hadDrag,hadTransform,dragKeys:[...manipulation.liveDragRef.current.keys()],transformKeys:[...manipulation.liveTransformRef.current.keys()]},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    }
+    // #endregion
     if (manipulation.liveDragRef.current.size > 0) {
       manipulation.liveDragRef.current.clear();
     }
@@ -1208,7 +1212,7 @@ export default function BoardPage() {
       rotation: 0,
       stroke: '#3b82f6',
       strokeWidth: 2,
-      fill: '#FFFFFF',
+      fill: null,
       containedObjectIds,
       name: frameName,
       zIndex: -1,
@@ -1232,28 +1236,27 @@ export default function BoardPage() {
     selectedIds.forEach((id: string) => {
       const obj = objectsMap.get(id);
       if (obj?.type === 'frame' && obj.isAIContainer) {
-        // Only mark contained objects for deletion if this is an AI container
         obj.containedObjectIds?.forEach((containedId: string) => {
           containedInSelectedFrames.add(containedId);
         });
       }
     });
 
+    // #region agent log
+    fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'page.tsx:getDeleteIds',message:'Delete IDs computation',data:{selectedIds,containedInSelectedFrames:[...containedInSelectedFrames],frames:selectedIds.filter((id:string)=>{const o=objectsMap.get(id);return o?.type==='frame';}).map((id:string)=>{const o=objectsMap.get(id) as any;return {id,isAIContainer:o?.isAIContainer,containedObjectIds:o?.containedObjectIds};})},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+    // #endregion
+
     // Second pass: collect IDs to delete
     selectedIds.forEach((id: string) => {
       const obj = objectsMap.get(id);
       if (obj?.type === 'frame') {
-        // When deleting a frame, delete the frame itself
         idsToDeleteSet.add(id);
-        // Only delete contained objects if this is an AI container
         if (obj.isAIContainer) {
           obj.containedObjectIds?.forEach((containedId: string) => {
             idsToDeleteSet.add(containedId);
           });
         }
       } else {
-        // For non-frame objects, only delete if they're not contained in a selected AI container frame
-        // (if they are, they'll be deleted with the frame above)
         if (!containedInSelectedFrames.has(id)) {
           idsToDeleteSet.add(id);
         }
@@ -1262,6 +1265,10 @@ export default function BoardPage() {
 
     // Convert set to array
     idsToDeleteSet.forEach((id) => idsToDelete.push(id));
+
+    // #region agent log
+    fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'page.tsx:getDeleteIds-result',message:'Final delete IDs',data:{idsToDelete},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+    // #endregion
 
     return idsToDelete;
   }, [selectedIds, objectsMap]);

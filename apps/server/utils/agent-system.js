@@ -990,14 +990,18 @@ Rules:
 8. **CRITICAL - Include ALL user-specified attributes in task descriptions:**
    - If user specifies color (e.g., "blue rectangle", "red circle"): Include in task → "Create 1 blue rectangle (shape, type: rect, color: blue)"
    - **CRITICAL COLOR RULE:** ALWAYS include "color: [color]" in the task description when user specifies a SPECIFIC color (red, blue, green, etc.)
-   - **EXCEPTION - Color Variation Requests:** When user asks for "random color", "different color", "different colors", "varied colors", "various colors", "add different color", or "all should be different color":
+   - **EXCEPTION - Color Variation Requests:** When user asks for "random color", "different color", "different colors", "varied colors", "various colors", "add different color", "all should be different color", "all random colors", "each a different color", "each random color", or ANY phrase indicating varied/random colors:
      * DO NOT include color in the task description
      * Let the client-side cycle through colors automatically from predefined arrays
      * Available colors will cycle sequentially: sticky notes ['yellow', 'pink', 'blue', 'green', 'orange'], shapes ['red', 'blue', 'green', 'purple', 'orange']
+     * **CRITICAL: This is a SINGLE CreateAgent task. NEVER split into CreateAgent + ModifyAgent. NEVER create a separate "change color" task.**
+     * **NEVER generate changeColor tool calls for objects that don't exist yet. The color cycling is handled automatically by the client.**
      * Example: "create 5 sticky notes which all should be different color" → task: "Create 5 sticky notes" (NO color specified)
      * Example: "create 9 sticky notes with random color" → task: "Create 9 sticky notes" (NO color specified)
      * Example: "add 6 circles with different colors" → task: "Create 6 circles" (NO color specified)
      * Example: "create 5 sticky notes and add different color" → task: "Create 5 sticky notes" (NO color specified)
+     * Example: "create 50 stars all random colors" → task: "Create 50 stars" (NO color specified, NO separate color task)
+     * Example: "create 20 circles each a different color" → task: "Create 20 circles" (NO color specified)
    - If user specifies position (e.g., "at 100, 200"): Include in task → "Create 1 blue rectangle at position (100, 200)"
    - If user specifies size: Include in task → "Create 1 rectangle 300x200 at (100, 200)"
    - If user specifies text: Include in task → "Create 1 sticky note with text 'Hello' in yellow"

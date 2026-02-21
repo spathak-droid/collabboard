@@ -657,6 +657,12 @@ export async function executeComplexSupervisor(openai, userMessage, boardState, 
 export function detectMiniAgent(command, hasSelection = false) {
   const lower = command.toLowerCase();
   
+  // CREATIVE/SEMANTIC patterns - must NOT be handled by mini-agents
+  // These describe concepts, scenes, or compositions rather than literal primitives
+  if (isCreativeCommand(lower)) {
+    return null; // Needs creative composer or full orchestration
+  }
+  
   // JOURNEY MAP patterns - needs full agent for LLM stage generation
   if (/(journey|user journey|customer journey)/i.test(lower)) {
     return null; // Too complex for mini-agent, needs LLM to generate stages
@@ -675,9 +681,13 @@ export function detectMiniAgent(command, hasSelection = false) {
     }
     
     // Check for quantities > 1 (needs full agent for auto-grid arrangement)
-    // Examples: "create 8 stars", "add 5 circles", "make 10 rectangles"
+    // Examples: "create 8 stars", "add 5 circles", "make 10 rectangles", "create three sticky notes"
     const quantityMatch = lower.match(/(?:create|add|make|draw)\s+(\d+)/i);
     if (quantityMatch && parseInt(quantityMatch[1]) > 1) {
+      return null; // Multiple objects need full agent for grid arrangement
+    }
+    // Also check word numbers
+    if (/(?:create|add|make|draw)\s+(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\d{2,})\b/i.test(lower)) {
       return null; // Multiple objects need full agent for grid arrangement
     }
     
@@ -730,6 +740,56 @@ export function detectMiniAgent(command, hasSelection = false) {
   }
   
   return null; // Needs full agent
+}
+
+/**
+ * Detect if a command describes a concept, scene, or composition
+ * rather than a literal whiteboard primitive. These need the creative
+ * composer (or full orchestration), not a mini-agent.
+ */
+function isCreativeCommand(lower) {
+  // Only check commands that start with create/add/make/draw
+  if (!/^(create|add|make|draw|build|design)\b/i.test(lower)) {
+    return false;
+  }
+
+  // Literal primitives -- NOT creative (let normal routing handle them)
+  // Matches: "create a circle", "create 5 stars", "add a frame", "create three sticky notes"
+  const literalPrimitives = /^(create|add|make|draw)\s+(a |an |one |two |three |four |five |six |seven |eight |nine |ten |\d+ )?(red |blue |green |yellow |orange |pink |purple )?(circle|rect(angle)?|triangle|star|frame|sticky\s*note|note|text\s*bubble|text|shape)/i;
+  if (literalPrimitives.test(lower)) {
+    return false;
+  }
+
+  // Real-world objects and scenes
+  const realWorldPatterns = [
+    /\b(building|house|car|tree|robot|person|city|castle|bridge|tower|boat|ship|airplane|rocket|flower|animal|face|landscape|mountain|ocean)\b/i,
+    /\b(multi[- ]?stor(y|ey|ied)|floor|room|window|door|roof|garden|garage)\b/i,
+  ];
+
+  // Diagrams, frameworks, and structured layouts
+  const diagramPatterns = [
+    /\b(kanban|flowchart|flow\s*chart|mind\s*map|org\s*chart|wireframe|dashboard|calendar|schedule|gantt)\b/i,
+    /\b(diagram|layout|blueprint|mockup|mock-up|prototype|sitemap|site\s*map|storyboard)\b/i,
+    /\b(architecture|infrastructure|network\s*diagram|er\s*diagram|class\s*diagram|sequence\s*diagram)\b/i,
+    /\b(user\s*flow|workflow|process\s*flow|data\s*flow)\b/i,
+  ];
+
+  // Compositional modifiers that imply multi-object scenes
+  const compositionPatterns = [
+    /\bwith\s+(multiple|several|many|different)\s+(section|column|row|part|component|element|layer|level|stage|step|phase)/i,
+    /\bwith\s+(room|floor|window|section|column|widget|panel)/i,
+    /\b(multi[- ]?stor|multi[- ]?level|multi[- ]?section|multi[- ]?column)/i,
+    /\bstyle\b.*\b(board|layout|view|page)\b/i,
+    /\b(board|layout|view|page)\b.*\bstyle\b/i,
+  ];
+
+  for (const pattern of [...realWorldPatterns, ...diagramPatterns, ...compositionPatterns]) {
+    if (pattern.test(lower)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**

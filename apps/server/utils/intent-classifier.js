@@ -25,7 +25,7 @@ export const INTENT_CLASSIFIER = {
         properties: {
           operation: {
             type: 'string',
-            enum: ['CREATE', 'UPDATE', 'DELETE', 'MOVE', 'RESIZE', 'ROTATE', 'CHANGE_COLOR', 'ARRANGE', 'ANALYZE', 'CONNECT', 'FIT_FRAME_TO_CONTENTS', 'MULTI_STEP', 'CONVERSATION', 'UNKNOWN'],
+            enum: ['CREATE', 'UPDATE', 'DELETE', 'MOVE', 'RESIZE', 'ROTATE', 'CHANGE_COLOR', 'ARRANGE', 'ANALYZE', 'CONNECT', 'FIT_FRAME_TO_CONTENTS', 'MULTI_STEP', 'CREATIVE', 'CONVERSATION', 'UNKNOWN'],
             description: 'Primary operation type',
           },
           objectType: {
@@ -112,6 +112,10 @@ export const INTENT_CLASSIFIER = {
             },
             description: 'Individual steps if isMultiStep=true',
           },
+          creativeDescription: {
+            type: 'string',
+            description: 'When operation=CREATIVE, a brief description of what the user wants to visually compose (e.g., "kanban board with 3 columns", "multi-story building")',
+          },
         },
         required: ['operation'],
       },
@@ -135,6 +139,19 @@ export const INTENT_CLASSIFIER = {
 - amber → "#F59E0B"
 - For sticky notes: yellow/pink/blue/green/orange (names OK for sticky notes only)
 - For shapes: ALWAYS use hex codes
+- **Creative/non-standard color names**: Convert to closest hex code:
+  * "lemon lime", "lime green", "chartreuse" → "#84CC16"
+  * "grape", "violet", "plum" → "#8B5CF6"
+  * "coral", "salmon" → "#F87171"
+  * "sky blue", "baby blue" → "#38BDF8"
+  * "navy", "dark blue" → "#1E40AF"
+  * "gold", "golden" → "#EAB308"
+  * "mint", "seafoam" → "#34D399"
+  * "burgundy", "maroon", "wine" → "#991B1B"
+  * "peach" → "#FDBA74"
+  * "lavender" → "#C4B5FD"
+  * "turquoise" → "#2DD4BF"
+  * For any other creative color name, pick the closest hex code you know
 
 **CRITICAL - Color Variation Handling:**
 When user requests varied/different/random colors:
@@ -158,12 +175,23 @@ When user specifies exact colors for multiple objects:
 - "create stars" (no number) = 1
 - "some circles" = 3 (reasonable default)
 - **CRITICAL: Always extract the number when present** (e.g., "create 3 X" → quantity:3)
-- **CRITICAL - Multiple Groups with Different Colors:**
-  * "4 blue stars, 3 pink stars" → quantity: 7, colors: ["#3B82F6", "#3B82F6", "#3B82F6", "#3B82F6", "#EC4899", "#EC4899", "#EC4899"]
-  * "2 red circles, 5 green circles" → quantity: 7, colors: ["#EF4444", "#EF4444", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981"]
-  * "one blue, 3 pink" → quantity: 4, colors: ["#3B82F6", "#EC4899", "#EC4899", "#EC4899"]
+- **CRITICAL - Multiple Groups with Different Colors (EVERY WORD MATTERS):**
+  When the user specifies different quantities of different colors, you MUST:
+  1. Sum ALL quantities to get total quantity
+  2. Build a colors array that repeats each hex color exactly by its count
+  3. Do NOT set color="random" — use the explicit colors array
+  4. Do NOT ignore any color group — parse EVERY group mentioned
+  
+  Pattern: "N [color1] and M [color2]" or "N [color1], M [color2]"
+  * "25 green and 25 white" → quantity: 50, colors: [25x "#10B981", 25x "#FFFFFF"]
+  * "4 blue stars, 3 pink stars" → quantity: 7, colors: [4x "#3B82F6", 3x "#EC4899"]
+  * "2 red circles, 5 green circles" → quantity: 7, colors: [2x "#EF4444", 5x "#10B981"]
+  * "one blue, 3 pink" → quantity: 4, colors: [1x "#3B82F6", 3x "#EC4899"]
+  * "10 red, 10 blue, 10 green" → quantity: 30, colors: [10x "#EF4444", 10x "#3B82F6", 10x "#10B981"]
+  * "create 50 stars, 25 green and 25 white" → quantity: 50, colors: [25x "#10B981", 25x "#FFFFFF"]
   * Total quantity = sum of all groups
-  * Colors array = repeat each color by its count in order
+  * Colors array = repeat each color hex by its count in order
+  * NEVER ignore the color breakdown — if user says "25 green and 25 white", you MUST produce exactly 25 green hex codes followed by 25 white hex codes
 - **GRID PATTERNS:**
   * "7x2 grid" or "7×2 grid" → rows:7, columns:2, quantity:14
   * "4x3 grid of circles" → rows:4, columns:3, quantity:12
@@ -265,6 +293,39 @@ When user specifies exact colors for multiple objects:
   * "delete all rectangles and create 5 stars" → isMultiStep=true
   * **NOTE: "create X and color them Y" is NOT multi-step - it's a single CREATE with color**
 
+- **CREATIVE**: User describes a **concept, scene, diagram, real-world object, or composition** rather than a literal whiteboard primitive. The user wants the AI to figure out WHAT objects to create and HOW to arrange them.
+  * **Key distinction:** CREATE = user names a specific whiteboard primitive (circle, rectangle, sticky note, frame, star, triangle, text). CREATIVE = user describes something that needs to be DECOMPOSED into multiple primitives.
+  * **Triggers:**
+    - Real-world objects: "building", "house", "car", "tree", "robot", "person", "city"
+    - Diagrams/frameworks: "kanban board", "flowchart", "mind map", "org chart", "wireframe", "dashboard", "calendar"
+    - Scenes/compositions: "solar system", "landscape", "classroom", "office layout"
+    - Descriptive modifiers that imply composition: "multi-story", "with rooms", "with columns", "with sections", "with stages"
+    - Abstract concepts visualized: "project timeline", "user flow", "architecture diagram"
+  * **NOT CREATIVE (these are CREATE):**
+    - "create a rectangle" → CREATE (literal primitive)
+    - "create 5 circles" → CREATE (literal primitives)
+    - "create a frame" → CREATE (literal primitive)
+    - "create a sticky note" → CREATE (literal primitive)
+    - "create a star" → CREATE (literal primitive)
+    - "create a red circle" → CREATE (literal primitive with color)
+  * **CREATIVE examples:**
+    - "create a kanban board" → operation=CREATIVE, creativeDescription="kanban board with columns for task management"
+    - "create a tall building with multiple stories" → operation=CREATIVE, creativeDescription="tall multi-story building"
+    - "create a rectangle shaped tall building with multi story" → operation=CREATIVE, creativeDescription="rectangle-shaped tall multi-story building"
+    - "create a flowchart for user signup" → operation=CREATIVE, creativeDescription="flowchart showing user signup process"
+    - "draw a house with a garden" → operation=CREATIVE, creativeDescription="house with garden scene"
+    - "make a dashboard layout" → operation=CREATIVE, creativeDescription="dashboard layout with sections"
+    - "create a mind map about productivity" → operation=CREATIVE, creativeDescription="mind map centered on productivity"
+    - "draw a robot" → operation=CREATIVE, creativeDescription="robot figure"
+    - "create a project timeline with 5 phases" → operation=CREATIVE, creativeDescription="project timeline with 5 phases"
+    - "make a wireframe for a login page" → operation=CREATIVE, creativeDescription="wireframe for login page UI"
+  * **CRITICAL:** Always include creativeDescription when operation=CREATIVE
+  * **CRITICAL - Frame Context for CREATIVE:** If user says "create X inside/in/within this/the frame", STILL set targetFilter={useSelection:true} alongside operation=CREATIVE. This tells the system to compose objects inside the selected frame.
+  * Examples with frame context:
+    - "create a cooking recipe within frame with sticky notes" → operation=CREATIVE, creativeDescription="cooking recipe for a new dish using sticky notes", targetFilter={useSelection:true}
+    - "create a kanban board inside this frame" → operation=CREATIVE, creativeDescription="kanban board with columns", targetFilter={useSelection:true}
+    - "make a flowchart in the frame" → operation=CREATIVE, creativeDescription="flowchart", targetFilter={useSelection:true}
+
 **CRITICAL - Operations that need agent handling:**
 - FIT_FRAME_TO_CONTENTS - requires board context to find frame and its contents
 - CONNECT - requires board context to find objects to connect
@@ -299,13 +360,16 @@ For these operations, classify them but return isMultiStep=true or operation spe
 6. "a" or "one" = quantity:1
 7. Always extract ALL mentioned parameters
 8. For CREATE operations with quantity, operation=CREATE (not CHANGE_COLOR)
-9. **"create X and color them Y" = CREATE with color parameter (NOT multi-step)**
+9. **"create X and color them Y" = CREATE with color parameter (NOT multi-step). Also: "create X all random colors", "create X with different colors", "create X each a different color", "create X with varied colors" = CREATE with color:"random" (NEVER multi-step, NEVER isMultiStep=true)**
 10. **"create X green" or "create green X" = CREATE with color parameter**
 11. **"create X with [any color phrase]" = CREATE operation (NOT CHANGE_COLOR)**
 12. **"these", "this", "them", "those" = useSelection:true (ignore any object type mentioned)**
 13. **"write X in Y" = UPDATE operation (modifies existing objects) - ONLY if command does NOT start with create/add/make**
 14. **"write" keyword means UPDATE only when targeting existing objects ("in all X", "in the Y")**
 15. **Content generation detected**: If command has "for [topic]", "about [topic]", "on [topic]", "[X] vs [Y]" → set isMultiStep=true (needs agent reasoning)
+16. **CREATIVE vs CREATE**: If user describes a concept, scene, real-world object, or composition (not a literal whiteboard primitive) → operation=CREATIVE with creativeDescription. If user names a specific primitive (circle, rectangle, sticky note, frame, star, triangle, text) → operation=CREATE.
+17. **CRITICAL - Random/different colors is NEVER multi-step**: "create N objects all random colors", "create N objects with different colors", "create N objects each a different color", "create N objects with varied colors" → operation=CREATE, color="random", isMultiStep=false. This is a SINGLE creation operation. Do NOT set isMultiStep=true. Do NOT split into create + change color. The color variation is handled by the colors array parameter.
+18. **CRITICAL - Specific color groups MUST be parsed exactly**: When user says "create 50 stars, 25 green and 25 white" or "create 10 circles, 5 red and 5 blue", you MUST parse EVERY color group. Extract each (count, color) pair, sum counts for total quantity, and build the colors array by repeating each hex color exactly by its count. NEVER ignore color breakdowns. NEVER return just a single color when multiple groups are specified. This is a SINGLE CREATE operation (isMultiStep=false).
 
 Examples:
 
@@ -364,6 +428,28 @@ User: "create 50 green stars"
   "quantity": 50,
   "color": "#10B981"
 }
+
+User: "create 50 stars all random colors"
+{
+  "operation": "CREATE",
+  "objectType": "shape",
+  "shapeType": "star",
+  "quantity": 50,
+  "color": "random",
+  "colors": ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"]
+}
+Note: "all random colors" = color:"random" with colors array. This is NOT multi-step. isMultiStep must be false.
+
+User: "create 20 circles each a different color"
+{
+  "operation": "CREATE",
+  "objectType": "shape",
+  "shapeType": "circle",
+  "quantity": 20,
+  "color": "random",
+  "colors": ["#EF4444", "#3B82F6", "#10B981", "#A855F7", "#F97316"]
+}
+Note: "each a different color" = color:"random". NOT multi-step.
 
 User: "add a red circle"
 {
@@ -546,6 +632,26 @@ User: "add one red circle, 5 green circles"
 }
 Note: Total quantity = 1 + 5 = 6. First color once, second color five times.
 
+User: "create 50 stars, 25 green and 25 white"
+{
+  "operation": "CREATE",
+  "objectType": "shape",
+  "shapeType": "star",
+  "quantity": 50,
+  "colors": ["#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#10B981", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF"]
+}
+Note: "25 green and 25 white" = 25 + 25 = 50 total. Colors array has 25x green hex then 25x white hex. EVERY color group matters.
+
+User: "create 10 circles, 5 red and 5 blue"
+{
+  "operation": "CREATE",
+  "objectType": "shape",
+  "shapeType": "circle",
+  "quantity": 10,
+  "colors": ["#EF4444", "#EF4444", "#EF4444", "#EF4444", "#EF4444", "#3B82F6", "#3B82F6", "#3B82F6", "#3B82F6", "#3B82F6"]
+}
+Note: 5 + 5 = 10. Colors array = 5x red then 5x blue.
+
 User: "hello"
 {
   "operation": "CONVERSATION"
@@ -559,7 +665,91 @@ User: "tell me a joke"
 User: "what can you do?"
 {
   "operation": "CONVERSATION"
-}`,
+}
+
+User: "create a kanban board"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "kanban board with columns (To Do, In Progress, Done) for task management"
+}
+
+User: "create a rectangle shaped tall building with multi story"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "rectangle-shaped tall multi-story building"
+}
+
+User: "draw a flowchart for user signup"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "flowchart showing user signup process steps"
+}
+
+User: "make a dashboard layout"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "dashboard layout with multiple sections and widgets"
+}
+
+User: "create a mind map about productivity"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "mind map centered on productivity with branching subtopics"
+}
+
+User: "draw a house with a garden"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "house with garden scene composed of shapes"
+}
+
+User: "create a project timeline with 5 phases"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "project timeline with 5 sequential phases"
+}
+
+User: "make a wireframe for a login page"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "wireframe mockup of a login page UI"
+}
+
+User: "create a kanban style task board"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "kanban-style task board with columns for workflow stages"
+}
+
+User: "draw a robot"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "robot figure composed of geometric shapes"
+}
+
+User: "create a cooking recipe within frame with sticky notes for new dish from england"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "cooking recipe layout with sticky notes for a traditional English dish, including ingredients and steps",
+  "targetFilter": { "useSelection": true }
+}
+Note: "within frame" means compose inside the selected frame. Set targetFilter.useSelection=true.
+
+User: "create a kanban board inside this frame"
+{
+  "operation": "CREATIVE",
+  "creativeDescription": "kanban board with columns (To Do, In Progress, Done)",
+  "targetFilter": { "useSelection": true }
+}
+
+User: "create three sticky notes inside the frame"
+{
+  "operation": "CREATE",
+  "objectType": "sticky",
+  "quantity": 3,
+  "targetFilter": { "useSelection": true }
+}
+Note: This is CREATE (literal primitives: sticky notes), NOT CREATIVE. "inside the frame" sets useSelection=true.`,
 };
 
 /**
@@ -608,10 +798,25 @@ export async function classifyUserIntent(openai, userMessage) {
  */
 export function executeFromIntent(intent, boardState) {
   console.log('⚡ Executing directly from intent (agent bypass)');
+  console.log('📋 Intent details:', JSON.stringify({
+    operation: intent.operation,
+    objectType: intent.objectType,
+    shapeType: intent.shapeType,
+    quantity: intent.quantity,
+    color: intent.color,
+    colorsLength: intent.colors?.length,
+    isMultiStep: intent.isMultiStep,
+  }));
   
   // CONVERSATION mode - return null to let the agent respond naturally
   if (intent.operation === 'CONVERSATION') {
     console.log('💬 Conversational query detected, routing to chat agent');
+    return null;
+  }
+  
+  // CREATIVE mode - return null to route to creative composer
+  if (intent.operation === 'CREATIVE') {
+    console.log('🎨 Creative command detected, routing to creative composer');
     return null;
   }
   
@@ -704,6 +909,12 @@ export function executeFromIntent(intent, boardState) {
         if (intent.dimensions) {
           args.width = intent.dimensions.width;
           args.height = intent.dimensions.height;
+        }
+        
+        console.log(`📦 [executeFromIntent] createShape args: type=${args.type}, quantity=${args.quantity}, color=${args.color}, colorsLength=${args.colors?.length}, hasColors=${!!args.colors}`);
+        if (args.colors && args.colors.length > 0) {
+          const unique = [...new Set(args.colors)];
+          console.log(`   Colors unique: ${unique.join(', ')}, first=${args.colors[0]}, last=${args.colors[args.colors.length - 1]}`);
         }
         
         toolCalls.push({

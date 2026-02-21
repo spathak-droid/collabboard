@@ -64,14 +64,17 @@ export interface CreateFrameArgs {
   y?: number;
   width?: number;
   height?: number;
+  fill?: string; // Optional: background fill color (e.g., 'transparent', '#FFFFFF')
   quantity?: number; // Optional: create multiple frames
   rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)
   columns?: number; // Optional: explicit grid columns (e.g., "4x2 grid" = columns:2)
 }
 
 export interface CreateConnectorArgs {
-  fromId: string;
-  toId: string;
+  fromId?: string;
+  toId?: string;
+  fromIndex?: number; // Index into the tool calls array (used by layout engine when IDs aren't known yet)
+  toIndex?: number;
   style?: 'straight' | 'curved';
 }
 

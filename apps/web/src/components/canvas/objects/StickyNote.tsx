@@ -104,6 +104,9 @@ const StickyNoteComponent = ({
   const [startColor, endColor] = getGradientStops(data.color);
 
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'StickyNote.tsx:useEffect-transformer',message:'Transformer attach effect',data:{id:data.id,isSelected,hasTransformer:!!transformerRef.current,hasGroup:!!groupRef.current},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
     if (isSelected && transformerRef.current && groupRef.current) {
       transformerRef.current.nodes([groupRef.current]);
       transformerRef.current.getLayer()?.batchDraw();
@@ -130,7 +133,9 @@ const StickyNoteComponent = ({
   };
 
   const handleTransformStart = () => {
-    // Capture base dimensions before transform starts
+    // #region agent log
+    fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'StickyNote.tsx:handleTransformStart',message:'Transform START',data:{id:data.id,width:data.width,height:data.height,rotation:data.rotation},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     baseDimensionsRef.current = { width: data.width, height: data.height };
     setIsTransforming(true);
     window.dispatchEvent(new Event('object-transform-start'));
@@ -152,6 +157,9 @@ const StickyNoteComponent = ({
 
   const handleTransformEnd = () => {
     const node = groupRef.current;
+    // #region agent log
+    fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'StickyNote.tsx:handleTransformEnd',message:'Transform END',data:{id:data.id,hasNode:!!node,baseDims:baseDimensionsRef.current,scaleX:node?.scaleX(),scaleY:node?.scaleY(),rotation:node?.rotation()},timestamp:Date.now(),hypothesisId:'AC'})}).catch(()=>{});
+    // #endregion
     if (!node || !baseDimensionsRef.current) return;
 
     const scaleX = node.scaleX();
@@ -303,7 +311,12 @@ const StickyNoteComponent = ({
         y={data.y}
         rotation={data.rotation}
         draggable={isDraggable}
-        onClick={onSelect}
+        onClick={(e) => {
+          // #region agent log
+          fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'StickyNote.tsx:onClick',message:'StickyNote clicked',data:{id:data.id,isSelected},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+          // #endregion
+          onSelect(e);
+        }}
         onTap={onSelect}
         onDblClick={handleTextEdit}
         onDragStart={handleDragStart}

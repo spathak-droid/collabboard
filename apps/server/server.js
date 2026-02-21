@@ -25,6 +25,7 @@ import { orchestrateAgents, continueOrchestration } from './utils/agent-orchestr
 import { createGeminiClient } from './utils/gemini-adapter.js';
 import { routeCommand, executeSingleAgent, executeMiniAgent, classifyUserIntent, executeFromIntent, needsComplexSupervisor, executeComplexSupervisor } from './utils/command-router.js';
 import { detectMiniAgent } from './utils/mini-agents.js';
+import { executeCreativeComposer } from './utils/creative-composer.js';
 
 dotenv.config();
 
@@ -571,7 +572,151 @@ async function handleAIMessage(ws, data) {
           // Classify intent
           const intent = await classifyUserIntent(openai, message);
           
-          if (intent && !intent.isMultiStep && intent.operation !== 'CONVERSATION') {
+          // Safety net: "create N objects all/with random/different colors" is NEVER multi-step.
+          // The LLM sometimes misclassifies this as multi-step, causing the supervisor to
+          // split it into create + changeColor with hallucinated IDs.
+          if (intent && intent.isMultiStep) {
+            const isSimpleCreateWithColors = /^(create|add|make|draw)\s+\d+\s+\w+.*\b(random|different|varied|various)\s*(color|colours?)\b/i.test(message);
+            if (isSimpleCreateWithColors) {
+              console.log('⚠️  Safety net: overriding isMultiStep=true for simple create-with-colors command');
+              intent.isMultiStep = false;
+              if (!intent.color) intent.color = 'random';
+              if (!intent.colors || intent.colors.length === 0) {
+                intent.colors = ['#EF4444', '#3B82F6', '#10B981', '#A855F7', '#F97316'];
+              }
+            }
+          }
+          
+          // Deterministic multi-color-group parser (ALWAYS runs for CREATE)
+          // LLMs are unreliable at generating large repetitive arrays — they truncate.
+          // e.g. "create 50 stars, 10 green, 10 purple and 30 red" → LLM returns 31 colors instead of 50.
+          // This regex parser is the authoritative source for color groups.
+          if (intent && intent.operation === 'CREATE') {
+            const colorMap = {
+              red: '#EF4444', blue: '#3B82F6', green: '#10B981', yellow: '#EAB308',
+              orange: '#F97316', pink: '#EC4899', purple: '#A855F7', cyan: '#06B6D4',
+              teal: '#14B8A6', indigo: '#6366F1', lime: '#84CC16', amber: '#F59E0B',
+              white: '#FFFFFF', black: '#000000', gray: '#6B7280', grey: '#6B7280',
+            };
+            
+            // Step 1: Try regex to extract color groups deterministically
+            const colorGroupPattern = /(\d+)\s+(red|blue|green|yellow|orange|pink|purple|cyan|teal|indigo|lime|amber|white|black|gray|grey)/gi;
+            const groups = [];
+            let regexMatch;
+            while ((regexMatch = colorGroupPattern.exec(message)) !== null) {
+              groups.push({ count: parseInt(regexMatch[1], 10), colorName: regexMatch[2].toLowerCase() });
+            }
+            
+            const llmColors = intent.colors || [];
+            const llmLen = llmColors.length;
+            const targetQty = intent.quantity || 0;
+            
+            if (groups.length >= 2) {
+              // Regex found 2+ color groups — build the deterministic colors array
+              const regexColors = [];
+              let totalFromGroups = 0;
+              for (const g of groups) {
+                const hex = colorMap[g.colorName] || '#E5E7EB';
+                for (let ci = 0; ci < g.count; ci++) {
+                  regexColors.push(hex);
+                }
+                totalFromGroups += g.count;
+              }
+              
+              // Use regex result if it covers the full quantity, OR if LLM had fewer/no colors
+              // Use LLM result (padded) if regex missed colors due to typos and LLM has more unique colors
+              const regexUnique = new Set(regexColors).size;
+              const llmUnique = new Set(llmColors).size;
+              
+              if (totalFromGroups >= targetQty || llmLen === 0 || regexUnique >= llmUnique) {
+                console.log(`🔧 Deterministic color parser: ${groups.length} groups → ${regexColors.length} colors (LLM had ${llmLen})`);
+                intent.colors = regexColors;
+                if (targetQty < totalFromGroups) {
+                  intent.quantity = totalFromGroups;
+                }
+              } else {
+                // LLM understood more colors (e.g. typos) — pad LLM's array to target quantity
+                const padded = [];
+                for (let pi = 0; pi < targetQty; pi++) {
+                  padded.push(llmColors[pi % llmLen]);
+                }
+                console.log(`🔧 LLM had more unique colors (${llmUnique} vs regex ${regexUnique}) — padded LLM's ${llmLen} → ${padded.length}`);
+                intent.colors = padded;
+              }
+              intent.isMultiStep = false;
+            }
+            // Step 2: No regex groups but LLM returned truncated colors array — pad it
+            else if (llmLen > 0 && targetQty > 0 && llmLen < targetQty) {
+              const padded = [];
+              for (let pi = 0; pi < targetQty; pi++) {
+                padded.push(llmColors[pi % llmLen]);
+              }
+              console.log(`🔧 Color array padding: LLM gave ${llmLen}, need ${targetQty} → padded by cycling`);
+              intent.colors = padded;
+            }
+          }
+          
+          // #region agent log
+          fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'server.js:590',message:'Intent classifier result',data:{operation:intent?.operation,isMultiStep:intent?.isMultiStep,objectType:intent?.objectType,shapeType:intent?.shapeType,quantity:intent?.quantity,color:intent?.color,colorsLength:intent?.colors?.length,creativeDescription:intent?.creativeDescription,userMessage:message},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+          // #endregion
+
+          // CREATIVE commands go directly to the creative composer (Planner+Executor)
+          if (intent && intent.operation === 'CREATIVE') {
+            // #region agent log
+            fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'server.js:593',message:'CREATIVE branch taken - routing to Planner+Executor',data:{creativeDescription:intent.creativeDescription,userMessage:message},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+            // #endregion
+            console.log('🎨 Creative command detected, routing to Creative Composer (Planner+Executor)');
+            
+            let frameInfo = null;
+            if (intent.targetFilter?.useSelection && selectedIds?.length > 0) {
+              const selectedFrame = boardState?.objects?.find(obj =>
+                selectedIds.includes(obj.id) && obj.type === 'frame'
+              );
+              if (selectedFrame) {
+                frameInfo = {
+                  id: selectedFrame.id,
+                  x: selectedFrame.x,
+                  y: selectedFrame.y,
+                  width: selectedFrame.width || 800,
+                  height: selectedFrame.height || 600,
+                };
+                console.log(`📦 [Creative Frame Context] Composing inside frame: ${frameInfo.id}`);
+              }
+            }
+            
+            try {
+              const composerResult = await executeCreativeComposer(
+                openai,
+                message,
+                boardState,
+                context,
+                intent.creativeDescription,
+                frameInfo
+              );
+              
+              // #region agent log
+              fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'server.js:620',message:'Creative composer result',data:{toolCallCount:composerResult?.toolCalls?.length,summary:composerResult?.summary,success:composerResult?.success},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+              // #endregion
+              
+              result = {
+                toolCalls: composerResult.toolCalls || [],
+                summary: composerResult.summary || composerResult.message || "I've composed the requested design",
+                needsFollowUp: false,
+                progressSent: false,
+              };
+            } catch (creativeError) {
+              // #region agent log
+              fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'server.js:632',message:'Creative composer ERROR',data:{error:creativeError?.message},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+              // #endregion
+              console.error('Creative composer failed:', creativeError);
+              result = {
+                toolCalls: [],
+                summary: `Creative composition failed: ${creativeError.message}`,
+                needsFollowUp: false,
+                progressSent: false,
+              };
+            }
+          } else if (intent && !intent.isMultiStep && intent.operation !== 'CONVERSATION') {
             // Execute directly from intent (bypass all agents!)
             let toolCalls = executeFromIntent(intent, { objects: boardState?.objects || [], selectedIds });
             
@@ -902,6 +1047,13 @@ Current board context: ${boardState?.objects?.length || 0} objects on the board.
       const colorChanges = response.actions.filter(a => a.name === 'changeColor');
       if (colorChanges.length > 0) {
         console.log('[SERVER SEND] changeColor actions:', JSON.stringify(colorChanges, null, 2));
+      }
+      
+      // DEBUG: Log createShape with colors being sent to client
+      const createShapes = response.actions.filter(a => a.name === 'createShape');
+      for (const cs of createShapes) {
+        const a = cs.arguments || {};
+        console.log(`[SERVER SEND] createShape: type=${a.type}, qty=${a.quantity}, color=${a.color}, colorsLen=${a.colors?.length}`);
       }
       
       ws.send(JSON.stringify(response));

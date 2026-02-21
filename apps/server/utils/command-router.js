@@ -43,7 +43,9 @@ export function requiresOrchestration(userMessage) {
     // Operations requiring multiple agents
     /create.*and.*arrange/i,
     /create.*and.*space/i,
-    /create.*and.*color/i,
+    // NOTE: /create.*and.*color/i was REMOVED — it's too broad.
+    // "create 10 stars with 5 lemon lime color" matched it and got misrouted.
+    // The intent classifier handles "create X with Y color" correctly as a single CREATE.
     
     // Very large batches (100+) that benefit from parallelization
     /create\s+(10[0-9]|1[1-9][0-9]|[2-9][0-9][0-9]|[0-9]{4,})/i, // Matches 100+
@@ -57,9 +59,14 @@ export function requiresOrchestration(userMessage) {
  * Returns: { type: 'intent' | 'mini' | 'single' | 'orchestrate', agent?: Agent, intent?: object, reason: string }
  */
 export function routeCommand(userMessage, hasSelection = false, useIntentClassifier = true) {
+  // CRITICAL: Commands starting with create/add/make/draw ALWAYS go through intent classifier.
+  // The classifier decides if it's CREATE, CREATIVE, or MULTI_STEP — never skip it for creation commands.
+  // This prevents mini-agents from hijacking "create X with Y color" as a CHANGE_COLOR operation.
+  const isCreationCommand = /^\s*(create|add|make|draw|generate)\b/i.test(userMessage);
+  
   // Level 0: Try intent classifier (fastest - direct execution)
-  // Skip for multi-step commands detected early
-  if (useIntentClassifier && !requiresOrchestration(userMessage)) {
+  // Skip for multi-step commands detected early, UNLESS it's a creation command
+  if (useIntentClassifier && (isCreationCommand || !requiresOrchestration(userMessage))) {
     return { type: 'intent', reason: 'Using intent classifier for direct execution' };
   }
   

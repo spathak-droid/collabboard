@@ -241,7 +241,7 @@ export const Frame = ({
         <Rect
           width={data.width}
           height={data.height}
-          fill={data.fill || '#FFFFFF'}
+          fill={data.fill ?? undefined}
           stroke={data.stroke || '#3b82f6'}
           strokeWidth={data.strokeWidth ?? 2}
           dash={[8, 4]}

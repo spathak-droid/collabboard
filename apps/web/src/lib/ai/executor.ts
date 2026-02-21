@@ -435,32 +435,50 @@ export function executeToolCalls(
         // Create multiple sticky notes with grid layout
         if (quantity > 1) {
           const currentTime = Date.now();
+          const stickyW = 200;
+          const stickyH = 200;
           
           // Calculate grid positions - use frame bounds if frameId provided
-          let preferredPos: { x: number; y: number };
+          let gridStartPos: { x: number; y: number };
           if (args.frameId) {
             const frameBounds = getFrameInnerBounds(args.frameId, ops.objects);
             if (frameBounds) {
-              preferredPos = { x: frameBounds.x, y: frameBounds.y };
+              gridStartPos = { x: frameBounds.x, y: frameBounds.y };
             } else {
-              preferredPos = options?.viewport 
+              const vp = options?.viewport 
                 ? getViewportCenterPosition(options.viewport as ViewportState)
                 : { x: 200, y: 200 };
+              gridStartPos = vp;
             }
           } else {
-            preferredPos = options?.viewport 
+            // Calculate total grid bounding box to find free space
+            const GAP = 20;
+            const gridCols = args.columns ?? (quantity <= 3 ? quantity : quantity <= 6 ? 3 : Math.ceil(Math.sqrt(quantity)));
+            const gridRows = Math.ceil(quantity / gridCols);
+            const gridWidth = gridCols * stickyW + (gridCols - 1) * GAP;
+            const gridHeight = gridRows * stickyH + (gridRows - 1) * GAP;
+            
+            const vp = options?.viewport 
               ? getViewportCenterPosition(options.viewport as ViewportState)
               : { x: 200, y: 200 };
+            
+            gridStartPos = findFreePositionWithBoxes(
+              getPlacementBoxes(),
+              gridWidth,
+              gridHeight,
+              vp.x - gridWidth / 2,
+              vp.y - gridHeight / 2,
+            );
           }
           
           const positions = calculateGridPositions(
             quantity,
-            200, // sticky note width
-            200, // sticky note height
+            stickyW,
+            stickyH,
             args.rows,
             args.columns,
-            preferredPos.x,
-            preferredPos.y
+            gridStartPos.x,
+            gridStartPos.y
           );
           
           // Color handling: ONLY cycle colors if explicitly requested via colors array or color="random"
@@ -565,20 +583,28 @@ export function executeToolCalls(
           const width = 100; // Approximate text width
           const height = 30; // Approximate text height
           
-          // Calculate viewport center or default position
-          const preferredPos = options?.viewport 
+          const GAP = 20;
+          const gridCols = explicitColumns ?? (quantity <= 3 ? quantity : Math.ceil(Math.sqrt(quantity)));
+          const gridRows = Math.ceil(quantity / gridCols);
+          const gridWidth = gridCols * width + (gridCols - 1) * GAP;
+          const gridHeight = gridRows * height + (gridRows - 1) * GAP;
+          
+          const vp = options?.viewport 
             ? getViewportCenterPosition(options.viewport as ViewportState)
             : { x: 200, y: 200 };
           
-          // Use calculateGridPositions to get positions for N text objects
+          const gridStartPos = findFreePositionWithBoxes(
+            getPlacementBoxes(), gridWidth, gridHeight, vp.x - gridWidth / 2, vp.y - gridHeight / 2,
+          );
+          
           const positions = calculateGridPositions(
             quantity,
             width,
             height,
-            preferredPos.x,
-            preferredPos.y,
             explicitRows,
-            explicitColumns
+            explicitColumns,
+            gridStartPos.x,
+            gridStartPos.y
           );
           
           // Create text objects at calculated positions
@@ -650,20 +676,28 @@ export function executeToolCalls(
           const width = args.width || 200;
           const height = args.height || 100;
           
-          // Calculate viewport center or default position
-          const preferredPos = options?.viewport 
+          const GAP = 20;
+          const gridCols = explicitColumns ?? (quantity <= 3 ? quantity : Math.ceil(Math.sqrt(quantity)));
+          const gridRows = Math.ceil(quantity / gridCols);
+          const gridWidth = gridCols * width + (gridCols - 1) * GAP;
+          const gridHeight = gridRows * height + (gridRows - 1) * GAP;
+          
+          const vp = options?.viewport 
             ? getViewportCenterPosition(options.viewport as ViewportState)
             : { x: 200, y: 200 };
           
-          // Use calculateGridPositions to get positions for N text bubbles
+          const gridStartPos = findFreePositionWithBoxes(
+            getPlacementBoxes(), gridWidth, gridHeight, vp.x - gridWidth / 2, vp.y - gridHeight / 2,
+          );
+          
           const positions = calculateGridPositions(
             quantity,
             width,
             height,
-            preferredPos.x,
-            preferredPos.y,
             explicitRows,
-            explicitColumns
+            explicitColumns,
+            gridStartPos.x,
+            gridStartPos.y
           );
           
           // Create text bubbles at calculated positions
@@ -733,6 +767,13 @@ export function executeToolCalls(
         const args = call.arguments as CreateShapeArgs;
         const quantity = args.quantity ?? 1;
         
+        // Debug: log received arguments to verify colors array arrives from server
+        console.log(`[createShape] Received args: type=${args.type}, quantity=${quantity}, color=${args.color}, colorsLength=${args.colors?.length}, hasColors=${!!(args.colors && Array.isArray(args.colors) && args.colors.length > 0)}`);
+        if (args.colors && args.colors.length > 0) {
+          const unique = [...new Set(args.colors)];
+          console.log(`[createShape] Colors array unique values: ${unique.join(', ')}`);
+        }
+        
         // Log frame context
         if (args.frameId) {
           console.log(`📦 [Client Executor] createShape received frameId: ${args.frameId}`);
@@ -762,20 +803,37 @@ export function executeToolCalls(
           const singleColor = args.color && args.color !== 'random' ? resolveShapeColor(args.color) : resolveShapeColor();
           
           // Calculate grid positions - use frame bounds if frameId provided
-          let preferredPos: { x: number; y: number };
+          let gridStartPos: { x: number; y: number };
           if (args.frameId) {
             const frameBounds = getFrameInnerBounds(args.frameId, ops.objects);
             if (frameBounds) {
-              preferredPos = { x: frameBounds.x, y: frameBounds.y };
+              gridStartPos = { x: frameBounds.x, y: frameBounds.y };
             } else {
-              preferredPos = options?.viewport 
+              const vp = options?.viewport 
                 ? getViewportCenterPosition(options.viewport as ViewportState)
                 : { x: 200, y: 200 };
+              gridStartPos = vp;
             }
           } else {
-            preferredPos = options?.viewport 
+            // Calculate total grid bounding box to find free space for the entire grid
+            const GAP = 20;
+            const gridCols = args.columns ?? (quantity <= 3 ? quantity : quantity <= 6 ? 3 : Math.ceil(Math.sqrt(quantity)));
+            const gridRows = Math.ceil(quantity / gridCols);
+            const gridWidth = gridCols * width + (gridCols - 1) * GAP;
+            const gridHeight = gridRows * height + (gridRows - 1) * GAP;
+            
+            const vp = options?.viewport 
               ? getViewportCenterPosition(options.viewport as ViewportState)
               : { x: 200, y: 200 };
+            
+            // Find free space for the entire grid, not just a single object
+            gridStartPos = findFreePositionWithBoxes(
+              getPlacementBoxes(),
+              gridWidth,
+              gridHeight,
+              vp.x - gridWidth / 2,
+              vp.y - gridHeight / 2,
+            );
           }
           
           const positions = calculateGridPositions(
@@ -784,9 +842,17 @@ export function executeToolCalls(
             height,
             args.rows,
             args.columns,
-            preferredPos.x,
-            preferredPos.y
+            gridStartPos.x,
+            gridStartPos.y
           );
+          
+          // Log color cycling info for debugging
+          if (shouldCycleColors) {
+            const uniqueColors = [...new Set(shapeColorArray)];
+            const first3 = shapeColorArray.slice(0, 3).join(', ');
+            const last3 = shapeColorArray.slice(-3).join(', ');
+            console.log(`[createShape] Color cycling: ${quantity} ${args.type}s, ${shapeColorArray.length} colors in palette, unique: [${uniqueColors.join(', ')}], first3: [${first3}], last3: [${last3}]`);
+          }
           
           // Create all shapes with calculated positions
           for (let i = 0; i < quantity; i++) {
@@ -998,20 +1064,28 @@ export function executeToolCalls(
           const width = args.width ?? 400;
           const height = args.height ?? 400;
           
-          // Calculate viewport center or default position
-          const preferredPos = options?.viewport 
+          const GAP = 20;
+          const gridCols = explicitColumns ?? (quantity <= 3 ? quantity : Math.ceil(Math.sqrt(quantity)));
+          const gridRows = Math.ceil(quantity / gridCols);
+          const gridWidth = gridCols * width + (gridCols - 1) * GAP;
+          const gridHeight = gridRows * height + (gridRows - 1) * GAP;
+          
+          const vp = options?.viewport 
             ? getViewportCenterPosition(options.viewport as ViewportState)
             : { x: 100, y: 100 };
           
-          // Use calculateGridPositions to get positions for N frames
+          const gridStartPos = findFreePositionWithBoxes(
+            getPlacementBoxes(), gridWidth, gridHeight, vp.x - gridWidth / 2, vp.y - gridHeight / 2,
+          );
+          
           const positions = calculateGridPositions(
             quantity,
             width,
             height,
-            preferredPos.x,
-            preferredPos.y,
             explicitRows,
-            explicitColumns
+            explicitColumns,
+            gridStartPos.x,
+            gridStartPos.y
           );
           
           // Create frames at calculated positions
@@ -1026,6 +1100,7 @@ export function executeToolCalls(
               y: pos.y,
               width,
               height,
+              fill: args.fill,
               stroke: '#6B7280',
               strokeWidth: 2,
               containedObjectIds: [],
@@ -1151,6 +1226,7 @@ export function executeToolCalls(
           y: y!,
           width,
           height,
+          fill: args.fill,
           stroke: '#6B7280',
           strokeWidth: 2,
           containedObjectIds: containedIds,
@@ -1159,7 +1235,7 @@ export function executeToolCalls(
           zIndex: nextZIndex++,
           createdBy: ops.userId,
           createdAt: Date.now(),
-          isAIContainer: containedIds.length > 0, // Mark as AI container only if it contains objects
+          isAIContainer: containedIds.length > 0,
         };
         // Queued for batch creation
         objectsToCreate.push(obj);
@@ -1172,14 +1248,35 @@ export function executeToolCalls(
       case 'createConnector': {
         const args = call.arguments as CreateConnectorArgs;
         
+        // Resolve fromId/toId — support both direct IDs and index-based references
+        // The layout engine emits fromIndex/toIndex (indices into the tool calls array)
+        // because object IDs don't exist yet at plan time. We resolve them here using
+        // createdIds which tracks IDs of objects created earlier in this batch.
+        let resolvedFromId = args.fromId;
+        let resolvedToId = args.toId;
+        
+        if (!resolvedFromId && args.fromIndex != null && args.fromIndex < createdIds.length) {
+          resolvedFromId = createdIds[args.fromIndex];
+        }
+        if (!resolvedToId && args.toIndex != null && args.toIndex < createdIds.length) {
+          resolvedToId = createdIds[args.toIndex];
+        }
+        
+        if (!resolvedFromId || !resolvedToId) {
+          descriptions.push(
+            `Could not create connector — missing IDs (from: ${resolvedFromId ?? `index ${args.fromIndex}`}, to: ${resolvedToId ?? `index ${args.toIndex}`})`,
+          );
+          break;
+        }
+        
         // Check both ops.objects and tempObjects for the source/target
         const allObjectsForLookup = getAllObjects();
-        const fromObj = allObjectsForLookup.find((o) => o.id === args.fromId);
-        const toObj = allObjectsForLookup.find((o) => o.id === args.toId);
+        const fromObj = allObjectsForLookup.find((o) => o.id === resolvedFromId);
+        const toObj = allObjectsForLookup.find((o) => o.id === resolvedToId);
 
         if (!fromObj || !toObj) {
           descriptions.push(
-            'Could not create connector — source or target object not found',
+            `Could not create connector — source or target object not found (from: ${resolvedFromId}, to: ${resolvedToId})`,
           );
           break;
         }
@@ -1196,8 +1293,8 @@ export function executeToolCalls(
           points: [fromPoint.x, fromPoint.y, toPoint.x, toPoint.y],
           stroke: '#000000',
           strokeWidth: 2,
-          startAnchor: { objectId: args.fromId, anchor: fromAnchor },
-          endAnchor: { objectId: args.toId, anchor: toAnchor },
+          startAnchor: { objectId: resolvedFromId, anchor: fromAnchor },
+          endAnchor: { objectId: resolvedToId, anchor: toAnchor },
           rotation: 0,
           zIndex: nextZIndex++,
           createdBy: ops.userId,
@@ -1740,7 +1837,7 @@ export function executeToolCalls(
             name: quadrants === 4 ? 'SWOT Analysis' : `${cols}×${rows} Matrix`,
             stroke: '#9CA3AF',
             strokeWidth: 2,
-            fill: '#FFFFFF',
+            fill: null,
             rotation: 0,
             containedObjectIds: createdObjectIds,
             zIndex: nextZIndex++,
@@ -1901,7 +1998,7 @@ export function executeToolCalls(
           name: 'User Journey Map',
           stroke: '#9CA3AF',
           strokeWidth: 2,
-          fill: '#FFFFFF',
+          fill: null,
           containedObjectIds: [...stageIds],
           rotation: 0,
           zIndex: nextZIndex++,
@@ -1989,7 +2086,7 @@ export function executeToolCalls(
             name: columnName,
             stroke: '#9CA3AF',
             strokeWidth: 2,
-            fill: '#FFFFFF',
+            fill: null,
             containedObjectIds: [],
             rotation: 0,
             zIndex: nextZIndex++,
@@ -2103,7 +2200,7 @@ export function executeToolCalls(
           name: 'Pros',
           stroke: '#10B981',
           strokeWidth: 2,
-          fill: '#FFFFFF',
+          fill: null,
           containedObjectIds: [],
           rotation: 0,
           zIndex: nextZIndex++,
@@ -2160,7 +2257,7 @@ export function executeToolCalls(
           name: 'Cons',
           stroke: '#EF4444',
           strokeWidth: 2,
-          fill: '#FFFFFF',
+          fill: null,
           containedObjectIds: [],
           rotation: 0,
           zIndex: nextZIndex++,

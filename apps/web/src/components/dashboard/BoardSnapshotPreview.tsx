@@ -115,7 +115,7 @@ const drawShape = (ctx: CanvasRenderingContext2D, obj: WhiteboardObject) => {
     case 'triangle': {
       const width = obj.width ?? 60;
       const height = obj.height ?? 50;
-      solidFill(obj.fill);
+      solidFill(obj.fill ?? undefined);
       ctx.beginPath();
       ctx.moveTo(obj.x + width / 2, obj.y);
       ctx.lineTo(obj.x + width, obj.y + height);
@@ -126,7 +126,7 @@ const drawShape = (ctx: CanvasRenderingContext2D, obj: WhiteboardObject) => {
       break;
     }
     case 'circle':
-      solidFill(obj.fill);
+      solidFill(obj.fill ?? undefined);
       ctx.beginPath();
       ctx.arc(obj.x, obj.y, obj.radius, 0, Math.PI * 2);
       ctx.fill();
@@ -141,7 +141,7 @@ const drawShape = (ctx: CanvasRenderingContext2D, obj: WhiteboardObject) => {
       ctx.stroke();
       break;
     case 'frame':
-      drawRect(obj.width ?? 120, obj.height ?? 80, obj.fill);
+      drawRect(obj.width ?? 120, obj.height ?? 80, obj.fill ?? undefined);
       break;
     case 'textBubble': {
       const width = ('width' in obj && typeof obj.width === 'number' ? obj.width : 60);
@@ -153,7 +153,7 @@ const drawShape = (ctx: CanvasRenderingContext2D, obj: WhiteboardObject) => {
     case 'star': {
       const width = ('width' in obj && typeof obj.width === 'number' ? obj.width : 60);
       const height = ('height' in obj && typeof obj.height === 'number' ? obj.height : 40);
-      drawRect(width, height, obj.fill);
+      drawRect(width, height, obj.fill ?? undefined);
       break;
     }
     case 'text': {

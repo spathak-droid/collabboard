@@ -228,12 +228,12 @@ export const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'changeColor',
-      description: 'Change the color of an existing object. For sticky notes use color names (yellow, pink, blue, green, orange). For shapes use hex colors.',
+      description: 'Change the color of an existing object. Use hex color codes (e.g., #EF4444 for red, #3B82F6 for blue). Hex codes give you unlimited color choices.',
       parameters: {
         type: 'object',
         properties: {
           objectId: { type: 'string', description: 'ID of the object to recolor' },
-          color: { type: 'string', description: 'New color — a name for sticky notes, or a hex string for shapes' },
+          color: { type: 'string', description: 'Hex color code (e.g., #EF4444). Choose any hex color you think fits the user\'s request.' },
         },
         required: ['objectId', 'color'],
       },

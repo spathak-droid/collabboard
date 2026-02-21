@@ -30,14 +30,15 @@ export const CREATE_AGENT = {
       type: 'function',
       function: {
         name: 'createStickyNote',
-        description: 'Create a sticky note (yellow/pink/blue/green/orange card with text)',
+        description: 'Create a sticky note (colored card with text). Use hex codes for colors.',
         parameters: {
           type: 'object',
           properties: {
             text: { type: 'string' },
             x: { type: 'number' },
             y: { type: 'number' },
-            color: { type: 'string', enum: ['yellow', 'pink', 'blue', 'green', 'orange'] },
+            color: { type: 'string', description: 'Hex color code (e.g., #FFF59D, #F48FB1, #81D4FA, #A5D6A7, #FFCC80)' },
+            frameId: { type: 'string', description: 'Optional: ID of frame to create sticky note inside. When user selects a frame and says "create X in/inside this frame", pass the frame ID.' },
           },
           required: ['text'],
         },
@@ -81,7 +82,7 @@ export const CREATE_AGENT = {
       type: 'function',
       function: {
         name: 'createShape',
-        description: 'Create a geometric shape with optional text label INSIDE the shape. Circles and rectangles can have text labels built-in.',
+        description: 'Create a geometric shape with optional text label INSIDE the shape. Use hex codes for colors.',
         parameters: {
           type: 'object',
           properties: {
@@ -90,8 +91,9 @@ export const CREATE_AGENT = {
             y: { type: 'number' },
             width: { type: 'number' },
             height: { type: 'number' },
-            color: { type: 'string' },
+            color: { type: 'string', description: 'Hex color code (e.g., #EF4444 for red, #3B82F6 for blue). If omitted, defaults to light gray.' },
             text: { type: 'string', description: 'Optional text label to display INSIDE the shape (for labeled circles, rectangles, etc.)' },
+            frameId: { type: 'string', description: 'Optional: ID of frame to create shape inside. When user selects a frame and says "create X in/inside this frame", pass the frame ID.' },
           },
           required: ['type'],
         },
@@ -263,12 +265,21 @@ export const CREATE_AGENT = {
 - "a text bubble" → createTextBubble(text: "") - ONCE
 
 **CRITICAL - Color Handling:**
-- **ALWAYS pass the color attribute when specified in the task**
-- "red circle" → createShape(type: 'circle', color: 'red') - MUST include color parameter
-- "blue rectangle" → createShape(type: 'rect', color: 'blue') - MUST include color parameter
-- You can use color names (red, blue, green, orange, purple, pink, yellow) OR hex codes
+- **ALWAYS use hex codes for colors**
 - Common colors: red="#EF4444", blue="#3B82F6", green="#10B981", orange="#F97316", purple="#A855F7", pink="#EC4899", yellow="#EAB308"
-- **If task mentions a color, YOU MUST pass it to the tool call - do NOT skip the color parameter**
+- "red circle" → createShape(type: 'circle', color: '#EF4444') - MUST include hex color
+- "blue rectangle" → createShape(type: 'rect', color: '#3B82F6') - MUST include hex color
+- **CRITICAL - Color Variation Requests:**
+  * If task says "random color", "different color", "varied colors", or "different colors" → OMIT color parameter entirely
+  * Let client-side randomize colors when color parameter is omitted
+  * Example: "Create 5 sticky notes" (no color in task) → 5 calls to createStickyNote WITHOUT color parameter
+  * Example: "Create 9 sticky notes with text 'Hello'" (no specific color) → 9 calls to createStickyNote(text='Hello') WITHOUT color parameter
+  * DO NOT pass "random" or "different" as a literal color value - they are NOT valid colors
+
+**Frame Context (IMPORTANT):**
+- When user says "create X in/inside this frame" OR user has a frame selected (see User Selection context) → pass frameId parameter
+- Example: User has frame "frame123" selected, says "create 2 stars" → createShape(type: 'star', frameId: 'frame123') - call TWICE
+- frameId tells client to place objects INSIDE the frame bounds instead of viewport center
 
 **Default colors (ONLY when no color specified):**
 - Shapes: light gray (#E5E7EB)
@@ -502,7 +513,7 @@ export const MODIFY_AGENT = {
 
 **You can:**
 - Move, resize, rotate objects
-- Update text, change colors
+- Update text, change colors (use hex codes: #EF4444 for red, #3B82F6 for blue, etc.)
 - Fit frames to contents (fitFrameToContents tool)
 
 **Movement calculations:**
@@ -512,10 +523,14 @@ export const MODIFY_AGENT = {
 - "Outside frame" = frame edge + 50px gap
 - Always make movements visually significant (100-300px minimum)
 
+**Color changes:**
+- Always use hex codes: red=#EF4444, blue=#3B82F6, green=#10B981, orange=#F97316, purple=#A855F7, pink=#EC4899, yellow=#EAB308
+- "Make it red" → changeColor(objectId, color: '#EF4444')
+
 **Multiple objects:**
 - <20 objects: Call tool for EACH object
 - 20+ objects with specific IDs in task: Process only those IDs
-- Example: "Change color of circles (IDs: abc, def, ghi) to red" → 3 changeColor calls
+- Example: "Change color of circles (IDs: abc, def, ghi) to red" → 3 changeColor calls with color='#EF4444'
 
 Use object IDs from board state. Don't create or delete objects.`,
 };
@@ -970,7 +985,13 @@ Rules:
    - NEVER create 2 objects when user says "a" or "add X" - "a" means 1
 8. **CRITICAL - Include ALL user-specified attributes in task descriptions:**
    - If user specifies color (e.g., "blue rectangle", "red circle"): Include in task → "Create 1 blue rectangle (shape, type: rect, color: blue)"
-   - **CRITICAL COLOR RULE:** ALWAYS include "color: [color]" in the task description when user specifies a color
+   - **CRITICAL COLOR RULE:** ALWAYS include "color: [color]" in the task description when user specifies a SPECIFIC color (red, blue, green, etc.)
+   - **EXCEPTION - Color Variation Requests:** When user asks for "random color", "different color", "different colors", "varied colors", "various colors", or "all should be different color":
+     * DO NOT include color in the task description
+     * Let the client-side randomize colors automatically
+     * Example: "create 5 sticky notes which all should be different color" → task: "Create 5 sticky notes" (NO color specified)
+     * Example: "create 9 sticky notes with random color" → task: "Create 9 sticky notes" (NO color specified)
+     * Example: "add 6 circles with different colors" → task: "Create 6 circles" (NO color specified)
    - If user specifies position (e.g., "at 100, 200"): Include in task → "Create 1 blue rectangle at position (100, 200)"
    - If user specifies size: Include in task → "Create 1 rectangle 300x200 at (100, 200)"
    - If user specifies text: Include in task → "Create 1 sticky note with text 'Hello' in yellow"
@@ -1055,10 +1076,28 @@ Response: {
 User: "create 6 yellow sticky notes"
 Response: {
   "plan": [
-    {"agent": "CreateAgent", "task": "Create 6 yellow sticky notes", "reasoning": "Create multiple objects", "waitForPrevious": false},
+    {"agent": "CreateAgent", "task": "Create 6 yellow sticky notes (color: yellow)", "reasoning": "Create multiple objects with specific color", "waitForPrevious": false},
     {"agent": "OrganizeAgent", "task": "Arrange the 6 sticky notes in a grid", "reasoning": "Auto-arrange in 3×2 grid", "waitForPrevious": true}
   ],
   "summary": "I'll create 6 yellow sticky notes and arrange them in a grid"
+}
+
+User: "create 5 sticky notes which all should be different color"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create 5 sticky notes", "reasoning": "Create multiple sticky notes without color spec - client will randomize", "waitForPrevious": false},
+    {"agent": "OrganizeAgent", "task": "Arrange the 5 sticky notes in a grid", "reasoning": "Auto-arrange in grid", "waitForPrevious": true}
+  ],
+  "summary": "I'll create 5 sticky notes with different colors and arrange them in a grid"
+}
+
+User: "create 9 sticky notes with random color and write I love hotdogs in them"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create 9 sticky notes with text 'I love hotdogs'", "reasoning": "Create multiple sticky notes with text, no color spec so client will randomize", "waitForPrevious": false},
+    {"agent": "OrganizeAgent", "task": "Arrange the 9 sticky notes in a grid", "reasoning": "Auto-arrange in grid", "waitForPrevious": true}
+  ],
+  "summary": "I'll create 9 sticky notes with your text in random colors and arrange them in a grid"
 }
 
 User: "create 2 stars connected by a line"

@@ -53,6 +53,19 @@ const COLOR_NAME_TO_HEX: Record<string, string> = {
   blue: STICKY_COLORS.BLUE,
   green: STICKY_COLORS.GREEN,
   orange: STICKY_COLORS.ORANGE,
+  // Shape colors (commonly used)
+  red: '#EF4444',
+  purple: '#A855F7',
+  violet: '#A855F7',
+  cyan: '#06B6D4',
+  teal: '#14B8A6',
+  indigo: '#6366F1',
+  lime: '#84CC16',
+  amber: '#F59E0B',
+  gray: '#6B7280',
+  grey: '#6B7280',
+  black: '#000000',
+  white: '#FFFFFF',
 };
 
 function resolveStickyColor(color?: string): string {
@@ -99,6 +112,35 @@ function resolveShapeColor(color?: string): string {
  */
 function hasExplicitCoordinates(args: { x?: number | null; y?: number | null }): boolean {
   return args.x != null && args.y != null; // != null checks for both null and undefined
+}
+
+/**
+ * Get the inner bounds of a frame (excluding padding).
+ * Returns the area where objects should be placed inside the frame.
+ */
+function getFrameInnerBounds(
+  frameId: string,
+  objects: WhiteboardObject[],
+  padding = 40
+): { x: number; y: number; width: number; height: number } | null {
+  console.log(`🔍 [Frame Bounds] Looking for frame: ${frameId}`);
+  const frame = objects.find((o) => o.id === frameId && o.type === 'frame');
+  if (!frame || frame.type !== 'frame') {
+    console.error(`❌ [Frame Bounds] Frame ${frameId} not found! Available objects: ${objects.length}`);
+    return null;
+  }
+  
+  const bounds = {
+    x: frame.x + padding,
+    y: frame.y + padding,
+    width: Math.max(frame.width - padding * 2, 100),
+    height: Math.max(frame.height - padding * 2, 100),
+  };
+  
+  console.log(`✅ [Frame Bounds] Frame found at (${frame.x}, ${frame.y}), size: ${frame.width}x${frame.height}`);
+  console.log(`   Inner bounds: (${bounds.x}, ${bounds.y}), size: ${bounds.width}x${bounds.height}`);
+  
+  return bounds;
 }
 
 // ── Smart placement algorithm ──────────────────────────────
@@ -384,15 +426,32 @@ export function executeToolCalls(
         const args = call.arguments as CreateStickyNoteArgs;
         const quantity = args.quantity ?? 1;
         
+        // Log frame context
+        if (args.frameId) {
+          console.log(`📦 [Client Executor] createStickyNote received frameId: ${args.frameId}`);
+        }
+        
         // Create multiple sticky notes with grid layout
         if (quantity > 1) {
-          const color = resolveStickyColor(args.color);
           const currentTime = Date.now();
           
-          // Calculate grid positions
-          const preferredPos = options?.viewport 
-            ? getViewportCenterPosition(options.viewport as ViewportState)
-            : { x: 200, y: 200 };
+          // Calculate grid positions - use frame bounds if frameId provided
+          let preferredPos: { x: number; y: number };
+          if (args.frameId) {
+            const frameBounds = getFrameInnerBounds(args.frameId, ops.objects);
+            if (frameBounds) {
+              preferredPos = { x: frameBounds.x, y: frameBounds.y };
+            } else {
+              preferredPos = options?.viewport 
+                ? getViewportCenterPosition(options.viewport as ViewportState)
+                : { x: 200, y: 200 };
+            }
+          } else {
+            preferredPos = options?.viewport 
+              ? getViewportCenterPosition(options.viewport as ViewportState)
+              : { x: 200, y: 200 };
+          }
+          
           const positions = calculateGridPositions(
             quantity,
             200, // sticky note width
@@ -403,9 +462,16 @@ export function executeToolCalls(
             preferredPos.y
           );
           
+          // Color handling: If no color specified OR color="random", cycle through colors
+          const colorArray = ['#FFF59D', '#F48FB1', '#81D4FA', '#A5D6A7', '#FFCC80']; // yellow, pink, blue, green, orange
+          const shouldCycleColors = (!args.color || args.color === 'random') && quantity > 1;
+          const singleColor = args.color && args.color !== 'random' ? resolveStickyColor(args.color) : resolveStickyColor();
+          
           // Create all sticky notes with calculated positions
           for (let i = 0; i < quantity; i++) {
             const id = generateId();
+            const noteColor = shouldCycleColors ? colorArray[i % colorArray.length] : singleColor;
+            
             const obj: StickyNote = {
               id,
               type: 'sticky',
@@ -413,7 +479,7 @@ export function executeToolCalls(
               y: positions[i].y,
               width: 200,
               height: 200,
-              color,
+              color: noteColor,
               text: args.text || '',
               rotation: 0,
               zIndex: nextZIndex++,
@@ -425,7 +491,9 @@ export function executeToolCalls(
             createdIds.push(id);
           }
           
-          descriptions.push(`Created ${quantity} ${color} sticky notes in a grid`);
+          const colorDescription = shouldCycleColors ? 'multi-colored' : singleColor;
+          const locationDesc = args.frameId ? ' inside frame' : ' in a grid';
+          descriptions.push(`Created ${quantity} ${colorDescription} sticky notes${locationDesc}`);
         }
         // Single sticky note
         else {
@@ -434,6 +502,22 @@ export function executeToolCalls(
           let pos: { x: number; y: number };
           if (hasExplicitCoordinates(args)) {
             pos = { x: args.x!, y: args.y! };
+          } else if (args.frameId) {
+            // Place inside frame bounds
+            const frameBounds = getFrameInnerBounds(args.frameId, ops.objects);
+            if (frameBounds) {
+              // Center the sticky note in the frame
+              pos = {
+                x: frameBounds.x + (frameBounds.width - 200) / 2,
+                y: frameBounds.y + (frameBounds.height - 200) / 2,
+              };
+            } else {
+              // Fallback if frame not found
+              const preferredPos = options?.viewport 
+                ? getViewportCenterPosition(options.viewport as ViewportState)
+                : { x: 200, y: 200 };
+              pos = findFreePositionWithBoxes(getPlacementBoxes(), 200, 200, preferredPos.x, preferredPos.y);
+            }
           } else {
             const preferredPos = options?.viewport 
               ? getViewportCenterPosition(options.viewport as ViewportState)
@@ -458,7 +542,8 @@ export function executeToolCalls(
           tempObjects.push(obj);
           objectsToCreate.push(obj);
           createdIds.push(id);
-          descriptions.push(`Created sticky note "${truncate(args.text)}"`);
+          const locationDesc = args.frameId ? ' inside frame' : '';
+          descriptions.push(`Created sticky note "${truncate(args.text)}"${locationDesc}`);
         }
         break;
       }
@@ -642,17 +727,45 @@ export function executeToolCalls(
         const args = call.arguments as CreateShapeArgs;
         const quantity = args.quantity ?? 1;
         
+        // Log frame context
+        if (args.frameId) {
+          console.log(`📦 [Client Executor] createShape received frameId: ${args.frameId}`);
+          const frame = ops.objects.find(o => o.id === args.frameId && o.type === 'frame');
+          if (frame) {
+            console.log(`   Frame found: ${frame.type} at (${frame.x}, ${frame.y}), size: ${frame.width}x${frame.height}`);
+          } else {
+            console.error(`   ⚠️ Frame ${args.frameId} NOT FOUND in objects!`);
+          }
+        }
+        
         // Create multiple shapes with grid layout
         if (quantity > 1) {
           const currentTime = Date.now();
           const width = args.width ?? 150;
           const height = args.height ?? 150;
-          const color = resolveShapeColor(args.color);
           
-          // Calculate grid positions
-          const preferredPos = options?.viewport 
-            ? getViewportCenterPosition(options.viewport as ViewportState)
-            : { x: 200, y: 200 };
+          // Color handling: If no color specified OR color="random", cycle through colors
+          const shapeColorArray = ['#EF4444', '#3B82F6', '#10B981', '#A855F7', '#F97316']; // red, blue, green, purple, orange
+          const shouldCycleColors = (!args.color || args.color === 'random') && quantity > 1;
+          const singleColor = args.color && args.color !== 'random' ? resolveShapeColor(args.color) : resolveShapeColor();
+          
+          // Calculate grid positions - use frame bounds if frameId provided
+          let preferredPos: { x: number; y: number };
+          if (args.frameId) {
+            const frameBounds = getFrameInnerBounds(args.frameId, ops.objects);
+            if (frameBounds) {
+              preferredPos = { x: frameBounds.x, y: frameBounds.y };
+            } else {
+              preferredPos = options?.viewport 
+                ? getViewportCenterPosition(options.viewport as ViewportState)
+                : { x: 200, y: 200 };
+            }
+          } else {
+            preferredPos = options?.viewport 
+              ? getViewportCenterPosition(options.viewport as ViewportState)
+              : { x: 200, y: 200 };
+          }
+          
           const positions = calculateGridPositions(
             quantity,
             width,
@@ -667,6 +780,7 @@ export function executeToolCalls(
           for (let i = 0; i < quantity; i++) {
             const id = generateId();
             const pos = positions[i];
+            const shapeColor = shouldCycleColors ? shapeColorArray[i % shapeColorArray.length] : singleColor;
             
             // For circles, adjust position to center
             if (args.type === 'circle') {
@@ -693,7 +807,7 @@ export function executeToolCalls(
                 ...baseFields,
                 type: 'circle',
                 radius,
-                fill: color,
+                fill: shapeColor,
                 stroke: '#000000',
                 strokeWidth: 2,
                 ...(args.text ? { text: args.text } : {}),
@@ -704,7 +818,7 @@ export function executeToolCalls(
                 type: 'triangle',
                 width,
                 height,
-                fill: color,
+                fill: shapeColor,
                 stroke: '#000000',
                 strokeWidth: 2,
                 ...(args.text ? { text: args.text } : {}),
@@ -715,7 +829,7 @@ export function executeToolCalls(
                 type: 'star',
                 width,
                 height,
-                fill: color,
+                fill: shapeColor,
                 stroke: '#000000',
                 strokeWidth: 2,
                 ...(args.text ? { text: args.text } : {}),
@@ -726,7 +840,7 @@ export function executeToolCalls(
                 type: 'rect',
                 width,
                 height,
-                fill: color,
+                fill: shapeColor,
                 stroke: '#000000',
                 strokeWidth: 2,
                 ...(args.text ? { text: args.text } : {}),
@@ -738,7 +852,9 @@ export function executeToolCalls(
             createdIds.push(id);
           }
           
-          descriptions.push(`Created ${quantity} ${args.type} shapes in a grid`);
+          const colorDescription = shouldCycleColors ? 'multi-colored' : singleColor;
+          const locationDesc = args.frameId ? ' inside frame' : ' in a grid';
+          descriptions.push(`Created ${quantity} ${colorDescription} ${args.type} shapes${locationDesc}`);
         }
         // Single shape
         else {
@@ -753,6 +869,31 @@ export function executeToolCalls(
           let pos: { x: number; y: number };
           if (hasExplicitCoordinates(args)) {
             pos = { x: args.x!, y: args.y! };
+          } else if (args.frameId) {
+            // Place inside frame bounds
+            const frameBounds = getFrameInnerBounds(args.frameId, ops.objects);
+            if (frameBounds) {
+              // Center the shape in the frame
+              pos = {
+                x: frameBounds.x + (frameBounds.width - placementSize) / 2,
+                y: frameBounds.y + (frameBounds.height - placementSize) / 2,
+              };
+              // Adjust for circle center positioning
+              if (args.type === 'circle') {
+                pos.x += radius;
+                pos.y += radius;
+              }
+            } else {
+              // Fallback if frame not found
+              const preferredPos = options?.viewport 
+                ? getViewportCenterPosition(options.viewport as ViewportState)
+                : { x: 200, y: 200 };
+              pos = findFreePositionWithBoxes(getPlacementBoxes(), placementSize, placementSize, preferredPos.x, preferredPos.y);
+              if (args.type === 'circle') {
+                pos.x += radius;
+                pos.y += radius;
+              }
+            }
           } else {
             const preferredPos = options?.viewport 
               ? getViewportCenterPosition(options.viewport as ViewportState)
@@ -828,7 +969,8 @@ export function executeToolCalls(
 
           tempObjects.push(createdObj);
           createdIds.push(id);
-          descriptions.push(`Created ${args.type} shape`);
+          const locationDesc = args.frameId ? ' inside frame' : '';
+          descriptions.push(`Created ${args.type} shape${locationDesc}`);
         }
         break;
       }

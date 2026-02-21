@@ -1,0 +1,199 @@
+---
+description: Tracks AI fixes and test cases in AI_FIXES_TEST_CASES.txt
+alwaysApply: true
+---
+
+# AI Fixes & Test Cases Tracker
+
+This rule ensures all AI-related issues, fixes, and test cases are documented in `AI_FIXES_TEST_CASES.txt`.
+
+## When to Use This File
+
+**ALWAYS reference and update `AI_FIXES_TEST_CASES.txt` when:**
+
+1. **User reports something broken** - Any functionality that isn't working as expected
+2. **User provides a new prompt** - Any command, request, or instruction they share
+3. **Multi-step commands** - Complex instructions that require multiple actions
+4. **Simple commands** - Even basic requests should be documented if they reveal issues
+5. **AI behavior issues** - When AI doesn't understand or execute commands correctly
+6. **Edge cases discovered** - Unusual scenarios that break expected behavior
+
+## File Location
+
+**Always use:** `/Users/san/Desktop/Gauntlet/CollabBoard/AI_FIXES_TEST_CASES.txt`
+
+## Workflow
+
+### Step 1: Check Existing Test Cases
+
+**Before fixing anything, ALWAYS:**
+1. Read `AI_FIXES_TEST_CASES.txt` to see if similar issues were already fixed
+2. Check if the user's prompt matches any existing test cases
+3. Reference previous fixes and solutions
+
+### Step 2: Document New Issues
+
+**When encountering a new problem or prompt:**
+
+1. **Add a new test case section** following this format:
+
+```
+=================================================================
+TEST CASE N: [SHORT DESCRIPTION]
+=================================================================
+
+PROBLEM:
+- User said "[exact user prompt]"
+- Expected: [what should happen]
+- Actual: [what actually happened]
+
+ROOT CAUSE:
+- [Technical explanation of why it failed]
+
+FIX APPLIED:
+- [What was changed to fix it]
+- [Any relevant technical details]
+
+TEST PROMPTS:
+1. "[user prompt example]"
+   Expected: [expected behavior]
+
+2. "[another test prompt]"
+   Expected: [expected behavior]
+
+FILES MODIFIED:
+- [file path] ([what was changed])
+- [file path] ([what was changed])
+```
+
+2. **Update the "COMBINED TEST SCENARIOS" section** if applicable
+3. **Update the "VALIDATION CHECKLIST"** if new validation is needed
+
+### Step 3: Add to File
+
+**When adding entries:**
+
+- **Append to the file** - Don't overwrite existing content
+- **Use consistent formatting** - Follow the exact structure shown above
+- **Include all details** - User prompt, expected vs actual, root cause, fix, test prompts, files modified
+- **Number sequentially** - Use "TEST CASE N" where N is the next number
+
+## Examples
+
+### Example 1: Broken Functionality
+
+```
+User: "The color picker isn't working"
+
+Action:
+1. Read AI_FIXES_TEST_CASES.txt to check for similar color issues
+2. Investigate the problem
+3. Fix the issue
+4. Add new TEST CASE section documenting:
+   - User's exact report
+   - What was broken
+   - Root cause
+   - Fix applied
+   - Test prompts to verify fix
+   - Files modified
+```
+
+### Example 2: New Prompt
+
+```
+User: "create 10 circles with random sizes"
+
+Action:
+1. Check if similar prompts exist in AI_FIXES_TEST_CASES.txt
+2. Execute the command
+3. If it works: Add a test prompt entry to verify it continues working
+4. If it fails: Document as new TEST CASE with problem, root cause, fix
+```
+
+### Example 3: Multi-Step Command
+
+```
+User: "select all circles, change their color to blue, then move them to the right"
+
+Action:
+1. Check AI_FIXES_TEST_CASES.txt for multi-step command patterns
+2. Execute the command
+3. Document the full command sequence and verify it works
+4. Add test prompts covering:
+   - The full multi-step command
+   - Individual steps
+   - Edge cases (no circles selected, etc.)
+```
+
+## File Structure
+
+The file follows this structure:
+
+1. **Header** - Date and purpose
+2. **Individual TEST CASE sections** - Each issue/prompt documented
+3. **COMBINED TEST SCENARIOS** - Scenarios testing multiple fixes together
+4. **VALIDATION CHECKLIST** - Checklist for verifying fixes
+5. **AUTOMATED TEST SCRIPT STRUCTURE** - Suggested test flow
+6. **EXPECTED PERFORMANCE METRICS** - Performance targets
+
+## Important Rules
+
+1. **Never delete existing content** - Only append new test cases
+2. **Always include user's exact words** - Quote the user's prompt verbatim
+3. **Document root cause** - Explain WHY it failed, not just WHAT failed
+4. **List all files modified** - Include file paths and what changed
+5. **Provide test prompts** - Include multiple test cases to verify the fix
+6. **Update combined scenarios** - Add new scenarios that test multiple fixes together
+
+## Quick Reference Format
+
+When adding a new test case, use this template:
+
+```
+=================================================================
+TEST CASE [N]: [BRIEF TITLE]
+=================================================================
+
+PROBLEM:
+- User said "[exact prompt]"
+- Expected: [expected behavior]
+- Actual: [actual behavior]
+
+ROOT CAUSE:
+- [technical explanation]
+
+FIX APPLIED:
+- [solution description]
+
+TEST PROMPTS:
+1. "[test prompt 1]"
+   Expected: [expected result]
+
+2. "[test prompt 2]"
+   Expected: [expected result]
+
+FILES MODIFIED:
+- [file path] ([change description])
+```
+
+## Integration with Other Rules
+
+- **Follow PRD requirements** - Ensure fixes align with MVP requirements
+- **Maintain performance standards** - Document if fixes affect performance metrics
+- **Update test cases** - Add corresponding test files if needed (TDD workflow)
+- **Code quality** - Ensure fixes follow code quality standards
+
+## When NOT to Add
+
+**Don't add entries for:**
+- Simple syntax errors that are immediately obvious
+- Typos or formatting issues
+- Questions that don't involve broken functionality
+- Requests for information/documentation only
+
+**DO add entries for:**
+- Any command that doesn't work as expected
+- Any prompt that reveals a bug or limitation
+- Multi-step commands (even if they work)
+- Edge cases or unusual scenarios
+- Performance issues related to AI commands

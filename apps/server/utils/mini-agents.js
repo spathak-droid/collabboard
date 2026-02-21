@@ -24,10 +24,11 @@ export const MINI_CREATE = {
             text: { type: 'string' },
             x: { type: 'number' },
             y: { type: 'number' },
-            color: { type: 'string', enum: ['yellow', 'pink', 'blue', 'green', 'orange'] },
+            color: { type: 'string', description: 'Hex color code (e.g., #FFF59D, #F48FB1, #81D4FA, #A5D6A7, #FFCC80)' },
             quantity: { type: 'number', description: 'Number of sticky notes to create (default: 1)' },
             rows: { type: 'number', description: 'Number of rows in grid layout' },
             columns: { type: 'number', description: 'Number of columns in grid layout' },
+            frameId: { type: 'string', description: 'Optional: ID of frame to create sticky notes inside' },
           },
           required: ['text'],
         },
@@ -46,10 +47,12 @@ export const MINI_CREATE = {
             y: { type: 'number' },
             width: { type: 'number' },
             height: { type: 'number' },
-            color: { type: 'string' },
+            color: { type: 'string', description: 'Hex color code (e.g., #EF4444 for red, #3B82F6 for blue)' },
+            text: { type: 'string' },
             quantity: { type: 'number', description: 'Number of shapes to create (default: 1)' },
             rows: { type: 'number', description: 'Number of rows in grid layout' },
             columns: { type: 'number', description: 'Number of columns in grid layout' },
+            frameId: { type: 'string', description: 'Optional: ID of frame to create shapes inside' },
           },
           required: ['type'],
         },
@@ -129,14 +132,16 @@ CRITICAL:
 - "text bubble" → use createTextBubble tool
 - "text" (plain text) → use createText tool
 - If user specifies a color, convert it to hex code in the color parameter
-- Color conversions: red="#EF4444", blue="#3B82F6", green="#10B981", purple="#A855F7", orange="#F97316", pink="#EC4899", yellow="#EAB308"
+- Common hex codes: red="#EF4444", blue="#3B82F6", green="#10B981", purple="#A855F7", orange="#F97316", pink="#EC4899", yellow="#EAB308"
+- **Frame Context:** If user has a frame selected (see User Selection context) and says "create X in/inside this frame", pass the frameId parameter
 
 Examples (SINGLE objects only):
 - "add a frame" → createFrame(title='Frame')
 - "red circle" → createShape(type='circle', color='#EF4444')
 - "purple star" → createShape(type='star', color='#A855F7')
 - "blue rectangle" → createShape(type='rect', color='#3B82F6')
-- "create a text bubble" → createTextBubble(text='')`,
+- "create a text bubble" → createTextBubble(text='')
+- User has frame "frame123" selected, says "create a star inside" → createShape(type='star', frameId='frame123')`,
 };
 
 export const MINI_COLOR = {
@@ -462,7 +467,7 @@ export const MINI_SWOT = {
 CRITICAL:
 - Default quadrants=4 (2x2 matrix for SWOT)
 - Use shape parameter if user specifies shapes instead of sticky notes
-- Color conversions: red="#EF4444", blue="#3B82F6", green="#10B981", purple="#A855F7", orange="#F97316"
+- Common hex codes: red="#EF4444", blue="#3B82F6", green="#10B981", purple="#A855F7", orange="#F97316"
 - withFrame=true by default
 
 RESPONSE MESSAGE:

@@ -85,24 +85,29 @@ export function useDirectKonvaUpdates({
         hasUpdates = true;
       }
     }
+    
+    // For Groups (Rectangle/Circle components), find the actual shape child and update it
+    const isGroup = node.getType() === 'Group';
+    const targetNode = isGroup ? (node as any).findOne('Rect') || (node as any).findOne('Circle') || node : node;
+    
     if (livePos.width !== undefined) {
-      const currentWidth = node.width();
+      const currentWidth = targetNode.width();
       if (Math.abs(currentWidth - livePos.width) > 0.1) {
-        node.width(livePos.width);
+        targetNode.width(livePos.width);
         hasUpdates = true;
       }
     }
     if (livePos.height !== undefined) {
-      const currentHeight = node.height();
+      const currentHeight = targetNode.height();
       if (Math.abs(currentHeight - livePos.height) > 0.1) {
-        node.height(livePos.height);
+        targetNode.height(livePos.height);
         hasUpdates = true;
       }
     }
-    if (livePos.radius !== undefined && (node as any).radius) {
-      const currentRadius = (node as any).radius();
+    if (livePos.radius !== undefined && (targetNode as any).radius) {
+      const currentRadius = (targetNode as any).radius();
       if (Math.abs(currentRadius - livePos.radius) > 0.1) {
-        (node as any).radius(livePos.radius);
+        (targetNode as any).radius(livePos.radius);
         hasUpdates = true;
       }
     }

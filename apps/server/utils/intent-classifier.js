@@ -125,6 +125,13 @@ export const INTENT_CLASSIFIER = {
 - purple → "#A855F7"
 - For sticky notes: yellow/pink/blue/green/orange (names OK)
 - For shapes: ALWAYS use hex codes
+- **CRITICAL - Color Variation Keywords (Extract as "random"):**
+  * "random color", "different color", "different colors", "varied colors", "various colors", "all should be different color", "each a different color"
+  * When you see these phrases → SET color: "random" (so executor knows to cycle colors)
+  * Example: "create 5 sticky notes which all should be different color" → color: "random"
+  * Example: "create 9 sticky notes with random color" → color: "random"
+  * Example: "add 6 circles with different colors" → color: "random"
+  * DO NOT convert "random" to a hex code - keep it as the string "random"
 
 **QUANTITY PARSING:**
 - "a circle" = 1
@@ -142,6 +149,21 @@ export const INTENT_CLASSIFIER = {
   * "create 50 green stars" → operation=CREATE, objectType=shape, shapeType=star, quantity=50, color="#10B981"
   * "add a red circle" → operation=CREATE, objectType=shape, shapeType=circle, quantity=1, color="#EF4444"
   * "make 5 yellow sticky notes" → operation=CREATE, objectType=sticky, quantity=5, color="yellow"
+  * **CRITICAL: If command has "create", "add", "make", "draw", or "generate" → operation=CREATE (NOT CHANGE_COLOR)**
+  * **CRITICAL: "create X with [color]" = CREATE operation, even if "color" keyword appears**
+  * **CRITICAL - Frame Context: If user says "create X inside/in this", "create X in the frame", "create X here" → set targetFilter={useSelection:true}**
+  * **CRITICAL - Frame Around Selection: If user says "create frame around/surrounding these/this/selected" → set targetFilter={useSelection:true}**
+  * **This tells the system to create objects inside the selected frame (if a frame is selected)**
+  * **Or wrap a frame around selected objects (if creating a frame)**
+  * Examples:
+    - "create 5 sticky notes with random color" → operation=CREATE (NOT CHANGE_COLOR)
+    - "add 9 circles with different colors" → operation=CREATE (NOT CHANGE_COLOR)
+    - "make sticky notes with blue color" → operation=CREATE (NOT CHANGE_COLOR)
+    - "create 2 stars inside this" → operation=CREATE, shapeType=star, quantity=2, targetFilter={useSelection:true}
+    - "add 3 circles in this frame" → operation=CREATE, shapeType=circle, quantity=3, targetFilter={useSelection:true}
+    - "create sticky notes here" → operation=CREATE, objectType=sticky, targetFilter={useSelection:true}
+    - "create a frame around these" → operation=CREATE, objectType=frame, targetFilter={useSelection:true}
+    - "add frame surrounding selected objects" → operation=CREATE, objectType=frame, targetFilter={useSelection:true}
   
 - **UPDATE**: "write", "update text", "change text", "edit text", "set text to"
   * "write 'upcoming' in all pink notes" → operation=UPDATE, text="upcoming", targetFilter={color:'pink', type:'sticky'}
@@ -155,12 +177,14 @@ export const INTENT_CLASSIFIER = {
     - "in all circles" → targetFilter={type:'circle'}
     - "in the rectangle" → targetFilter={useSelection:true} (implies specific object)
   
-- **CHANGE_COLOR**: "color", "change color", "make [existing] blue"
+- **CHANGE_COLOR**: "color", "change color", "make [existing] blue" (WITHOUT create/add/make keywords)
   * "color all circles red" → operation=CHANGE_COLOR, targetFilter={type:'circle'}, color="#EF4444"
   * "make these green" → operation=CHANGE_COLOR, targetFilter={useSelection:true}, color="#10B981"
   * **"color these stars pink" → operation=CHANGE_COLOR, targetFilter={useSelection:true}, color="#EC4899" (NOT type:star!)**
   * **"color this red" → operation=CHANGE_COLOR, targetFilter={useSelection:true}, color="#EF4444"**
   * **CRITICAL: "these", "this", "them" = useSelection:true, ignore object type in command**
+  * **CRITICAL: CHANGE_COLOR requires EXISTING objects - never use for creation commands**
+  * **CRITICAL: If "create", "add", "make" appears in command → NOT CHANGE_COLOR, it's CREATE**
   
 - **MOVE**: "move", "shift", "drag" + direction/coordinates
   * "move right" → operation=MOVE, direction="right", targetFilter={useSelection:true}
@@ -200,6 +224,14 @@ export const INTENT_CLASSIFIER = {
 - FIT_FRAME_TO_CONTENTS - requires board context to find frame and its contents
 - CONNECT - requires board context to find objects to connect
 - MULTI_STEP - requires orchestration
+- **CONTENT GENERATION - requires AI to generate meaningful content based on a topic**
+  * Triggers: "for [topic]", "about [topic]", "on [topic]", "comparing [X] vs [Y]"
+  * Examples:
+    - "create sticky notes for project planning" → needs agent to generate planning-related content
+    - "create 2x3 grid of sticky notes for thinking vs critical thinking" → needs agent to compare concepts
+    - "add sticky notes about marketing strategy" → needs agent to generate strategy points
+    - "create shapes for product roadmap" → needs agent to generate roadmap stages
+  * If detected, set isMultiStep=true to route to agent system
 
 For these operations, classify them but return isMultiStep=true or operation specific so the router can hand off to the appropriate agent.
 
@@ -214,16 +246,19 @@ For these operations, classify them but return isMultiStep=true or operation spe
 - "frame" → objectType=frame (also used in targetFilter)
 
 **CRITICAL RULES:**
-1. If quantity specified → it's CREATE, NOT modification
-2. Color must be converted to hex for shapes
-3. "a" or "one" = quantity:1
-4. Always extract ALL mentioned parameters
-5. For CREATE operations with quantity, operation=CREATE (not CHANGE_COLOR)
-6. **"create X and color them Y" = CREATE with color parameter (NOT multi-step)**
-7. **"create X green" or "create green X" = CREATE with color parameter**
-8. **"these", "this", "them", "those" = useSelection:true (ignore any object type mentioned)**
-9. **"write X in Y" = UPDATE operation (NOT CREATE) - extract text X, find objects Y**
-10. **"write" keyword ALWAYS means UPDATE, never CREATE (unless writing "on" or "into" a new object)**
+1. **CREATE always wins over CHANGE_COLOR**: If command has "create", "add", "make", "draw", or "generate" → operation=CREATE (even if "color" keyword appears)
+2. If quantity specified → it's CREATE, NOT modification
+3. Color must be converted to hex for shapes
+4. "a" or "one" = quantity:1
+5. Always extract ALL mentioned parameters
+6. For CREATE operations with quantity, operation=CREATE (not CHANGE_COLOR)
+7. **"create X and color them Y" = CREATE with color parameter (NOT multi-step)**
+8. **"create X green" or "create green X" = CREATE with color parameter**
+9. **"create X with [any color phrase]" = CREATE operation (NOT CHANGE_COLOR)**
+10. **"these", "this", "them", "those" = useSelection:true (ignore any object type mentioned)**
+11. **"write X in Y" = UPDATE operation (NOT CREATE) - extract text X, find objects Y**
+12. **"write" keyword ALWAYS means UPDATE, never CREATE (unless writing "on" or "into" a new object)**
+13. **Content generation detected**: If command has "for [topic]", "about [topic]", "on [topic]", "[X] vs [Y]" → set isMultiStep=true (needs agent reasoning)
 
 Examples:
 
@@ -243,6 +278,32 @@ User: "add 5 red circles"
   "shapeType": "circle",
   "quantity": 5,
   "color": "#EF4444"
+}
+
+User: "create 5 sticky notes which all should be different color"
+{
+  "operation": "CREATE",
+  "objectType": "sticky",
+  "quantity": 5,
+  "color": "random"
+}
+
+User: "create 9 sticky notes with random color and write I love hotdogs in them"
+{
+  "operation": "CREATE",
+  "objectType": "sticky",
+  "quantity": 9,
+  "text": "I love hotdogs",
+  "color": "random"
+}
+
+User: "add 6 circles with different colors"
+{
+  "operation": "CREATE",
+  "objectType": "shape",
+  "shapeType": "circle",
+  "quantity": 6,
+  "color": "random"
 }
 
 User: "create 50 green stars"
@@ -358,7 +419,34 @@ User: "delete all red rectangles"
 {
   "operation": "DELETE",
   "targetFilter": { "type": "shape", "shapeType": "rect", "color": "#EF4444" }
-}`,
+}
+
+User: "create a 2x3 grid of sticky notes for thinking vs critical thinking"
+{
+  "operation": "CREATE",
+  "objectType": "sticky",
+  "quantity": 6,
+  "rows": 2,
+  "columns": 3,
+  "isMultiStep": true
+}
+Note: isMultiStep=true because "for thinking vs critical thinking" requires AI reasoning to generate content.
+
+User: "add sticky notes about marketing strategy"
+{
+  "operation": "CREATE",
+  "objectType": "sticky",
+  "isMultiStep": true
+}
+Note: "about marketing strategy" requires content generation, route to agent.
+
+User: "create 5 sticky notes"
+{
+  "operation": "CREATE",
+  "objectType": "sticky",
+  "quantity": 5
+}
+Note: No topic/content generation needed, can execute directly.`,
 };
 
 /**
@@ -423,8 +511,29 @@ export function executeFromIntent(intent, boardState) {
       // Generate tool calls for creation
       const quantity = intent.quantity || 1;
       
-      // Convert color name to hex
-      const color = intent.color ? colorNameToHex(intent.color) : undefined;
+      // Convert color name to hex (but preserve "random" as-is)
+      const color = intent.color && intent.color !== 'random' ? colorNameToHex(intent.color) : intent.color;
+      
+      // Check if user has a frame selected (for "create X inside this frame")
+      let selectedFrameId = null;
+      if (intent.targetFilter?.useSelection && boardState?.selectedIds && boardState.selectedIds.length > 0) {
+        console.log(`🔍 [Frame Context] Checking selection for frame...`);
+        console.log(`   Selected IDs: ${JSON.stringify(boardState.selectedIds)}`);
+        
+        // Find if any selected object is a frame
+        const selectedFrame = boardState.objects?.find(obj => 
+          boardState.selectedIds.includes(obj.id) && obj.type === 'frame'
+        );
+        if (selectedFrame) {
+          selectedFrameId = selectedFrame.id;
+          console.log(`📦 [Frame Context] Creating objects inside selected frame: ${selectedFrameId}`);
+        } else {
+          console.log(`⚠️  [Frame Context] Selection exists but no frame found`);
+          console.log(`   Selected object types: ${boardState.objects?.filter(o => boardState.selectedIds.includes(o.id)).map(o => o.type).join(', ')}`);
+        }
+      } else {
+        console.log(`ℹ️  [Frame Context] No frame selection detected (useSelection: ${intent.targetFilter?.useSelection}, selectedIds: ${boardState?.selectedIds?.length || 0})`);
+      }
       
       if (intent.objectType === 'shape' && intent.shapeType) {
         // Create shape(s) - single tool call with quantity parameter
@@ -435,6 +544,12 @@ export function executeFromIntent(intent, boardState) {
         // Add color if specified (now converted to hex)
         if (color) {
           args.color = color;
+        }
+        
+        // Add frameId if a frame is selected
+        if (selectedFrameId) {
+          args.frameId = selectedFrameId;
+          console.log(`✅ [Frame Context] Added frameId to createShape: ${selectedFrameId}`);
         }
         
         // Add quantity if > 1
@@ -474,6 +589,12 @@ export function executeFromIntent(intent, boardState) {
           args.color = color;
         }
         
+        // Add frameId if a frame is selected
+        if (selectedFrameId) {
+          args.frameId = selectedFrameId;
+          console.log(`✅ [Frame Context] Added frameId to createStickyNote: ${selectedFrameId}`);
+        }
+        
         // Add quantity if > 1
         if (quantity > 1) {
           args.quantity = quantity;
@@ -499,6 +620,63 @@ export function executeFromIntent(intent, boardState) {
           title: intent.text || 'Frame',
         };
         
+        // If user has objects selected and is creating a frame, wrap the frame around selected objects
+        if (intent.targetFilter?.useSelection && boardState?.selectedIds && boardState.selectedIds.length > 0) {
+          console.log(`📦 [Frame Context] Creating frame around ${boardState.selectedIds.length} selected objects`);
+          console.log(`   Selected IDs: ${JSON.stringify(boardState.selectedIds)}`);
+          
+          // Calculate bounding box of selected objects
+          const selectedObjects = boardState.objects?.filter(obj => 
+            boardState.selectedIds.includes(obj.id)
+          ) || [];
+          
+          if (selectedObjects.length > 0) {
+            // Find min/max coordinates
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            
+            for (const obj of selectedObjects) {
+              if (obj.type === 'line') continue; // Skip lines
+              
+              let objMinX = obj.x;
+              let objMinY = obj.y;
+              let objMaxX = obj.x;
+              let objMaxY = obj.y;
+              
+              if (obj.type === 'circle') {
+                const radius = obj.radius || 50;
+                objMinX = obj.x - radius;
+                objMinY = obj.y - radius;
+                objMaxX = obj.x + radius;
+                objMaxY = obj.y + radius;
+              } else if (obj.type === 'star') {
+                objMaxX = obj.x + (obj.width || 180);
+                objMaxY = obj.y + (obj.height || 180);
+              } else if (obj.width && obj.height) {
+                objMaxX = obj.x + obj.width;
+                objMaxY = obj.y + obj.height;
+              }
+              
+              console.log(`   Object ${obj.id} (${obj.type}): min(${objMinX}, ${objMinY}) max(${objMaxX}, ${objMaxY})`);
+              
+              minX = Math.min(minX, objMinX);
+              minY = Math.min(minY, objMinY);
+              maxX = Math.max(maxX, objMaxX);
+              maxY = Math.max(maxY, objMaxY);
+            }
+            
+            console.log(`   Combined bounds: min(${minX}, ${minY}) max(${maxX}, ${maxY})`);
+            
+            // Add padding
+            const PADDING = 40;
+            args.x = minX - PADDING;
+            args.y = minY - PADDING;
+            args.width = (maxX - minX) + (PADDING * 2);
+            args.height = (maxY - minY) + (PADDING * 2);
+            
+            console.log(`✅ [Frame Context] Frame bounds calculated: (${args.x}, ${args.y}), size: ${args.width}x${args.height}`);
+          }
+        }
+        
         // Add quantity if > 1
         if (quantity > 1) {
           args.quantity = quantity;
@@ -508,8 +686,8 @@ export function executeFromIntent(intent, boardState) {
           if (intent.columns) args.columns = intent.columns;
         }
         
-        // Add coordinates if specified (only for single objects)
-        if (quantity === 1 && intent.coordinates) {
+        // Add coordinates if specified (only for single objects, and not already calculated from selection)
+        if (quantity === 1 && intent.coordinates && !args.x) {
           args.x = intent.coordinates.x;
           args.y = intent.coordinates.y;
         }

@@ -13,10 +13,11 @@ export interface CreateStickyNoteArgs {
   text: string;
   x?: number;
   y?: number;
-  color?: 'yellow' | 'pink' | 'blue' | 'green' | 'orange';
+  color?: 'yellow' | 'pink' | 'blue' | 'green' | 'orange' | 'random';
   quantity?: number; // Optional: create multiple sticky notes
   rows?: number; // Optional: explicit grid rows (e.g., "7x2 grid" = rows:7)
   columns?: number; // Optional: explicit grid columns (e.g., "7x2 grid" = columns:2)
+  frameId?: string; // Optional: ID of frame to create objects inside
 }
 
 export interface CreateTextArgs {
@@ -26,6 +27,7 @@ export interface CreateTextArgs {
   quantity?: number; // Optional: create multiple text objects
   rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)
   columns?: number; // Optional: explicit grid columns (e.g., "4x2 grid" = columns:2)
+  frameId?: string; // Optional: ID of frame to create objects inside
 }
 
 export interface CreateTextBubbleArgs {
@@ -37,6 +39,7 @@ export interface CreateTextBubbleArgs {
   quantity?: number; // Optional: create multiple text bubbles
   rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)
   columns?: number; // Optional: explicit grid columns (e.g., "4x2 grid" = columns:2)
+  frameId?: string; // Optional: ID of frame to create objects inside
 }
 
 export interface CreateShapeArgs {
@@ -50,6 +53,7 @@ export interface CreateShapeArgs {
   quantity?: number; // Optional: create multiple shapes
   rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)
   columns?: number; // Optional: explicit grid columns (e.g., "4x2 grid" = columns:2)
+  frameId?: string; // Optional: ID of frame to create objects inside
 }
 
 export interface CreateFrameArgs {
@@ -226,8 +230,8 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           color: {
             type: 'string',
-            enum: ['yellow', 'pink', 'blue', 'green', 'orange'],
-            description: 'Sticky note color. Defaults to yellow.',
+            enum: ['yellow', 'pink', 'blue', 'green', 'orange', 'random'],
+            description: 'Sticky note color. Use "random" to cycle through all colors when creating multiple notes. Defaults to yellow for single notes.',
           },
           quantity: {
             type: 'number',
@@ -279,7 +283,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           color: {
             type: 'string',
             description:
-              'Fill color as hex string (e.g. "#3B82F6") or color name',
+              'Fill color as hex string (e.g. "#3B82F6"), color name, or "random" to cycle through colors when creating multiple shapes',
           },
           text: {
             type: 'string',

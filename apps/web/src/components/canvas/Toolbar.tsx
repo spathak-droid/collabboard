@@ -20,6 +20,7 @@ import Grid3x3Icon from '@mui/icons-material/Grid3x3';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CropFreeIcon from '@mui/icons-material/CropFree';
 import PanToolIcon from '@mui/icons-material/PanTool';
+import BorderColorIcon from '@mui/icons-material/BorderColor';
 
 interface ToolbarProps {
   onDelete?: () => void;
@@ -62,6 +63,11 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
       id: 'frame' as const,
       label: 'Frame',
       icon: <CropFreeIcon sx={{ fontSize: 20 }} />,
+    },
+    {
+      id: 'draw' as const,
+      label: 'Draw',
+      icon: <BorderColorIcon sx={{ fontSize: 20 }} />,
     },
   ];
 

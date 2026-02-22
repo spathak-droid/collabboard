@@ -59,6 +59,27 @@ export function getObjectBounds(obj: WhiteboardObject): {
     };
   }
 
+  if (obj.type === 'path') {
+    const path = obj as { x: number; y: number; points: number[] };
+    const pts = path.points;
+    if (!pts || pts.length < 2) {
+      return { minX: path.x, minY: path.y, maxX: path.x + 1, maxY: path.y + 1 };
+    }
+    let minX = path.x + pts[0];
+    let minY = path.y + pts[1];
+    let maxX = minX;
+    let maxY = minY;
+    for (let i = 2; i < pts.length; i += 2) {
+      const px = path.x + pts[i];
+      const py = path.y + pts[i + 1];
+      minX = Math.min(minX, px);
+      minY = Math.min(minY, py);
+      maxX = Math.max(maxX, px);
+      maxY = Math.max(maxY, py);
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
   // All other types have width/height
   const width = (obj as any).width || 100;
   const height = (obj as any).height || 100;

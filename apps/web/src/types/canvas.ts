@@ -2,7 +2,7 @@
  * Canvas object types and interfaces
  */
 
-export type ObjectType = 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'text' | 'textBubble' | 'frame';
+export type ObjectType = 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'text' | 'textBubble' | 'frame' | 'path';
 
 export interface BaseObject {
   id: string;
@@ -128,7 +128,15 @@ export interface Frame extends BaseObject {
   isAIContainer?: boolean; // True if AI created this for grouping/organizing objects, false/undefined for user-drawn frames
 }
 
-export type WhiteboardObject = StickyNote | RectShape | CircleShape | TriangleShape | StarShape | LineShape | TextShape | TextBubbleShape | Frame;
+/** Freehand draw path: points are relative to (x, y). */
+export interface PathShape extends BaseObject {
+  type: 'path';
+  points: number[]; // [x1,y1, x2,y2, ...] relative to (x, y)
+  stroke: string;
+  strokeWidth: number;
+}
+
+export type WhiteboardObject = StickyNote | RectShape | CircleShape | TriangleShape | StarShape | LineShape | TextShape | TextBubbleShape | Frame | PathShape;
 
 export interface CanvasState {
   objects: Map<string, WhiteboardObject>;
@@ -165,4 +173,11 @@ export const CURSOR_COLORS = [
   '#FFA07A',
   '#98D8C8',
   '#F7DC6F',
+] as const;
+
+/** Preset colors for the draw (pen) tool. */
+export const DRAW_COLORS = [
+  '#000000', '#6B7280', '#EF4444', '#F97316',
+  '#EAB308', '#10B981', '#3B82F6', '#6366F1',
+  '#A855F7', '#EC4899',
 ] as const;

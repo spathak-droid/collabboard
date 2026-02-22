@@ -9,7 +9,14 @@ import { useCallback, useState } from 'react';
 import ControlCameraIcon from '@mui/icons-material/ControlCamera';
 import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
 
-export const ZoomControl = () => {
+interface ZoomControlProps {
+  /** When provided, "Fit to screen" fits view to content (same as minimap). When omitted, resets to 100% at (0,0). */
+  onFitToContent?: () => void;
+  /** When provided, called after zoom out so the board can recenter on content (e.g. keep content in view). */
+  onZoomOut?: (newScale: number) => void;
+}
+
+export const ZoomControl = ({ onFitToContent, onZoomOut }: ZoomControlProps) => {
   const { scale, setScale, resetView } = useCanvasStore();
   const [showCameraControls, setShowCameraControls] = useState(false);
 
@@ -18,12 +25,18 @@ export const ZoomControl = () => {
   }, [scale, setScale]);
 
   const handleZoomOut = useCallback(() => {
-    setScale(Math.max(0.1, scale / 1.2));
-  }, [scale, setScale]);
+    const newScale = Math.max(0.1, scale / 1.2);
+    setScale(newScale);
+    onZoomOut?.(newScale);
+  }, [scale, setScale, onZoomOut]);
 
   const handleFitToScreen = useCallback(() => {
-    resetView();
-  }, [resetView]);
+    if (onFitToContent) {
+      onFitToContent();
+    } else {
+      resetView();
+    }
+  }, [onFitToContent, resetView]);
 
   const handleCameraControlsClick = useCallback(() => {
     setShowCameraControls(true);
@@ -35,7 +48,8 @@ export const ZoomControl = () => {
 
   const handleZoomTo10 = useCallback(() => {
     setScale(0.1);
-  }, [setScale]);
+    onZoomOut?.(0.1);
+  }, [setScale, onZoomOut]);
 
   return (
     <>

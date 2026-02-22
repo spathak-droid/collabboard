@@ -2,7 +2,7 @@
  * Object bounds utilities — calculate bounding boxes for whiteboard objects
  */
 
-import type { WhiteboardObject, LineShape } from '@/types/canvas';
+import type { WhiteboardObject, LineShape, PathShape } from '@/types/canvas';
 import { resolveLinePoints } from './connectors';
 
 export interface Bounds {
@@ -42,6 +42,38 @@ export const getObjectBounds = (
       minY: Math.min(y1, y2) - pad,
       maxX: Math.max(x1, x2) + pad,
       maxY: Math.max(y1, y2) + pad,
+    };
+  }
+
+  if (obj.type === 'path') {
+    const path = obj as PathShape;
+    const pts = path.points;
+    if (pts.length < 2) {
+      return {
+        minX: path.x - strokePad,
+        minY: path.y - strokePad,
+        maxX: path.x + strokePad,
+        maxY: path.y + strokePad,
+      };
+    }
+    let minX = path.x + pts[0];
+    let minY = path.y + pts[1];
+    let maxX = minX;
+    let maxY = minY;
+    for (let i = 2; i < pts.length; i += 2) {
+      const px = path.x + pts[i];
+      const py = path.y + pts[i + 1];
+      minX = Math.min(minX, px);
+      minY = Math.min(minY, py);
+      maxX = Math.max(maxX, px);
+      maxY = Math.max(maxY, py);
+    }
+    const pad = (path.strokeWidth ?? 2) / 2 + 2;
+    return {
+      minX: minX - pad,
+      minY: minY - pad,
+      maxX: maxX + pad,
+      maxY: maxY + pad,
     };
   }
 

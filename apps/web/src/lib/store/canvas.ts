@@ -19,8 +19,14 @@ export interface CanvasStore {
   resetView: () => void;
   
   // Active tool
-  activeTool: 'select' | 'move' | 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'textBubble' | 'text' | 'frame' | null;
+  activeTool: 'select' | 'move' | 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'textBubble' | 'text' | 'frame' | 'draw' | null;
   setActiveTool: (tool: CanvasStore['activeTool']) => void;
+
+  // Draw tool options (when activeTool === 'draw')
+  drawColor: string;
+  drawSize: number;
+  setDrawColor: (color: string) => void;
+  setDrawSize: (size: number) => void;
 
   // View settings
   gridMode: 'none' | 'line';
@@ -69,6 +75,12 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   // Active tool
   activeTool: 'select',
   setActiveTool: (tool) => set({ activeTool: tool }),
+
+  // Draw tool options
+  drawColor: '#000000',
+  drawSize: 4,
+  setDrawColor: (color) => set({ drawColor: color }),
+  setDrawSize: (size) => set({ drawSize: Math.max(1, Math.min(24, size)) }),
 
   // View settings
   gridMode: 'line',

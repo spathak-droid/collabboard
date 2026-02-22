@@ -2,7 +2,7 @@
  * Auto-fit utilities for canvas zoom and positioning
  */
 
-import type { WhiteboardObject } from '@/types/canvas';
+import type { WhiteboardObject, PathShape } from '@/types/canvas';
 
 interface BoundingBox {
   minX: number;
@@ -50,6 +50,24 @@ export function calculateBoundingBox(objects: WhiteboardObject[]): BoundingBox |
       minY = Math.min(minY, obj.y);
       maxX = Math.max(maxX, obj.x + 100);
       maxY = Math.max(maxY, obj.y + 30);
+    } else if (obj.type === 'path') {
+      const path = obj as PathShape;
+      const pts = path.points;
+      if (pts && pts.length >= 2) {
+        for (let i = 0; i < pts.length; i += 2) {
+          const px = path.x + pts[i];
+          const py = path.y + pts[i + 1];
+          minX = Math.min(minX, px);
+          minY = Math.min(minY, py);
+          maxX = Math.max(maxX, px);
+          maxY = Math.max(maxY, py);
+        }
+      } else {
+        minX = Math.min(minX, obj.x);
+        minY = Math.min(minY, obj.y);
+        maxX = Math.max(maxX, obj.x + 1);
+        maxY = Math.max(maxY, obj.y + 1);
+      }
     } else {
       // For rectangles, sticky notes, text bubbles, frames - all have width/height
       const objWithDimensions = obj as WhiteboardObject & { width: number; height: number };

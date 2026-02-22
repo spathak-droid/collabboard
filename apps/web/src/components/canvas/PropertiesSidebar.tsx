@@ -54,7 +54,8 @@ export const PropertiesSidebar = ({
     obj.type === 'triangle' || 
     obj.type === 'star' || 
     obj.type === 'line' ||
-    obj.type === 'frame'
+    obj.type === 'frame' ||
+    obj.type === 'path'
   ) as { stroke?: string } | undefined;
   const currentStroke = shapeWithStroke?.stroke || '#000000';
   const currentFill = (

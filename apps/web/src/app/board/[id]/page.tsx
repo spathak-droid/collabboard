@@ -19,7 +19,9 @@ import { Line } from '@/components/canvas/objects/Line';
 import { Text } from '@/components/canvas/objects/Text';
 import { TextBubble } from '@/components/canvas/objects/TextBubble';
 import { Frame } from '@/components/canvas/objects/Frame';
+import { Path } from '@/components/canvas/objects/Path';
 import { SelectionArea } from '@/components/canvas/SelectionArea';
+import { DrawOptionsSidebar } from '@/components/canvas/DrawOptionsSidebar';
 import { Cursors } from '@/components/canvas/Cursors';
 import { DisconnectBanner } from '@/components/canvas/DisconnectBanner';
 import { PropertiesSidebar } from '@/components/canvas/PropertiesSidebar';
@@ -37,10 +39,10 @@ import { supabase, updateBoard, fetchBoardMembers, ensureBoardAccess, fetchOnlin
 import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
 import { ConnectionDots } from '@/components/canvas/objects/ConnectionDots';
 import { findNearestAnchor, resolveLinePoints } from '@/lib/utils/connectors';
-import { calculateAutoFit } from '@/lib/utils/autoFit';
+import { calculateAutoFit, calculateBoundingBox } from '@/lib/utils/autoFit';
 import { getVisibleObjects, getViewport, type Viewport } from '@/lib/utils/viewportCulling';
 import { STICKY_COLORS } from '@/types/canvas';
-import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextShape, TextBubbleShape, Frame as FrameType, AnchorPosition } from '@/types/canvas';
+import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextShape, TextBubbleShape, Frame as FrameType, PathShape, AnchorPosition } from '@/types/canvas';
 // Refactored hooks
 import { useObjectBounds } from '@/lib/hooks/useObjectBounds';
 import { useFrameManagement } from '@/lib/hooks/useFrameManagement';
@@ -137,10 +139,12 @@ export default function BoardPage() {
     selectByRect,
   } = useSelection();
 
-  const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode, setScale, setPosition, selectionRect } = useCanvasStore();
+  const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode, setScale, setPosition, selectionRect, drawColor, drawSize } = useCanvasStore();
   const [previewPosition, setPreviewPosition] = useState<{ x: number; y: number } | null>(null);
   const isCreatingFrame = useRef(false);
   const pendingFrameRect = useRef<typeof selectionRect>(null);
+  /** Current freehand path points (canvas coords) while drawing; empty when not drawing */
+  const [currentPathPoints, setCurrentPathPoints] = useState<number[]>([]);
   
   // Selection Area - persistent selection rectangle
   const [selectionArea, setSelectionArea] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -372,6 +376,33 @@ export default function BoardPage() {
       hasAutoFittedRef.current = true;
     }
   }, [objects.length, mounted, setScale, setPosition]);
+
+  /** Fit view to content (same bounds as minimap). Used by "Fit to screen" in zoom bar. */
+  const handleFitToContent = useCallback(() => {
+    const viewport = { width: typeof window !== 'undefined' ? window.innerWidth : 1920, height: typeof window !== 'undefined' ? window.innerHeight : 1080 };
+    const autoFit = calculateAutoFit(objects, viewport.width, viewport.height);
+    if (autoFit && typeof autoFit.scale === 'number' && !isNaN(autoFit.scale) && isFinite(autoFit.scale)) {
+      setScale(autoFit.scale);
+      setPosition(autoFit.position);
+    } else {
+      setScale(0.3);
+      setPosition({ x: 0, y: 0 });
+    }
+  }, [objects, setScale, setPosition]);
+
+  /** After zoom out, recenter view on content so content stays in view (aligned with minimap). */
+  const handleZoomOutCentered = useCallback(
+    (newScale: number) => {
+      const bboxRes = calculateBoundingBox(objects);
+      if (!bboxRes || objects.length === 0) return;
+      const vw = typeof window !== 'undefined' ? window.innerWidth : 1920;
+      const vh = typeof window !== 'undefined' ? window.innerHeight : 1080;
+      const x = vw / 2 - bboxRes.centerX * newScale;
+      const y = vh / 2 - bboxRes.centerY * newScale;
+      setPosition({ x, y });
+    },
+    [objects, setPosition]
+  );
 
   const handleBackToDashboard = () => {
     router.push('/dashboard');
@@ -842,6 +873,7 @@ export default function BoardPage() {
 
   const handleCanvasClick = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (activeTool === 'draw') return;
       const stage = e.target.getStage();
       if (!stage) return;
       
@@ -1003,6 +1035,53 @@ export default function BoardPage() {
       }
     },
     [activeTool, objects.length, objects, objectsMap, user, shapeFillColor, shapeStrokeColor, createObject, getPlacementCoordinates, setActiveTool, deselectAll, getConnectedObjectIds, getObjectBounds, selectObject, selectionArea]
+  );
+
+  // Draw tool: pointer handlers for freehand path
+  const handleStagePointerDown = useCallback(
+    (canvasX: number, canvasY: number) => {
+      setCurrentPathPoints([canvasX, canvasY]);
+    },
+    []
+  );
+  const handleStagePointerMove = useCallback(
+    (canvasX: number, canvasY: number) => {
+      setCurrentPathPoints((prev) => (prev.length >= 2 ? [...prev, canvasX, canvasY] : prev));
+    },
+    []
+  );
+  const handleStagePointerUp = useCallback(
+    (canvasX: number, canvasY: number) => {
+      setCurrentPathPoints((prev) => {
+        const pts = prev.length >= 4 ? [...prev, canvasX, canvasY] : prev;
+        if (pts.length < 4) {
+          return [];
+        }
+        let minX = pts[0];
+        let minY = pts[1];
+        for (let i = 2; i < pts.length; i += 2) {
+          minX = Math.min(minX, pts[i]);
+          minY = Math.min(minY, pts[i + 1]);
+        }
+        const relativePoints = pts.map((v, i) => (i % 2 === 0 ? v - minX : v - minY));
+        const pathObj: PathShape = {
+          id: generateId(),
+          type: 'path',
+          x: minX,
+          y: minY,
+          points: relativePoints,
+          stroke: drawColor,
+          strokeWidth: drawSize,
+          rotation: 0,
+          zIndex: objects.length,
+          createdBy: user?.uid || '',
+          createdAt: Date.now(),
+        };
+        createObject(pathObj);
+        return [];
+      });
+    },
+    [drawColor, drawSize, objects.length, createObject, user?.uid]
   );
 
   // Frame management functions moved to useFrameManagement hook
@@ -1931,7 +2010,7 @@ export default function BoardPage() {
 
       <Toolbar onDelete={handleDelete} selectedCount={selectedIds.length} />
       
-      <ZoomControl />
+      <ZoomControl onFitToContent={handleFitToContent} onZoomOut={handleZoomOutCentered} />
       <Minimap objects={objects} />
 
       {user && (
@@ -1965,8 +2044,13 @@ export default function BoardPage() {
         />
       )}
       
-      {/* Show regular properties sidebar when no selection area */}
-      {!selectionArea && selectedIds.length > 0 && (
+      {/* Draw tool options: color and size when Draw is selected */}
+      {activeTool === 'draw' && (
+        <DrawOptionsSidebar />
+      )}
+
+      {/* Show regular properties sidebar when no selection area (hide when draw tool so DrawOptions shows) */}
+      {!selectionArea && selectedIds.length > 0 && activeTool !== 'draw' && (
         <PropertiesSidebar
           selectedObjects={objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id))}
           onStrokeColorChange={handleShapeStrokeColorChange}
@@ -1987,6 +2071,9 @@ export default function BoardPage() {
         boardId={boardId}
         objects={objects}
         stageRef={stageRef}
+        onStagePointerDown={activeTool === 'draw' ? handleStagePointerDown : undefined}
+        onStagePointerMove={activeTool === 'draw' ? handleStagePointerMove : undefined}
+        onStagePointerUp={activeTool === 'draw' ? handleStagePointerUp : undefined}
         onClick={(e: Konva.KonvaEventObject<MouseEvent>) => {
           if (connectorDrawing.isDrawingLine) {
             const stage = e.target.getStage();
@@ -2097,6 +2184,18 @@ export default function BoardPage() {
         ) : null}
 
         {/* Line tool: no preview — lines are created by dragging from connection dots */}
+
+        {/* Draw tool: live stroke while drawing */}
+        {activeTool === 'draw' && currentPathPoints.length >= 2 ? (
+          <KonvaLine
+            points={currentPathPoints}
+            stroke={drawColor}
+            strokeWidth={drawSize}
+            lineCap="round"
+            lineJoin="round"
+            listening={false}
+          />
+        ) : null}
 
         {/* Selection Area - draggable selection rectangle */}
         {selectionArea && selectedIds.length > 0 && (
@@ -2246,6 +2345,30 @@ export default function BoardPage() {
                 onUpdate={(updates: Partial<LineShape>) => updateObject(obj.id, updates)}
                 onEndpointDrag={connectorDrawing.handleEndpointDrag}
                 onEndpointDragEnd={connectorDrawing.handleEndpointDragEnd}
+              />
+            );
+          }
+
+          if (renderObj.type === 'path') {
+            return (
+              <Path
+                key={obj.id}
+                data={renderShapeObj as PathShape}
+                isSelected={isSelected(obj.id) && !selectionArea}
+                onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
+                  if (e.evt.shiftKey) {
+                    selectObject(obj.id, true);
+                  } else {
+                    selectObject(obj.id, false);
+                  }
+                }}
+                onUpdate={(updates: Partial<PathShape>) => handleShapeUpdateWithClear(obj.id, updates)}
+                onDragMove={(x, y) => handleShapeDragMoveWithBroadcast(obj.id, x, y)}
+                isDraggable={activeTool !== 'move'}
               />
             );
           }

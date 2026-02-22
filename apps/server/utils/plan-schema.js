@@ -124,8 +124,8 @@ export const CREATE_PLAN_TOOL = {
             },
             aspect: {
               type: 'string',
-              enum: ['square', 'wide', 'tall', 'tall_narrow', 'small', 'large'],
-              description: 'Size hint for the layout engine. Default is "square".',
+              enum: ['square', 'wide', 'tall', 'tall_narrow', 'small', 'large', 'tiny', 'flat'],
+              description: 'Size hint. For faces: use "tiny" for eyes and nose, "flat" for mouth. Default "square".',
             },
             x: {
               type: 'number',

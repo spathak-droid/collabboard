@@ -393,5 +393,101 @@ FILES MODIFIED:
 
 
 =================================================================
+TEST CASE 9: Selection area moving all drawn (path) elements
+=================================================================
+
+PROBLEM:
+- User drew something (freehand paths), then created a selection area (marquee) on canvas
+- Expected: Only objects inside the selection rect are selected and move when dragging the selection area
+- Actual: All drawn (path) elements moved when dragging the selection area
+
+ROOT CAUSE:
+- useSelection.ts getObjectBounds had no case for type === 'path'
+- PathShape has no width/height; it was treated as generic object, yielding { x, y, width: undefined, height: undefined }
+- doRectsIntersect(rect, { ..., width: undefined, height: undefined }) produced incorrect results (NaN), so every path was considered to intersect every selection rect
+
+FIX APPLIED:
+- In useSelection.ts selectByRect/getObjectBounds, added a branch for obj.type === 'path'
+- Path bounds are computed from path.points (relative to path.x, path.y): min/max in canvas space, plus stroke padding
+- For paths with < 4 points, use a small box around (path.x, path.y)
+
+TEST PROMPTS:
+1. Draw 2–3 separate strokes, switch to select, drag a marquee around only one stroke, then drag the selection area
+   Expected: Only the stroke inside the marquee moves
+
+2. Draw several strokes, create a selection rect that overlaps only some strokes, drag selection
+   Expected: Only paths that intersect the rect move; others stay put
+
+FILES MODIFIED:
+- apps/web/src/lib/hooks/useSelection.ts (path case in getObjectBounds; PathShape import)
+
+
+=================================================================
+TEST CASE 10: CLEAR CANVAS VIA AI - "Clear canvas" / "Delete everything"
+=================================================================
+
+PROBLEM:
+- User said "clear canvas", "delete everything", "remove all", "clear all", etc.
+- Expected: Entire canvas cleared instantly using Yjs Map.clear() (same as header "Clear canvas" button)
+- Actual: AI could call deleteObject with all IDs (works but slower); no dedicated tool for full clear
+
+ROOT CAUSE:
+- No clearCanvas tool; model was steered to deleteObject with objectIds for all delete intents
+- Executor had a 95% heuristic for deleteObject to use clearObjects(), but agent should explicitly use clear canvas when user asks for it
+- Intent classifier returned UNKNOWN for "clear canvas", so request fell through to mini-agent (MiniDelete) instead of executing clearCanvas
+
+FIX APPLIED:
+- Added clearCanvas tool (no args) on server (ai-tools.js) and web (tools.ts)
+- Server prompt: for "clear canvas", "delete everything", "remove all", "clear all", "wipe the board" use clearCanvas, not deleteObject
+- Executor: case 'clearCanvas' calls ops.clearObjects() (or batch delete if clearObjects unavailable)
+- Server response summary: when tool is clearCanvas, show "I've cleared the canvas."
+- Intent classifier: added CLEAR_CANVAS operation; "clear canvas", "delete everything", "remove all", "clear all", "wipe the board" → operation=CLEAR_CANVAS; executeFromIntent emits one clearCanvas tool call so the intent path runs it directly (no mini-agent).
+
+TEST PROMPTS:
+1. "clear canvas"
+   Expected: All objects removed; response like "I've cleared the canvas."
+
+2. "delete everything"
+   Expected: All objects removed; same behavior as header Clear canvas button
+
+3. "remove all" / "clear all" / "wipe the board"
+   Expected: Full canvas clear using clearCanvas → clearObjects()
+
+FILES MODIFIED:
+- apps/server/utils/ai-tools.js (clearCanvas tool, prompt guidance, deleteObject description)
+- apps/web/src/lib/ai/tools.ts (ToolName, ToolArgs, AI_TOOLS entry for clearCanvas)
+- apps/web/src/lib/ai/executor.ts (case 'clearCanvas' calling ops.clearObjects())
+- apps/server/server.js (summary for CLEAR_CANVAS and clearCanvas in DELETE branch)
+- apps/server/utils/intent-classifier.js (CLEAR_CANVAS in enum and prompt; executeFromIntent case 'CLEAR_CANVAS' → clearCanvas tool call; few-shot example)
+
+
+=================================================================
+TEST CASE 11: PUBLIC BOARDS – OPEN THEN BACK REMOVES/DUPLICATES
+=================================================================
+
+PROBLEM:
+- User opens a board from Public boards, then goes back: board disappeared from Public (moved to Shared).
+- Fix made Public = unlocked only (no access check): board then duplicated in All boards and Public boards.
+
+ROOT CAUSE:
+- Opening any board called ensureBoardAccess(), which added a board_access row, so the board gained "access" and was filtered out of Public (Public required !boardIdsWithAccess.has(id)).
+- Changing Public to "unlocked only" made boards with access appear in both Public and Shared, causing duplicates.
+
+FIX APPLIED:
+- Public boards = non-owned, unlocked, and no explicit access (invite/key). No duplicate: with access → Shared only; no access → Public only.
+- ensureBoardAccess() is only called when the user already has access (hasBoardAccess() first). Viewing a public board does not grant access, so it stays in Public when they go back; when owner locks, it disappears from everywhere for that viewer.
+
+TEST PROMPTS:
+1. As viewer: Dashboard → Public boards → open a public board → go back.
+   Expected: Board still appears in Public boards (no duplicate in All/Public).
+
+2. Owner unlocks board → viewer sees it in Public. Owner locks board → viewer no longer sees it anywhere (not in Public, not in Shared unless they have invite/key).
+
+FILES MODIFIED:
+- apps/web/src/app/dashboard/page.tsx (Public filter: non-owned, !boardIdsWithAccess, unlocked)
+- apps/web/src/lib/hooks/useBoardMetadata.ts (call ensureBoardAccess only when hasBoardAccess is true)
+
+
+=================================================================
 END OF TEST CASES
 =================================================================

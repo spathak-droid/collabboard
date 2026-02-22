@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { supabase, fetchBoardMembers, ensureBoardAccess, fetchOnlineUserUids, type BoardMember } from '@/lib/supabase/client';
+import { supabase, fetchBoardMembers, ensureBoardAccess, hasBoardAccess, fetchOnlineUserUids, type BoardMember } from '@/lib/supabase/client';
 
 /**
  * Hook that manages board metadata (title, owner, members, presence).
@@ -36,8 +36,9 @@ export function useBoardMetadata(boardId: string | undefined, user: { uid: strin
         if (data?.owner_uid) setOwnerUid(data.owner_uid);
       });
 
-    // Register this user as a collaborator, then fetch all known members
-    ensureBoardAccess(boardId, user.uid)
+    // Only ensure board_access for users who already have access (invite/key). Viewing a public board does not grant access, so it stays in Public when they go back; when owner locks, it disappears from everywhere for that viewer.
+    hasBoardAccess(boardId, user.uid)
+      .then((allowed) => (allowed ? ensureBoardAccess(boardId, user.uid) : Promise.resolve()))
       .then(() => fetchBoardMembers(boardId))
       .then((members) => {
         setBoardMembers(members);

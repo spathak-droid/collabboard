@@ -25,11 +25,14 @@ interface CanvasProps {
   onStagePointerUp?: (canvasX: number, canvasY: number) => void;
   onObjectDragStart?: () => void;
   onObjectDragEnd?: () => void;
+  onStageMouseLeave?: (event: Konva.KonvaEventObject<MouseEvent>) => void;
   theme?: 'light' | 'dark';
+  /** Canvas background color (hex). When set, overrides theme background. */
+  backgroundColor?: string;
   stageRef?: React.RefObject<Konva.Stage>;
 }
 
-const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove, onStagePointerDown, onStagePointerMove, onStagePointerUp, onObjectDragStart, onObjectDragEnd, theme = 'light', stageRef: externalStageRef }: CanvasProps) => {
+const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove, onStagePointerDown, onStagePointerMove, onStagePointerUp, onObjectDragStart, onObjectDragEnd, onStageMouseLeave, theme = 'light', backgroundColor, stageRef: externalStageRef }: CanvasProps) => {
   const internalStageRef = useRef<Konva.Stage>(null);
   const stageRef = externalStageRef || internalStageRef;
   const isDrawingRef = useRef(false);
@@ -268,6 +271,15 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
     
     setIsDragging(false);
   }, [isPanning, position, scale, setSelectionRect, onStagePointerUp]);
+
+  const handleMouseLeave = useCallback(
+    (event: Konva.KonvaEventObject<MouseEvent>) => {
+      if (onStageMouseLeave) {
+        onStageMouseLeave(event);
+      }
+    },
+    [onStageMouseLeave]
+  );
   
   // Handle click event
   const handleClick = useCallback(
@@ -348,15 +360,16 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
     };
   }, [stageRef]);
 
-  const backgroundClass = theme === 'dark' ? 'bg-slate-950' : 'bg-gray-50';
+  const backgroundClass = !backgroundColor && (theme === 'dark' ? 'bg-slate-950' : 'bg-gray-50');
+  const backgroundStyle = backgroundColor ? { backgroundColor } : undefined;
 
   if (!isMounted) {
     return (
       <div
         className="w-full h-screen overflow-hidden"
-        style={{ touchAction: 'none', overscrollBehavior: 'none' }}
+        style={{ touchAction: 'none', overscrollBehavior: 'none', ...backgroundStyle }}
       >
-        <div className={backgroundClass} />
+        {!backgroundColor && <div className={backgroundClass || undefined} />}
       </div>
     );
   }
@@ -364,7 +377,7 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
   return (
     <div 
       className="w-full h-screen overflow-hidden"
-      style={{ touchAction: 'none', overscrollBehavior: 'none' }}
+      style={{ touchAction: 'none', overscrollBehavior: 'none', ...backgroundStyle }}
     >
       <Stage
         ref={stageRef}
@@ -376,12 +389,13 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMoveInternal}
         onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
         onClick={handleClick}
         scaleX={scale}
         scaleY={scale}
         x={position.x}
         y={position.y}
-        className={backgroundClass}
+        className={backgroundClass || undefined}
         listening={true}
         perfectDrawEnabled={false}
       >

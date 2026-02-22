@@ -132,7 +132,9 @@ CREATE TABLE boards (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   last_modified TIMESTAMPTZ DEFAULT NOW(),
   thumbnail TEXT,
-  is_public BOOLEAN DEFAULT FALSE
+  is_public BOOLEAN DEFAULT FALSE,
+  is_locked BOOLEAN DEFAULT TRUE,
+  share_key TEXT UNIQUE
 );
 
 -- Board snapshots (Yjs state)
@@ -152,6 +154,10 @@ CREATE TABLE board_access (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (board_id, user_uid)
 );
+
+-- If boards table already exists, add share key and lock columns:
+-- ALTER TABLE boards ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT TRUE;
+-- ALTER TABLE boards ADD COLUMN IF NOT EXISTS share_key TEXT UNIQUE;
 
 -- Enable Row Level Security
 ALTER TABLE boards ENABLE ROW LEVEL SECURITY;

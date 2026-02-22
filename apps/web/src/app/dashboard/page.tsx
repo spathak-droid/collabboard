@@ -16,10 +16,14 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { NewBoardModal } from '@/components/ui/NewBoardModal';
 import { InviteModal } from '@/components/ui/InviteModal';
 import { InviteAppModal } from '@/components/ui/InviteAppModal';
+import { ShareBoardModal } from '@/components/ui/ShareBoardModal';
+import { JoinWithKeyModal } from '@/components/ui/JoinWithKeyModal';
+import { BoardCard, type BoardRow, type CollabInfo } from '@/components/dashboard/BoardCard';
 import {
   ensureUser,
   createBoard as createBoardInDb,
   fetchAllBoards,
+  fetchBoardIdsWithAccess,
   updateBoard as updateBoardInDb,
   deleteBoard as deleteBoardFromDb,
   fetchBoardMembers,
@@ -34,28 +38,8 @@ import { getCachedBoards, setCachedBoards } from '@/lib/utils/boardsCache';
 import { getCachedSnapshot, preloadSnapshots } from '@/lib/utils/snapshotCache';
 import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
 
-type BoardVisibilityFilter = 'all' | 'owned' | 'shared';
 type BoardSort = 'last_modified' | 'created' | 'alphabetical';
-
-type CollabInfo = {
-  uid: string;
-  name: string;
-  color: string;
-  isOnline: boolean; // globally online (heartbeat within 2 min)
-};
-
-type BoardRow = {
-  id: string;
-  title: string;
-  ownerName: string;
-  ownerUid: string;
-  collaborators: CollabInfo[];
-  createdAt: number;
-  lastModified: number;
-  sharedWithMe: boolean;
-  thumbnail?: string;
-  isLocked: boolean;
-};
+type BoardSection = 'all' | 'your' | 'shared' | 'public';
 
 const timeAgo = (timestamp: number): string => {
   const now = Date.now();
@@ -90,7 +74,6 @@ export default function DashboardPage() {
   const { user, loading: authLoading } = useAuth();
   const [mounted, setMounted] = useState(false);
   const [search, setSearch] = useState('');
-  const [visibilityFilter, setVisibilityFilter] = useState<BoardVisibilityFilter>('all');
   const [sortBy, setSortBy] = useState<BoardSort>('last_modified');
   const [boards, setBoards] = useState<BoardWithOwner[]>([]);
   const [boardsLoading, setBoardsLoading] = useState(true);
@@ -98,11 +81,16 @@ export default function DashboardPage() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [boardMembersMap, setBoardMembersMap] = useState<Record<string, BoardMember[]>>({});
+  const [boardIdsWithAccess, setBoardIdsWithAccess] = useState<Set<string>>(new Set());
   const [globalOnlineUids, setGlobalOnlineUids] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
   const [inviteTarget, setInviteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [shareTarget, setShareTarget] = useState<{ id: string; title: string } | null>(null);
+  const [showJoinKeyModal, setShowJoinKeyModal] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showNewBoardModal, setShowNewBoardModal] = useState(false);
+  const [activeSection, setActiveSection] = useState<BoardSection>('your');
+  const refetchBoardsRef = useRef<() => void>(() => {});
   const [openCollaboratorsDropdown, setOpenCollaboratorsDropdown] = useState<string | null>(null);
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number } | null>(null);
   const collaboratorsDropdownRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -219,8 +207,8 @@ export default function DashboardPage() {
 
     const init = async () => {
       try {
-        // Run in parallel — ensureUser and fetchAllBoards are independent
-        const [, data] = await Promise.all([
+        // Run in parallel — ensureUser, fetchAllBoards, and board access list
+        const [, data, accessIds] = await Promise.all([
           ensureUser({
             uid: user.uid,
             email: user.email,
@@ -228,12 +216,14 @@ export default function DashboardPage() {
             photoURL: user.photoURL ?? null,
           }),
           fetchAllBoards(),
+          fetchBoardIdsWithAccess(user.uid),
         ]);
 
         if (!cancelled) {
           setBoards(data);
+          setBoardIdsWithAccess(new Set(accessIds));
           setError(null);
-          
+
           // Cache the fresh data
           setCachedBoards(user.uid, data);
 
@@ -288,16 +278,19 @@ export default function DashboardPage() {
     // Also poll as fallback if Realtime replication is not enabled.
     const refetchBoards = () => {
       if (cancelled || !user) return;
-      fetchAllBoards()
-        .then((data) => {
+      Promise.all([fetchAllBoards(), fetchBoardIdsWithAccess(user.uid)])
+        .then(([data, accessIds]) => {
           if (cancelled) return;
           setBoards(data);
+          setBoardIdsWithAccess(new Set(accessIds));
           setCachedBoards(user.uid, data);
         })
         .catch((err) => {
           console.error('Realtime/polling board refresh failed:', err);
         });
     };
+
+    refetchBoardsRef.current = refetchBoards;
 
     const applyBoardsUpdatePayload = (payload: BoardsChangePayload): boolean => {
       if (payload.eventType !== 'UPDATE' || !payload.new) return false;
@@ -401,7 +394,7 @@ export default function DashboardPage() {
 
   const handleOpenBoard = useCallback(
     (boardId: string, isLocked: boolean, ownerUid: string) => {
-      if (user && isLocked && ownerUid !== user.uid) {
+      if (user && isLocked && ownerUid !== user.uid && !boardIdsWithAccess.has(boardId)) {
         setError('This board is locked by the owner.');
         return;
       }
@@ -425,7 +418,7 @@ export default function DashboardPage() {
         last_modified: new Date().toISOString(),
       }).catch(console.error);
     },
-    [router, user]
+    [router, user, boardIdsWithAccess]
   );
 
   const handleDeleteBoard = useCallback(
@@ -467,10 +460,12 @@ export default function DashboardPage() {
   const allBoards = useMemo<BoardRow[]>(() => {
     const currentUserUid = user?.uid || 'unknown-user';
 
-    // Owners see all their boards; non-owners do not see locked boards
+    // Owners see their boards; non-owners see unlocked boards or boards they joined (via key or invite)
     const visibleBoardsRaw = boards.filter(
       (board) =>
-        board.owner_uid === currentUserUid || !(board.is_locked ?? false)
+        board.owner_uid === currentUserUid ||
+        !(board.is_locked ?? false) ||
+        boardIdsWithAccess.has(board.id)
     );
 
     return visibleBoardsRaw.map((board) => {
@@ -501,30 +496,59 @@ export default function DashboardPage() {
         isLocked: board.is_locked ?? false,
       };
     });
-  }, [boards, user?.uid, boardMembersMap, globalOnlineUids]);
+  }, [boards, user?.uid, boardMembersMap, boardIdsWithAccess, globalOnlineUids]);
 
-  const visibleBoards = useMemo(() => {
-    const filteredByScope = allBoards.filter((board) => {
-      if (visibilityFilter === 'owned') return board.ownerUid === user?.uid;
-      if (visibilityFilter === 'shared') return board.sharedWithMe;
-      return true;
-    });
+  const { yourBoards, sharedBoards, publicBoards } = useMemo(() => {
+    const currentUserUid = user?.uid;
+    const your = allBoards.filter((board) => board.ownerUid === currentUserUid);
+    const shared = allBoards.filter(
+      (board) => board.ownerUid !== currentUserUid && boardIdsWithAccess.has(board.id)
+    );
+    // Public = non-owned, unlocked, no explicit access (invite/key). Viewing a public board does not grant access.
+    const publicB = allBoards.filter(
+      (board) =>
+        board.ownerUid !== currentUserUid &&
+        !boardIdsWithAccess.has(board.id) &&
+        !board.isLocked
+    );
+    return { yourBoards: your, sharedBoards: shared, publicBoards: publicB };
+  }, [allBoards, user?.uid, boardIdsWithAccess]);
 
-    const searchTerm = search.trim().toLowerCase();
-    const filtered = filteredByScope.filter((board) => {
-      if (!searchTerm) return true;
-      return (
-        board.title.toLowerCase().includes(searchTerm) ||
-        board.ownerName.toLowerCase().includes(searchTerm)
-      );
-    });
+  const applySearchAndSort = useCallback(
+    (list: BoardRow[]) => {
+      const searchTerm = search.trim().toLowerCase();
+      const filtered = searchTerm
+        ? list.filter(
+            (board) =>
+              board.title.toLowerCase().includes(searchTerm) ||
+              board.ownerName.toLowerCase().includes(searchTerm)
+          )
+        : list;
+      return [...filtered].sort((left, right) => {
+        if (sortBy === 'alphabetical') return left.title.localeCompare(right.title);
+        if (sortBy === 'created') return right.createdAt - left.createdAt;
+        return right.lastModified - left.lastModified;
+      });
+    },
+    [search, sortBy]
+  );
 
-    return filtered.sort((left, right) => {
-      if (sortBy === 'alphabetical') return left.title.localeCompare(right.title);
-      if (sortBy === 'created') return right.createdAt - left.createdAt;
-      return right.lastModified - left.lastModified;
-    });
-  }, [allBoards, search, sortBy, user?.uid, visibilityFilter]);
+  const visibleYourBoards = useMemo(
+    () => applySearchAndSort(yourBoards),
+    [yourBoards, applySearchAndSort]
+  );
+  const visibleSharedBoards = useMemo(
+    () => applySearchAndSort(sharedBoards),
+    [sharedBoards, applySearchAndSort]
+  );
+  const visiblePublicBoards = useMemo(
+    () => applySearchAndSort(publicBoards),
+    [publicBoards, applySearchAndSort]
+  );
+  const visibleBoards = useMemo(
+    () => [...visibleYourBoards, ...visibleSharedBoards, ...visiblePublicBoards],
+    [visibleYourBoards, visibleSharedBoards, visiblePublicBoards]
+  );
 
   // Preload snapshots for visible boards when they change (filter/search)
   useEffect(() => {
@@ -545,7 +569,7 @@ export default function DashboardPage() {
         <div className="neon-orb bottom-[-5rem] left-[40%] h-72 w-72 bg-emerald-300/35" />
 
         {/* Real Header */}
-        <header className="relative z-20 mx-auto flex w-full max-w-[1200px] items-center justify-between rounded-3xl border border-slate-200/70 bg-white/90 px-6 py-4 shadow-[0_25px_80px_-40px_rgba(15,23,42,0.55)] backdrop-blur-3xl">
+        <header className="relative z-20 mx-auto flex w-full max-w-[1200px] items-center justify-between rounded-3xl border-2 border-slate-200 bg-white px-6 py-4 shadow-[0_8px_30px_-6px_rgba(0,0,0,0.12),0_4px_12px_-4px_rgba(0,0,0,0.08),0_0_0_1px_rgba(0,0,0,0.05)] backdrop-blur-sm">
           <div className="flex items-center gap-3">
             <BrandLogo size="md" showText={false} logoClassName="h-14 w-auto drop-shadow-none" />
             <div>
@@ -581,71 +605,71 @@ export default function DashboardPage() {
 
         {/* Main Content - Only Board Cards Skeleton */}
         <main className="relative z-10 mx-auto w-full max-w-[1200px]">
-          <section className="mt-8 space-y-6 rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-[0_35px_120px_-45px_rgba(15,23,42,0.65)]">
+          <section className="mt-8 space-y-6 rounded-3xl border-2 border-slate-200 bg-white p-6 shadow-[0_8px_40px_-8px_rgba(0,0,0,0.12),0_4px_16px_-4px_rgba(0,0,0,0.08),0_0_0_1px_rgba(0,0,0,0.06)]">
             {/* Real Title and Button */}
-            <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200/70 pb-4">
+            <div className="flex flex-wrap items-end justify-between gap-4 border-b-2 border-slate-200 pb-4">
               <div>
-                <p className="text-3xl font-semibold text-slate-900">Your Boards</p>
+                <p className="text-3xl font-semibold text-slate-900">Boards</p>
                 <p className="mt-1 max-w-xl text-sm text-slate-500">
                   Collaborate, brainstorm, and organize your ideas in real-time.
                 </p>
               </div>
-              <button
-                disabled
-                className="rounded-2xl bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-200 opacity-60 cursor-not-allowed"
-              >
-                + New Board
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  disabled
+                  className="rounded-2xl border border-slate-200/70 bg-white px-4 py-2.5 text-sm font-medium text-slate-400 opacity-60 cursor-not-allowed"
+                >
+                  Join with key
+                </button>
+                <button
+                  disabled
+                  className="rounded-2xl bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-200 opacity-60 cursor-not-allowed"
+                >
+                  + New Board
+                </button>
+              </div>
             </div>
 
-            {/* Real Filters */}
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-wrap gap-3">
                 <div className="flex flex-col gap-1 text-xs text-slate-500">
                   <span className="font-semibold uppercase tracking-[0.3em] text-slate-400">Filter</span>
-                  <select
-                    disabled
-                    className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-cyan-500 focus:bg-white opacity-60 cursor-not-allowed"
-                  >
+                  <select disabled className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-700 opacity-60 cursor-not-allowed">
                     <option value="all">All boards</option>
                   </select>
                 </div>
                 <div className="flex flex-col gap-1 text-xs text-slate-500">
                   <span className="font-semibold uppercase tracking-[0.3em] text-slate-400">Sort</span>
-                  <select
-                    disabled
-                    className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-cyan-500 focus:bg-white opacity-60 cursor-not-allowed"
-                  >
+                  <select disabled className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-700 opacity-60 cursor-not-allowed">
                     <option value="last_modified">Last modified</option>
                   </select>
                 </div>
               </div>
-              <p className="text-xs text-slate-500">
-                Loading boards...
-              </p>
+              <p className="text-xs text-slate-500">Loading boards...</p>
             </div>
 
-            {/* ONLY Board Cards Skeleton */}
-            <div className="flex flex-col gap-4">
-              {Array.from({ length: 3 }).map((_, index) => (
+            <div className="flex flex-wrap gap-2">
+              {['All boards', 'Your boards', 'Shared with me', 'Public boards'].map((label, i) => (
+                <span
+                  key={label}
+                  className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-400 bg-slate-100/80 animate-pulse"
+                >
+                  {label} (—)
+                </span>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+              {Array.from({ length: 8 }).map((_, index) => (
                 <div
                   key={`skeleton-${index}`}
-                  className="flex animate-pulse flex-col gap-4 rounded-[26px] border border-slate-200/70 bg-white/90 p-4 shadow-[0_20px_80px_-40px_rgba(15,23,42,0.45)]"
+                  className="flex animate-pulse flex-col gap-2 rounded-xl border border-slate-200/70 bg-white/90 p-4 shadow-[0_4px_14px_0_rgba(0,0,0,0.08),0_2px_6px_0_rgba(0,0,0,0.04)] aspect-[3/2] min-w-0"
                 >
-                  <div className="flex flex-1 flex-col justify-between gap-3">
-                    <div className="flex flex-col gap-2">
-                      <div className="h-5 w-1/2 rounded-full bg-slate-200/70" />
-                      <div className="h-3 w-1/3 rounded-full bg-slate-200/70" />
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {/* Collaborator avatars skeleton */}
-                      <div className="flex -space-x-1.5">
-                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
-                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
-                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
-                      </div>
-                      <div className="h-3 w-24 rounded-full bg-slate-200/70" />
-                    </div>
+                  <div className="h-4 w-2/3 rounded bg-slate-200/70" />
+                  <div className="h-3 w-1/2 rounded bg-slate-200/70" />
+                  <div className="flex items-center gap-2 mt-1 flex-1">
+                    <div className="h-6 w-6 rounded-full bg-slate-200/70" />
+                    <div className="h-3 w-12 rounded bg-slate-200/70" />
                   </div>
                 </div>
               ))}
@@ -668,7 +692,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <header className="relative z-20 mx-auto flex w-full max-w-[1200px] items-center justify-between rounded-3xl border border-slate-200/70 bg-white/90 px-6 py-4 shadow-[0_25px_80px_-40px_rgba(15,23,42,0.55)] backdrop-blur-3xl">
+      <header className="relative z-20 mx-auto flex w-full max-w-[1200px] items-center justify-between rounded-3xl border-2 border-slate-200 bg-white px-6 py-4 shadow-[0_8px_30px_-6px_rgba(0,0,0,0.12),0_4px_12px_-4px_rgba(0,0,0,0.08),0_0_0_1px_rgba(0,0,0,0.05)] backdrop-blur-sm">
         <div className="flex items-center gap-3">
           <BrandLogo size="md" showText={false} logoClassName="h-14 w-auto drop-shadow-none" />
           <div>
@@ -700,21 +724,29 @@ export default function DashboardPage() {
       </header>
 
       <main className="relative z-10 mx-auto w-full max-w-[1200px]">
-        <section className="mt-8 space-y-6 rounded-3xl border border-slate-200/70 bg-white/90 p-6 shadow-[0_35px_120px_-45px_rgba(15,23,42,0.65)]">
-          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200/70 pb-4">
+        <section className="mt-8 space-y-6 rounded-3xl border-2 border-slate-200 bg-white p-6 shadow-[0_8px_40px_-8px_rgba(0,0,0,0.12),0_4px_16px_-4px_rgba(0,0,0,0.08),0_0_0_1px_rgba(0,0,0,0.06)]">
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b-2 border-slate-200 pb-4">
             <div>
-              <p className="text-3xl font-semibold text-slate-900">Your Boards</p>
+              <p className="text-3xl font-semibold text-slate-900">Boards</p>
               <p className="mt-1 max-w-xl text-sm text-slate-500">
                 Collaborate, brainstorm, and organize your ideas in real-time.
               </p>
             </div>
-            <button
-              onClick={() => setShowNewBoardModal(true)}
-              disabled={creating}
-              className="rounded-2xl bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              + New Board
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setShowJoinKeyModal(true)}
+                className="rounded-2xl border border-slate-200/70 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:border-cyan-300 hover:bg-slate-50"
+              >
+                Join with key
+              </button>
+              <button
+                onClick={() => setShowNewBoardModal(true)}
+                disabled={creating}
+                className="rounded-2xl bg-gradient-to-r from-blue-600 via-cyan-500 to-emerald-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-cyan-200 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                + New Board
+              </button>
+            </div>
           </div>
 
           {error && (
@@ -723,18 +755,19 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-b border-slate-200 pb-4">
             <div className="flex flex-wrap gap-3">
               <div className="flex flex-col gap-1 text-xs text-slate-500">
                 <span className="font-semibold uppercase tracking-[0.3em] text-slate-400">Filter</span>
                 <select
-                  value={visibilityFilter}
-                  onChange={(event) => setVisibilityFilter(event.target.value as BoardVisibilityFilter)}
+                  value={activeSection}
+                  onChange={(event) => setActiveSection(event.target.value as BoardSection)}
                   className="rounded-2xl border border-slate-200/80 bg-slate-50/70 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-cyan-500 focus:bg-white"
                 >
                   <option value="all">All boards</option>
-                  <option value="owned">Owned by me</option>
+                  <option value="your">Your boards</option>
                   <option value="shared">Shared with me</option>
+                  <option value="public">Public boards</option>
                 </select>
               </div>
               <div className="flex flex-col gap-1 text-xs text-slate-500">
@@ -750,210 +783,146 @@ export default function DashboardPage() {
                 </select>
               </div>
             </div>
-            <p className="text-xs text-slate-500">
-              Showing {visibleBoards.length} of {allBoards.length} boards
-            </p>
           </div>
 
-          <div className="flex flex-col gap-4">
+          {/* Tabs: Your boards | Shared with me | Public boards (synced with Filter) */}
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                { id: 'all' as const, label: 'All boards', count: visibleBoards.length },
+                { id: 'your' as const, label: 'Your boards', count: visibleYourBoards.length },
+                { id: 'shared' as const, label: 'Shared with me', count: visibleSharedBoards.length },
+                { id: 'public' as const, label: 'Public boards', count: visiblePublicBoards.length },
+              ] as const
+            ).map(({ id, label, count }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveSection(id)}
+                className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
+                  activeSection === id
+                    ? 'bg-white text-slate-900 shadow-md ring-1 ring-slate-200/80'
+                    : 'text-slate-500 hover:bg-slate-100/80 hover:text-slate-700'
+                }`}
+              >
+                {label} ({count})
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {boardsLoading || membersLoading ? (
-              Array.from({ length: 3 }).map((_, index) => (
+              Array.from({ length: 8 }).map((_, index) => (
                 <div
                   key={`skeleton-${index}`}
-                  className="flex animate-pulse flex-col gap-4 rounded-[26px] border border-slate-200/70 bg-white/90 p-4 shadow-[0_20px_80px_-40px_rgba(15,23,42,0.45)]"
+                  className="flex animate-pulse flex-col gap-2 rounded-xl border border-slate-200/70 bg-white/90 p-4 shadow-[0_4px_14px_0_rgba(0,0,0,0.08),0_2px_6px_0_rgba(0,0,0,0.04)] aspect-[3/2] min-w-0"
                 >
-                  <div className="flex flex-1 flex-col justify-between gap-3">
-                    <div className="flex flex-col gap-2">
-                      <div className="h-5 w-1/2 rounded-full bg-slate-200/70" />
-                      <div className="h-3 w-1/3 rounded-full bg-slate-200/70" />
-                    </div>
-                    <div className="flex items-center gap-3">
-                      {/* Collaborator avatars skeleton */}
-                      <div className="flex -space-x-1.5">
-                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
-                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
-                        <div className="h-7 w-7 rounded-full bg-slate-200/70 border-2 border-white" />
-                      </div>
-                      <div className="h-3 w-24 rounded-full bg-slate-200/70" />
-                    </div>
+                  <div className="h-4 w-2/3 rounded bg-slate-200/70" />
+                  <div className="h-3 w-1/2 rounded bg-slate-200/70" />
+                  <div className="flex items-center gap-2 mt-1 flex-1">
+                    <div className="h-6 w-6 rounded-full bg-slate-200/70" />
+                    <div className="h-3 w-12 rounded bg-slate-200/70" />
                   </div>
                 </div>
               ))
-            ) : visibleBoards.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200/70 bg-slate-50/60 px-4 py-6 text-center text-sm text-slate-500">
-                {boards.length === 0
-                  ? 'No boards yet. Create one to save a snapshot of your canvas.'
-                  : 'No boards match your current filters.'}
+            ) : activeSection === 'all' ? (
+              visibleBoards.length === 0 ? (
+                <div className="col-span-full rounded-xl border border-dashed border-slate-200/70 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-500">
+                  {allBoards.length === 0
+                    ? 'No boards yet. Create one with + New Board or join one with a key.'
+                    : 'No boards match your search.'}
+                </div>
+              ) : (
+                visibleBoards.map((board) => (
+                  <BoardCard
+                    key={board.id}
+                    board={board}
+                    user={user ? { uid: user.uid } : null}
+                    openCollaboratorsDropdown={openCollaboratorsDropdown}
+                    setOpenCollaboratorsDropdown={setOpenCollaboratorsDropdown}
+                    collaboratorsDropdownRefs={collaboratorsDropdownRefs}
+                    dropdownPosition={dropdownPosition}
+                    onOpenBoard={handleOpenBoard}
+                    onShare={() => setShareTarget({ id: board.id, title: board.title })}
+                    onToggleLock={() => handleToggleLock(board.id, board.isLocked)}
+                    onDelete={() => setDeleteTarget({ id: board.id, title: board.title })}
+                    timeAgo={timeAgo}
+                  />
+                ))
+              )
+            ) : activeSection === 'your' ? (
+              visibleYourBoards.length === 0 ? (
+                <div className="col-span-full rounded-xl border border-dashed border-slate-200/70 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-500">
+                  {yourBoards.length === 0
+                    ? 'No boards yet. Create one with + New Board.'
+                    : 'No boards match your search.'}
+                </div>
+              ) : (
+                visibleYourBoards.map((board) => (
+                  <BoardCard
+                    key={board.id}
+                    board={board}
+                    user={user ? { uid: user.uid } : null}
+                    openCollaboratorsDropdown={openCollaboratorsDropdown}
+                    setOpenCollaboratorsDropdown={setOpenCollaboratorsDropdown}
+                    collaboratorsDropdownRefs={collaboratorsDropdownRefs}
+                    dropdownPosition={dropdownPosition}
+                    onOpenBoard={handleOpenBoard}
+                    onShare={() => setShareTarget({ id: board.id, title: board.title })}
+                    onToggleLock={() => handleToggleLock(board.id, board.isLocked)}
+                    onDelete={() => setDeleteTarget({ id: board.id, title: board.title })}
+                    timeAgo={timeAgo}
+                  />
+                ))
+              )
+            ) : activeSection === 'shared' ? (
+              visibleSharedBoards.length === 0 ? (
+                <div className="col-span-full rounded-xl border border-dashed border-slate-200/70 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-500">
+                  {sharedBoards.length === 0
+                    ? 'Boards shared with you (via key or invite) will appear here.'
+                    : 'No boards match your search.'}
+                </div>
+              ) : (
+                visibleSharedBoards.map((board) => (
+                  <BoardCard
+                    key={board.id}
+                    board={board}
+                    user={user ? { uid: user.uid } : null}
+                    openCollaboratorsDropdown={openCollaboratorsDropdown}
+                    setOpenCollaboratorsDropdown={setOpenCollaboratorsDropdown}
+                    collaboratorsDropdownRefs={collaboratorsDropdownRefs}
+                    dropdownPosition={dropdownPosition}
+                    onOpenBoard={handleOpenBoard}
+                    onShare={() => setShareTarget({ id: board.id, title: board.title })}
+                    onToggleLock={() => handleToggleLock(board.id, board.isLocked)}
+                    onDelete={() => setDeleteTarget({ id: board.id, title: board.title })}
+                    timeAgo={timeAgo}
+                  />
+                ))
+              )
+            ) : visiblePublicBoards.length === 0 ? (
+              <div className="col-span-full rounded-xl border border-dashed border-slate-200/70 bg-slate-50/80 px-4 py-6 text-center text-sm text-slate-500">
+                {publicBoards.length === 0
+                  ? 'No public boards right now. Unlocked boards from others will appear here.'
+                  : 'No boards match your search.'}
               </div>
             ) : (
-              visibleBoards.map((board) => {
-                const MAX_AVATARS = 4;
-                const visibleCollabs = board.collaborators.slice(0, MAX_AVATARS);
-                const overflow = board.collaborators.length - MAX_AVATARS;
-
-                return (
-                  <div
-                    key={board.id}
-                    className={`group relative overflow-hidden flex flex-col gap-4 rounded-[26px] border p-4 shadow-[0_20px_80px_-40px_rgba(15,23,42,0.45)] transition hover:shadow-[0_30px_100px_-40px_rgba(15,23,42,0.55)] ${
-                      board.isLocked ? 'border-red-300 bg-slate-200/70' : 'border-slate-200/70 bg-white/90'
-                    }`}
-                  >
-                    <div className="relative z-10 flex flex-1 flex-col justify-between gap-3">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center justify-between gap-3">
-                          <button
-                            onClick={() => handleOpenBoard(board.id, board.isLocked, board.ownerUid)}
-                            className="text-left"
-                          >
-                            <p className="text-lg font-semibold text-slate-900">{board.title}</p>
-                          </button>
-                          <span className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-                            {timeAgo(board.lastModified)}
-                          </span>
-                        </div>
-                        <p className="text-sm text-slate-500">
-                          Owned by {board.ownerName}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="relative"
-                            ref={(el) => {
-                              collaboratorsDropdownRefs.current[board.id] = el;
-                            }}
-                          >
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOpenCollaboratorsDropdown(
-                                  openCollaboratorsDropdown === board.id ? null : board.id
-                                );
-                              }}
-                              className="flex items-center gap-2 transition hover:opacity-80"
-                            >
-                              <div className="flex -space-x-1.5">
-                                {visibleCollabs.map((c, i) => (
-                                  <div
-                                    key={c.uid}
-                                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold text-white shadow-sm"
-                                    style={{
-                                      backgroundColor: c.color,
-                                      zIndex: MAX_AVATARS - i,
-                                    }}
-                                    title={c.name}
-                                  >
-                                    {c.name.charAt(0).toUpperCase()}
-                                  </div>
-                                ))}
-                                {overflow > 0 && (
-                                  <div
-                                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-gray-200 text-[10px] font-semibold text-gray-600 shadow-sm"
-                                    style={{ zIndex: 0 }}
-                                  >
-                                    +{overflow}
-                                  </div>
-                                )}
-                              </div>
-                              <span className="text-[11px] text-slate-500">
-                                {board.collaborators.length} collaborators
-                              </span>
-                            </button>
-                          </div>
-
-                          {/* Collaborators Dropdown */}
-                          {openCollaboratorsDropdown === board.id && dropdownPosition && (
-                            <div
-                              data-collaborators-dropdown
-                              className="fixed z-[100] w-[220px] rounded-xl border border-gray-200 bg-white shadow-xl animate-in fade-in slide-in-from-top-2 duration-150"
-                              style={{
-                                top: `${dropdownPosition.top}px`,
-                                left: `${dropdownPosition.left}px`,
-                              }}
-                            >
-                              <div className="px-3 pb-2 pt-3 text-[10px] font-semibold uppercase tracking-[0.3em] text-gray-400">
-                                Collaborators — {board.collaborators.length}
-                              </div>
-                              <div className="max-h-60 overflow-y-auto">
-                                {board.collaborators.map((c) => (
-                                  <div
-                                    key={c.uid}
-                                    className="flex items-center gap-2 px-3 py-2 transition hover:bg-gray-50"
-                                  >
-                                    <div
-                                      className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-semibold text-white"
-                                      style={{ backgroundColor: c.color }}
-                                    >
-                                      {c.name.charAt(0).toUpperCase()}
-                                    </div>
-                                    <div className="flex flex-col min-w-0">
-                                      <span className="text-sm font-semibold text-slate-700 truncate">
-                                        {c.name}
-                                      </span>
-                                      {c.isOnline && (
-                                        <span className="text-[11px] text-emerald-500">
-                                          Online
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {board.ownerUid === user?.uid ? (
-                            <>
-                              <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleLock(board.id, board.isLocked);
-                              }}
-                              className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:text-slate-800"
-                                aria-label={board.isLocked ? 'Visibility off' : 'Visibility on'}
-                                title={board.isLocked ? 'Visibility off' : 'Visibility on'}
-                            >
-                                {board.isLocked ? (
-                                  <VisibilityOff className="h-4 w-4" />
-                                ) : (
-                                  <Visibility className="h-4 w-4" />
-                                )}
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setDeleteTarget({ id: board.id, title: board.title });
-                                }}
-                                className="flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white text-red-500 transition hover:border-red-300 hover:text-red-600"
-                                aria-label={`Delete ${board.title}`}
-                              >
-                                <svg
-                                  className="h-4 w-4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  viewBox="0 0 24 24"
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    strokeWidth={2}
-                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                  />
-                                </svg>
-                              </button>
-                            </>
-                          ) : (
-                            <span className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-600">
-                              Collab
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
+              visiblePublicBoards.map((board) => (
+                <BoardCard
+                  key={board.id}
+                  board={board}
+                  user={user ? { uid: user.uid } : null}
+                  openCollaboratorsDropdown={openCollaboratorsDropdown}
+                  setOpenCollaboratorsDropdown={setOpenCollaboratorsDropdown}
+                  collaboratorsDropdownRefs={collaboratorsDropdownRefs}
+                  dropdownPosition={dropdownPosition}
+                  onOpenBoard={handleOpenBoard}
+                  onShare={() => setShareTarget({ id: board.id, title: board.title })}
+                  onToggleLock={() => handleToggleLock(board.id, board.isLocked)}
+                  onDelete={() => setDeleteTarget({ id: board.id, title: board.title })}
+                  timeAgo={timeAgo}
+                />
+              ))
             )}
           </div>
         </section>
@@ -998,6 +967,21 @@ export default function DashboardPage() {
         open={showInviteModal}
         inviterName={user?.displayName ?? 'Someone'}
         onClose={() => setShowInviteModal(false)}
+      />
+
+      <ShareBoardModal
+        open={!!shareTarget}
+        boardId={shareTarget?.id ?? ''}
+        boardTitle={shareTarget?.title ?? ''}
+        ownerUid={user?.uid ?? ''}
+        onClose={() => setShareTarget(null)}
+      />
+
+      <JoinWithKeyModal
+        open={showJoinKeyModal}
+        userUid={user?.uid ?? ''}
+        onClose={() => setShowJoinKeyModal(false)}
+        onJoined={() => refetchBoardsRef.current?.()}
       />
     </div>
   );

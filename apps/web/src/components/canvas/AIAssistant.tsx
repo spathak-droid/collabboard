@@ -8,10 +8,12 @@
 
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import type { ChatMessage } from '@/lib/hooks/useAICommands';
+import type { WhiteboardObject } from '@/types/canvas';
+import CenterFocusStrongIcon from '@mui/icons-material/CenterFocusStrong';
 
 // ── Suggested command chips ─────────────────────────────────
 
@@ -32,6 +34,8 @@ interface AIAssistantProps {
   isReconnecting: boolean;
   onSendMessage: (message: string) => void;
   onReconnect: () => void;
+  /** When user clicks "Auto focus" after AI created objects, pan/zoom to them. */
+  onFocusOnCreated?: (createdObjects: WhiteboardObject[]) => void;
 }
 
 // ── Component ───────────────────────────────────────────────
@@ -43,6 +47,7 @@ export const AIAssistant = ({
   isReconnecting,
   onSendMessage,
   onReconnect,
+  onFocusOnCreated,
 }: AIAssistantProps) => {
   const [showChat, setShowChat] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -106,6 +111,25 @@ export const AIAssistant = ({
     },
     [isProcessing, onSendMessage],
   );
+
+  // Only show Auto focus on the latest assistant message that created objects,
+  // and only if the user hasn't sent a new message after it (new chat hides it).
+  const lastAutoFocusMessageId = useMemo(() => {
+    let lastCreationIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === 'assistant' && m.createdObjects?.length) {
+        lastCreationIndex = i;
+        break;
+      }
+    }
+    if (lastCreationIndex === -1) return null;
+    // If any message after that assistant reply is from the user, hide Auto focus.
+    for (let i = lastCreationIndex + 1; i < messages.length; i++) {
+      if (messages[i].role === 'user') return null;
+    }
+    return messages[lastCreationIndex].id;
+  }, [messages]);
 
   return (
     <>
@@ -226,7 +250,12 @@ export const AIAssistant = ({
 
                 {/* Chat messages */}
                 {messages.map((msg) => (
-                  <MessageBubble key={msg.id} message={msg} />
+                  <MessageBubble
+                    key={msg.id}
+                    message={msg}
+                    onFocusOnCreated={onFocusOnCreated}
+                    showAutoFocus={msg.id === lastAutoFocusMessageId}
+                  />
                 ))}
 
                 {/* Processing indicator */}
@@ -313,21 +342,57 @@ export const AIAssistant = ({
   );
 };
 
+// ── Format timestamp for chat ────────────────────────────────
+
+function formatMessageTime(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const isYesterday =
+    new Date(now.getTime() - 86400000).toDateString() === d.toDateString();
+  if (isToday) {
+    return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+  if (isYesterday) {
+    return `Yesterday ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+  }
+  return d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 // ── Message bubble sub-component ────────────────────────────
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({
+  message,
+  onFocusOnCreated,
+  showAutoFocus,
+}: {
+  message: ChatMessage;
+  onFocusOnCreated?: (createdObjects: WhiteboardObject[]) => void;
+  showAutoFocus?: boolean;
+}) {
   const isUser = message.role === 'user';
+  const hasCreatedObjects = !isUser && message.createdObjects && message.createdObjects.length > 0;
+  const showButton = hasCreatedObjects && showAutoFocus && onFocusOnCreated;
+  const timeLabel = formatMessageTime(message.timestamp);
 
   if (isUser) {
     return (
       <motion.div
-        className="flex justify-end"
+        className="flex flex-col items-end"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.2 }}
       >
+        <span className="text-[10px] text-gray-500 mb-0.5 mr-1" title={new Date(message.timestamp).toLocaleString()}>
+          {timeLabel}
+        </span>
         <div className="bg-indigo-600 text-white rounded-xl rounded-tr-sm px-2.5 py-2 max-w-[85%]">
-          <p className="text-xs">{message.content}</p>
+          <p className="text-xs whitespace-pre-line">{message.content}</p>
         </div>
       </motion.div>
     );
@@ -343,10 +408,23 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       <div className="w-6 h-6 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center flex-shrink-0 mt-0.5">
         <AutoAwesomeIcon style={{ fontSize: 12 }} className="text-white" />
       </div>
-      <div className="max-w-[85%] space-y-1">
+      <div className="max-w-[85%] space-y-1 flex-1">
+        <span className="text-[10px] text-gray-500 block mb-0.5" title={new Date(message.timestamp).toLocaleString()}>
+          {timeLabel}
+        </span>
         <div className="bg-gray-100 rounded-xl rounded-tl-sm px-2.5 py-2">
-          <p className="text-xs text-gray-800">{message.content}</p>
+          <p className="text-xs text-gray-800 whitespace-pre-line">{message.content}</p>
         </div>
+        {showButton && (
+          <button
+            type="button"
+            onClick={() => onFocusOnCreated(message.createdObjects!)}
+            className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-green-500 text-white text-[10px] font-medium hover:bg-green-600 transition-colors"
+          >
+            <CenterFocusStrongIcon style={{ fontSize: 14 }} />
+            Auto focus
+          </button>
+        )}
       </div>
     </motion.div>
   );

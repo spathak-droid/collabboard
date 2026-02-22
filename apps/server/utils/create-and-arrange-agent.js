@@ -1,0 +1,207 @@
+/**
+ * Create-and-Arrange Mini-Agent
+ *
+ * Handles "create a RxC grid of sticky notes or shapes (for pros/cons or a topic)" in one shot:
+ * - Sticky notes: pros/cons content or placeholders; colors green/yellow/pink/orange.
+ * - Shapes (rect, circle, star, triangle): topic-based labels (e.g. "student time management").
+ * - Returns a single tool call createStickyNotesInGrid so the client creates and arranges on free canvas space (no frame).
+ */
+
+const GENERATE_STICKIES_SCHEMA = {
+  type: 'function',
+  function: {
+    name: 'generateStickies',
+    description: 'Return an array of sticky note content: { text, color } for each cell. Pros use green/yellow, cons use pink/orange.',
+    parameters: {
+      type: 'object',
+      properties: {
+        stickies: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'Short text for the sticky (one line, few words)' },
+              color: { type: 'string', enum: ['green', 'yellow', 'pink', 'orange'], description: 'green/yellow for pros, pink/orange for cons' },
+            },
+            required: ['text', 'color'],
+          },
+          description: 'One entry per sticky, in grid order (row by row). First half pros, second half cons.',
+        },
+      },
+      required: ['stickies'],
+    },
+  },
+};
+
+const GENERATE_LABELS_SCHEMA = {
+  type: 'function',
+  function: {
+    name: 'generateLabels',
+    description: 'Return an array of short labels for grid cells (e.g. for time management: Morning routine, Study block, ...).',
+    parameters: {
+      type: 'object',
+      properties: {
+        labels: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'One short label per cell, in grid order. 2-5 words each.',
+        },
+      },
+      required: ['labels'],
+    },
+  },
+};
+
+const SHAPE_COLORS = ['#EF4444', '#3B82F6', '#10B981', '#A855F7', '#F97316'];
+
+/**
+ * Run the create-and-arrange agent: generate content then return one tool call.
+ *
+ * @param {object} openai - OpenAI client
+ * @param {object} intent - Classified intent: CREATE_AND_ARRANGE, rows, columns, objectType (sticky|shape), shapeType (rect|circle|star|triangle), prosAndCons, topic
+ * @returns {{ toolCalls: Array<{ name: string, arguments: object }>, summary: string }}
+ */
+export async function executeCreateAndArrangeAgent(openai, intent) {
+  const rows = intent.rows ?? 2;
+  const columns = intent.columns ?? 3;
+  const quantity = intent.quantity ?? rows * columns;
+  const prosAndCons = intent.prosAndCons === true;
+  const topic = (intent.topic || '').trim();
+  const objectType = intent.objectType === 'shape' ? (intent.shapeType || 'rect') : 'sticky';
+  const isShape = objectType !== 'sticky';
+
+  console.log(`📐 Create-and-arrange: ${rows}×${columns} grid, ${quantity} ${objectType}s, prosAndCons=${prosAndCons}, topic="${topic}"`);
+
+  let items;
+
+  if (isShape) {
+    if (topic && quantity > 0) {
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: `You generate short, varied labels for a whiteboard grid. Topic: "${topic}". Each label: 2-5 words, one line. Return exactly ${quantity} labels in order (row by row).` },
+          { role: 'user', content: `Generate ${quantity} labels for a grid about: ${topic}.` },
+        ],
+        tools: [GENERATE_LABELS_SCHEMA],
+        tool_choice: { type: 'function', function: { name: 'generateLabels' } },
+        temperature: 0.5,
+      });
+      const toolCall = response.choices[0]?.message?.tool_calls?.find(tc => tc.function?.name === 'generateLabels');
+      if (toolCall) {
+        try {
+          const parsed = JSON.parse(toolCall.function.arguments);
+          const list = Array.isArray(parsed.labels) ? parsed.labels : [];
+          items = list.slice(0, quantity).map((text, i) => ({
+            text: String(text || '').trim() || `Item ${i + 1}`,
+            color: SHAPE_COLORS[i % SHAPE_COLORS.length],
+          }));
+        } catch (e) {
+          items = makePlaceholderItems(quantity, true);
+        }
+      } else {
+        items = makePlaceholderItems(quantity, true);
+      }
+    } else {
+      items = makePlaceholderItems(quantity, true);
+    }
+  } else {
+    if (prosAndCons && quantity > 0) {
+      const half = Math.ceil(quantity / 2);
+      const systemPrompt = `You generate short, varied sticky note texts for a pros-and-cons grid on a whiteboard.
+- First ${half} stickies are PROS (benefits, advantages). Use color "green" or "yellow" for each.
+- Remaining ${quantity - half} stickies are CONS (drawbacks, challenges). Use color "pink" or "orange" for each.
+- Each text: one short line, few words, no quotes. Be specific and varied.
+- Topic: ${topic || 'general'}. Generate ${quantity} entries in order (pros first, then cons).`;
+
+      const userPrompt = topic
+        ? `Generate ${quantity} pros and cons sticky texts for topic: ${topic}. First ${half} pros (green/yellow), then ${quantity - half} cons (pink/orange).`
+        : `Generate ${quantity} general pros and cons sticky texts. First ${half} pros (green/yellow), then ${quantity - half} cons (pink/orange).`;
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        tools: [GENERATE_STICKIES_SCHEMA],
+        tool_choice: { type: 'function', function: { name: 'generateStickies' } },
+        temperature: 0.6,
+      });
+
+      const toolCall = response.choices[0]?.message?.tool_calls?.find(tc => tc.function?.name === 'generateStickies');
+      if (!toolCall) {
+        items = makePlaceholderStickies(quantity);
+      } else {
+        try {
+          const parsed = JSON.parse(toolCall.function.arguments);
+          const list = Array.isArray(parsed.stickies) ? parsed.stickies : [];
+          if (list.length >= quantity) {
+            items = list.slice(0, quantity).map(s => ({
+              text: String(s.text || '').trim() || 'Note',
+              color: ['green', 'yellow', 'pink', 'orange'].includes(s.color) ? s.color : 'yellow',
+            }));
+          } else {
+            items = makePlaceholderStickies(quantity);
+          }
+        } catch (e) {
+          items = makePlaceholderStickies(quantity);
+        }
+      }
+    } else {
+      items = makePlaceholderStickies(quantity);
+    }
+  }
+
+  const args = {
+    rows,
+    columns,
+    stickies: items,
+  };
+  if (isShape) {
+    args.objectType = objectType;
+    args.shapeType = objectType;
+  }
+
+  const toolCalls = [
+    {
+      id: 'create_and_arrange_0',
+      name: 'createStickyNotesInGrid',
+      arguments: args,
+    },
+  ];
+
+  const typeLabel = isShape ? (objectType === 'rect' ? 'rectangles' : objectType + 's') : 'sticky notes';
+  const summary = prosAndCons && !isShape
+    ? `Created ${quantity} sticky notes for pros and cons in a ${rows}×${columns} grid on the canvas.`
+    : topic && isShape
+      ? `Created ${quantity} ${typeLabel} for ${topic} in a ${rows}×${columns} grid on the canvas.`
+      : `Created ${quantity} ${typeLabel} in a ${rows}×${columns} grid on the canvas.`;
+
+  return { toolCalls, summary };
+}
+
+function makePlaceholderStickies(quantity) {
+  const stickies = [];
+  const half = Math.ceil(quantity / 2);
+  const prosColors = ['green', 'yellow'];
+  const consColors = ['pink', 'orange'];
+  for (let i = 0; i < quantity; i++) {
+    const isPro = i < half;
+    stickies.push({
+      text: isPro ? `Pro ${i + 1}` : `Con ${i - half + 1}`,
+      color: isPro ? prosColors[i % prosColors.length] : consColors[(i - half) % consColors.length],
+    });
+  }
+  return stickies;
+}
+
+function makePlaceholderItems(quantity, isShape) {
+  const items = [];
+  for (let i = 0; i < quantity; i++) {
+    items.push({
+      text: `Item ${i + 1}`,
+      color: isShape ? SHAPE_COLORS[i % SHAPE_COLORS.length] : 'yellow',
+    });
+  }
+  return items;
+}

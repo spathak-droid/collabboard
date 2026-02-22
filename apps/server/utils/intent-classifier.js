@@ -25,8 +25,8 @@ export const INTENT_CLASSIFIER = {
         properties: {
           operation: {
             type: 'string',
-            enum: ['CREATE', 'UPDATE', 'DELETE', 'MOVE', 'RESIZE', 'ROTATE', 'CHANGE_COLOR', 'ARRANGE', 'ANALYZE', 'CONNECT', 'FIT_FRAME_TO_CONTENTS', 'MULTI_STEP', 'CREATIVE', 'CONVERSATION', 'UNKNOWN'],
-            description: 'Primary operation type',
+            enum: ['CREATE', 'CREATE_AND_ARRANGE', 'UPDATE', 'DELETE', 'CLEAR_CANVAS', 'MOVE', 'RESIZE', 'ROTATE', 'CHANGE_COLOR', 'ARRANGE', 'ANALYZE', 'CONNECT', 'FIT_FRAME_TO_CONTENTS', 'MULTI_STEP', 'CREATIVE', 'CONVERSATION', 'UNKNOWN'],
+            description: 'Primary operation type. Use CREATE_AND_ARRANGE when user asks to create a grid of sticky notes (e.g. 2x3) and arrange them in one shot, especially "for pros and cons".',
           },
           objectType: {
             type: 'string',
@@ -115,6 +115,14 @@ export const INTENT_CLASSIFIER = {
             type: 'string',
             description: 'When operation=CREATIVE, a brief description of what the user wants to visually compose (e.g., "kanban board with 3 columns", "multi-story building")',
           },
+          prosAndCons: {
+            type: 'boolean',
+            description: 'When operation=CREATE_AND_ARRANGE: true if user wants pros and cons content on sticky notes (e.g. "for pros and cons", "pros and cons grid")',
+          },
+          topic: {
+            type: 'string',
+            description: 'When operation=CREATE_AND_ARRANGE and prosAndCons: true, the topic for pros/cons (e.g. "remote work", "electric cars"). Empty or generic if not specified.',
+          },
         },
         required: ['operation'],
       },
@@ -197,6 +205,18 @@ When user specifies exact colors for multiple objects:
   * "1 row 5 columns" → rows:1, columns:5, quantity:5
   * "create 8 stars" (no grid) → quantity:8 (no rows/columns, auto-calculated)
 
+- **CREATE_AND_ARRANGE (create + arrange in one shot, no frame):**
+  * Use when user asks to CREATE a grid of sticky notes OR shapes (rectangles, circles, stars, triangles) with explicit rows×columns, arranged on the canvas in one shot.
+  * Set operation=CREATE_AND_ARRANGE, quantity=rows×columns, rows, columns. objectType=sticky for notes; objectType=shape and shapeType=rect|circle|star|triangle for shapes.
+  * For "for pros and cons": prosAndCons=true, topic=user topic or empty. For other purposes (e.g. "for student time management"): prosAndCons=false, topic="student time management" (or the stated purpose).
+  * Examples:
+    - "create a 2x3 grid of sticky notes for pros and cons" → operation=CREATE_AND_ARRANGE, objectType=sticky, quantity=6, rows=2, columns=3, prosAndCons=true, topic=""
+    - "create 2x3 grid of stickies for pros and cons of remote work" → operation=CREATE_AND_ARRANGE, objectType=sticky, quantity=6, rows=2, columns=3, prosAndCons=true, topic="remote work"
+    - "4×2 grid of rectangles for student time management" → operation=CREATE_AND_ARRANGE, objectType=shape, shapeType=rect, quantity=8, rows=4, columns=2, prosAndCons=false, topic="student time management"
+    - "create a 3x2 grid of circles for categories" → operation=CREATE_AND_ARRANGE, objectType=shape, shapeType=circle, quantity=6, rows=3, columns=2, topic="categories"
+    - "make a 2x4 grid of stars" → operation=CREATE_AND_ARRANGE, objectType=shape, shapeType=star, quantity=8, rows=2, columns=4
+  * Do NOT use CREATIVE for these — use CREATE_AND_ARRANGE so they are created and arranged on the canvas without a frame.
+
 **CONVERSATIONAL QUERIES (NOT COMMANDS):**
 - **CONVERSATION**: User is chatting, asking questions, or making conversation (NOT giving whiteboard commands)
   * Greetings: "hello", "hi", "hey", "good morning"
@@ -278,9 +298,15 @@ When user specifies exact colors for multiple objects:
 - **ROTATE**: "rotate", "turn" + angle
   * "rotate 45 degrees" → operation=ROTATE, rotation=45
   
-- **DELETE**: "delete", "remove", "clear"
+- **DELETE**: "delete", "remove", "clear" (for SPECIFIC objects only)
   * "delete all circles" → operation=DELETE, targetFilter={type:'circle'}
   * **"delete these" or "delete this" → operation=DELETE, targetFilter={useSelection:true}**
+  * **"delete the frame"** → operation=DELETE, targetFilter (e.g. useSelection or type:frame)
+  
+- **CLEAR_CANVAS**: Remove ALL objects from the board in one go. Use when user says:
+  * "clear canvas", "clear the canvas", "clear the board", "clear board"
+  * "delete everything", "remove everything", "remove all", "clear all", "wipe the board", "wipe canvas"
+  * **→ operation=CLEAR_CANVAS** (no targetFilter). Do NOT use DELETE for these — use CLEAR_CANVAS.
   
 - **ARRANGE**: "arrange", "organize", "grid", "space"
   * "arrange in grid" → operation=ARRANGE, method="grid"
@@ -305,13 +331,14 @@ When user specifies exact colors for multiple objects:
     - Scenes/compositions: "solar system", "landscape", "classroom", "office layout"
     - Descriptive modifiers that imply composition: "multi-story", "with rooms", "with columns", "with sections", "with stages"
     - Abstract concepts visualized: "project timeline", "user flow", "architecture diagram"
-  * **NOT CREATIVE (these are CREATE):**
+  * **NOT CREATIVE (these are CREATE or multi-step template):**
     - "create a rectangle" → CREATE (literal primitive)
     - "create 5 circles" → CREATE (literal primitives)
     - "create a frame" → CREATE (literal primitive)
     - "create a sticky note" → CREATE (literal primitive)
     - "create a star" → CREATE (literal primitive)
     - "create a red circle" → CREATE (literal primitive with color)
+    - **"retrospective board", "retro board", "set up a board with X columns"** (e.g. "what clients say, do or mean", "start stop continue") → operation=CREATE, isMultiStep=true. These use createRetrospectiveBoard with columns inferred from the user; do NOT use CREATIVE.
   * **CREATIVE examples:**
     - "create a kanban board" → operation=CREATIVE, creativeDescription="kanban board with columns for task management"
     - "create a tall building with multiple stories" → operation=CREATIVE, creativeDescription="tall multi-story building"
@@ -371,9 +398,10 @@ For these operations, classify them but return isMultiStep=true or operation spe
 13. **"write X in Y" = UPDATE operation (modifies existing objects) - ONLY if command does NOT start with create/add/make**
 14. **"write" keyword means UPDATE only when targeting existing objects ("in all X", "in the Y")**
 15. **Content generation detected**: If command has "for [topic]", "about [topic]", "on [topic]", "[X] vs [Y]" → set isMultiStep=true (needs agent reasoning)
-16. **CREATIVE vs CREATE**: If user describes a concept, scene, real-world object, or composition (not a literal whiteboard primitive) → operation=CREATIVE with creativeDescription. If user names a specific primitive (circle, rectangle, sticky note, frame, star, triangle, text) → operation=CREATE.
-17. **CRITICAL - Random/different colors is NEVER multi-step**: "create N objects all random colors", "create N objects with different colors", "create N objects each a different color", "create N objects with varied colors" → operation=CREATE, color="random", isMultiStep=false. This is a SINGLE creation operation. Do NOT set isMultiStep=true. Do NOT split into create + change color. The color variation is handled by the colors array parameter.
-18. **CRITICAL - Specific color groups MUST be parsed exactly**: When user says "create 50 stars, 25 green and 25 white" or "create 10 circles, 5 red and 5 blue", you MUST parse EVERY color group. Extract each (count, color) pair, sum counts for total quantity, and build the colors array by repeating each hex color exactly by its count. NEVER ignore color breakdowns. NEVER return just a single color when multiple groups are specified. This is a SINGLE CREATE operation (isMultiStep=false).
+16. **Retrospective / column board**: Any request for a board with columns or categories (e.g. "retrospective board", "retro board", "board with X and Y columns", "set up a board with what clients say, do or mean", "ideas / concerns / questions") → operation=CREATE, isMultiStep=true. Never CREATIVE — the orchestrator infers column names from context and calls createRetrospectiveBoard.
+17. **CREATIVE vs CREATE**: If user describes a concept, scene, real-world object, or composition (not a literal whiteboard primitive) → operation=CREATIVE with creativeDescription. If user names a specific primitive (circle, rectangle, sticky note, frame, star, triangle, text) → operation=CREATE.
+18. **CRITICAL - Random/different colors is NEVER multi-step**: "create N objects all random colors", "create N objects with different colors", "create N objects each a different color", "create N objects with varied colors" → operation=CREATE, color="random", isMultiStep=false. This is a SINGLE creation operation. Do NOT set isMultiStep=true. Do NOT split into create + change color. The color variation is handled by the colors array parameter.
+19. **CRITICAL - Specific color groups MUST be parsed exactly**: When user says "create 50 stars, 25 green and 25 white" or "create 10 circles, 5 red and 5 blue", you MUST parse EVERY color group. Extract each (count, color) pair, sum counts for total quantity, and build the colors array by repeating each hex color exactly by its count. NEVER ignore color breakdowns. NEVER return just a single color when multiple groups are specified. This is a SINGLE CREATE operation (isMultiStep=false).
 
 Examples:
 
@@ -597,6 +625,11 @@ User: "delete all red rectangles"
   "targetFilter": { "type": "shape", "shapeType": "rect", "color": "#EF4444" }
 }
 
+User: "clear canvas" OR "clear the board" OR "delete everything" OR "remove all" OR "clear all" OR "wipe the board"
+{
+  "operation": "CLEAR_CANVAS"
+}
+
 User: "create a 2x3 grid of sticky notes for thinking vs critical thinking"
 {
   "operation": "CREATE",
@@ -685,6 +718,29 @@ User: "tell me a joke"
 User: "what can you do?"
 {
   "operation": "CONVERSATION"
+}
+
+User: "create a 2x3 grid of sticky notes for pros and cons"
+{
+  "operation": "CREATE_AND_ARRANGE",
+  "objectType": "sticky",
+  "quantity": 6,
+  "rows": 2,
+  "columns": 3,
+  "prosAndCons": true,
+  "topic": ""
+}
+
+User: "create a 4×2 grid of rectangles for student time management"
+{
+  "operation": "CREATE_AND_ARRANGE",
+  "objectType": "shape",
+  "shapeType": "rect",
+  "quantity": 8,
+  "rows": 4,
+  "columns": 2,
+  "prosAndCons": false,
+  "topic": "student time management"
 }
 
 User: "create a kanban board"
@@ -837,6 +893,12 @@ export function executeFromIntent(intent, boardState) {
   // CREATIVE mode - return null to route to creative composer
   if (intent.operation === 'CREATIVE') {
     console.log('🎨 Creative command detected, routing to creative composer');
+    return null;
+  }
+
+  // CREATE_AND_ARRANGE - return null to route to create-and-arrange mini-agent (one-shot create + arrange, no frame)
+  if (intent.operation === 'CREATE_AND_ARRANGE') {
+    console.log('📐 Create-and-arrange detected, routing to create-and-arrange agent');
     return null;
   }
   
@@ -1156,6 +1218,15 @@ export function executeFromIntent(intent, boardState) {
         });
       }
       
+      break;
+    }
+    
+    case 'CLEAR_CANVAS': {
+      toolCalls.push({
+        id: 'clear_0',
+        name: 'clearCanvas',
+        arguments: {},
+      });
       break;
     }
     

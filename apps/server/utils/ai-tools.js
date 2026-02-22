@@ -40,7 +40,8 @@ Shape colors: use hex strings like "#3B82F6" (blue), "#EF4444" (red), "#10B981" 
 ## Manipulation Rules
 - When asked to move objects, use the objectId from the board state (objects array in the JSON).
 - When asked to "move all pink sticky notes", find them in the board state objects array and issue moveObject calls for each.
-- When asked to delete, remove, or clear objects, use deleteObject with the objectId(s). NEVER use moveObject to move objects off-screen — always delete properly.
+- When asked to delete, remove, or clear **specific** objects, use deleteObject with those objectId(s). NEVER use moveObject to move objects off-screen — always delete properly.
+- **Clear entire canvas:** When the user says "clear canvas", "clear the board", "delete everything", "remove all", "clear all", "wipe the board", or wants to remove ALL objects, use the clearCanvas tool (no arguments). Do NOT use deleteObject with a list of all IDs — use clearCanvas for a full clear.
 - **Resize frame to fit contents:** When the user says "resize to fit contents", "fit to contents", "resize frame to fit", "make frame fit the objects", "extend frame to fit", "make frame bigger to fit", or similar, ALWAYS use the fitFrameToContents tool (pass the frame's objectId). This tool automatically calculates the bounding box of all objects inside the frame and resizes it with proper padding. DO NOT manually calculate dimensions with resizeObject.
 - **Selection context:** If the prompt includes "User Selection" with object IDs, the user has those objects selected. Commands like "format them", "space them", "arrange in a grid", "organize these" refer to ONLY those selected objects.
 - **Arrange in grid:** When the user says "arrange in grid", "arrange these in a grid", "organize in a grid", or similar, ALWAYS call the arrangeInGrid tool with the selected object IDs. Do NOT use moveObject for grid layout — use arrangeInGrid.
@@ -246,7 +247,7 @@ export const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'deleteObject',
-      description: 'Permanently remove one or more objects from the whiteboard. Use when the user asks to delete, remove, or clear objects. Pass the object IDs to delete.',
+      description: 'Permanently remove one or more objects from the whiteboard. Use when the user asks to delete or remove SPECIFIC objects. Pass the object IDs to delete. For clearing the ENTIRE canvas use clearCanvas instead.',
       parameters: {
         type: 'object',
         properties: {
@@ -258,6 +259,14 @@ export const AI_TOOLS = [
         },
         required: ['objectIds'],
       },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clearCanvas',
+      description: 'Remove ALL objects from the whiteboard in one action. Use when the user says "clear canvas", "clear the board", "delete everything", "remove all", "clear all", "wipe the board", or similar. Do not use for deleting only some objects — use deleteObject for that.',
+      parameters: { type: 'object', properties: {}, required: [] },
     },
   },
   {

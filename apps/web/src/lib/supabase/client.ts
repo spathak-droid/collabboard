@@ -28,6 +28,7 @@ export interface Board {
   thumbnail?: string;
   is_public: boolean;
   is_locked: boolean;
+  share_key?: string | null;
 }
 
 export interface BoardSnapshot {
@@ -86,7 +87,7 @@ export const createBoard = async (board: {
       owner_uid: board.owner_uid,
       created_at: now,
       last_modified: now,
-      is_locked: false,
+      is_locked: true,
     })
     .select()
     .single();
@@ -129,6 +130,7 @@ export const fetchAllBoards = async (): Promise<BoardWithOwner[]> => {
       thumbnail: row.thumbnail as string | undefined,
       is_public: row.is_public as boolean,
       is_locked: (row.is_locked as boolean) ?? false,
+      share_key: (row.share_key as string | null) ?? null,
       owner_name: users?.display_name ?? null,
       owner_email: users?.email ?? null,
     };
@@ -137,7 +139,7 @@ export const fetchAllBoards = async (): Promise<BoardWithOwner[]> => {
 
 export const updateBoard = async (
   boardId: string,
-  updates: Partial<Pick<Board, 'title' | 'last_modified' | 'thumbnail' | 'is_locked'>>
+  updates: Partial<Pick<Board, 'title' | 'last_modified' | 'thumbnail' | 'is_locked' | 'share_key'>>
 ): Promise<void> => {
   const { data, error } = await supabase
     .from('boards')
@@ -159,6 +161,98 @@ export const updateBoard = async (
     console.error(noRowsError.message, { boardId, updates });
     throw noRowsError;
   }
+};
+
+/** Generate a 12-character alphanumeric share key. */
+function generateShareKey(): string {
+  const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => chars[b % chars.length]).join('');
+}
+
+/**
+ * Fetch board by share_key. Returns null if not found or key is empty.
+ */
+export const getBoardByShareKey = async (shareKey: string): Promise<Board | null> => {
+  const key = shareKey.trim();
+  if (!key) return null;
+  const { data, error } = await supabase
+    .from('boards')
+    .select('*')
+    .eq('share_key', key)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as Board;
+};
+
+/**
+ * Fetch board IDs for which the user has a board_access row (joined via key or invite).
+ */
+export const fetchBoardIdsWithAccess = async (userUid: string): Promise<string[]> => {
+  const { data, error } = await supabase
+    .from('board_access')
+    .select('board_id')
+    .eq('user_uid', userUid);
+  if (error) {
+    console.error('[supabase] fetchBoardIdsWithAccess failed:', error);
+    return [];
+  }
+  return (data ?? []).map((r: { board_id: string }) => r.board_id);
+};
+
+/**
+ * Get or create a share key for a board. Only the owner can generate a key.
+ * Returns the share key or null if not owner or update failed.
+ */
+export const generateOrGetShareKey = async (
+  boardId: string,
+  ownerUid: string
+): Promise<string | null> => {
+  const { data: board, error: fetchErr } = await supabase
+    .from('boards')
+    .select('id, owner_uid, share_key')
+    .eq('id', boardId)
+    .single();
+  if (fetchErr || !board) return null;
+  if ((board.owner_uid as string) !== ownerUid) return null;
+  const existing = board.share_key as string | null | undefined;
+  if (existing && existing.trim()) return existing;
+  const key = generateShareKey();
+  await updateBoard(boardId, { share_key: key });
+  return key;
+};
+
+/**
+ * Join a board using a secret share key. Adds the user to board_access and returns the board id.
+ */
+export const joinBoardWithKey = async (
+  shareKey: string,
+  userUid: string
+): Promise<{ boardId: string; title: string } | null> => {
+  const board = await getBoardByShareKey(shareKey);
+  if (!board) return null;
+  await ensureBoardAccess(board.id, userUid, 'editor');
+  return { boardId: board.id, title: board.title };
+};
+
+/**
+ * Check whether a user has board_access (member) for a board. Owners are not in board_access but have access.
+ */
+export const hasBoardAccess = async (boardId: string, userUid: string): Promise<boolean> => {
+  const { data: board } = await supabase
+    .from('boards')
+    .select('owner_uid')
+    .eq('id', boardId)
+    .single();
+  if (board && (board.owner_uid as string) === userUid) return true;
+  const { data: access } = await supabase
+    .from('board_access')
+    .select('board_id')
+    .eq('board_id', boardId)
+    .eq('user_uid', userUid)
+    .maybeSingle();
+  return !!access;
 };
 
 /**

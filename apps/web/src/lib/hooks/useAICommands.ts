@@ -22,6 +22,8 @@ export interface ChatMessage {
   content: string;
   timestamp: number;
   actionSummary?: string;
+  /** When the assistant created objects, used to show "Auto focus" button. */
+  createdObjects?: WhiteboardObject[];
 }
 
 interface UseAICommandsOptions {
@@ -39,10 +41,12 @@ interface UseAICommandsOptions {
   selectionArea?: { x: number; y: number; width: number; height: number } | null;
   /** Current viewport state for viewport-aware positioning (directions, visible area) */
   viewport?: { position: { x: number; y: number }; scale: number };
+  /** When the AI creates objects, call this to smoothly focus the view on them (pan/zoom). */
+  onFocusOnCreated?: (createdObjects: WhiteboardObject[]) => void;
 }
 
 export function useAICommands(options: UseAICommandsOptions) {
-  const { boardId, createObject, createObjectsBatch, updateObject, deleteObjects, clearObjects, objects, userId, selectedIds = [], selectionArea = null, viewport } =
+  const { boardId, createObject, createObjectsBatch, updateObject, deleteObjects, clearObjects, objects, userId, selectedIds = [], selectionArea = null, viewport, onFocusOnCreated } =
     options;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -83,7 +87,7 @@ export function useAICommands(options: UseAICommandsOptions) {
   selectionAreaRef.current = selectionArea;
   const viewportRef = useRef(viewport);
   viewportRef.current = viewport;
-  
+
   // Track the original message for follow-up calls
   const originalMessageRef = useRef<string>('');
   const boardIdRef = useRef(boardId);
@@ -185,7 +189,7 @@ export function useAICommands(options: UseAICommandsOptions) {
             height: typeof window !== 'undefined' ? window.innerHeight : 1080,
           } : undefined,
         });
-        
+
         // Generate response for this step
         const stepMessage = generateResponse({
           originalMessage: originalMessageRef.current,
@@ -200,14 +204,25 @@ export function useAICommands(options: UseAICommandsOptions) {
           role: 'assistant',
           content: stepMessage,
           timestamp: Date.now(),
+          ...(executionResult.createdObjects?.length ? { createdObjects: executionResult.createdObjects } : {}),
         };
         setMessages((prev) => [...prev, chatMessage]);
-        
+
         return;
       }
-      
-      // Handle completion signal when progress updates were used
+
+      // Handle completion signal when progress updates were used (still show LLM-generated message when present)
       if (data.type === 'complete') {
+        const completeData = data as { assistantMessage?: string };
+        if (completeData.assistantMessage?.trim()) {
+          const assistantMsg: ChatMessage = {
+            id: nextId(),
+            role: 'assistant',
+            content: completeData.assistantMessage,
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+        }
         setIsProcessing(false);
         return;
       }
@@ -259,7 +274,7 @@ export function useAICommands(options: UseAICommandsOptions) {
           });
           actionSummary = executionResult.summary;
           createdIds = executionResult.createdIds;
-          
+
           // Force immediate UI update for modified objects
           // The Yjs observer will fire, but we want to ensure React re-renders immediately
           if (executionResult.modifiedIds && executionResult.modifiedIds.length > 0) {
@@ -303,11 +318,9 @@ export function useAICommands(options: UseAICommandsOptions) {
           return; // Don't show message yet, wait for follow-up response
         }
 
-        // Generate natural language response using the response agent
+        // Use server message when it's an AI-generated friendly reply; otherwise build from execution result
         let finalMessage = assistantMessage;
-        
-        // If the server message is generic or if there were actions, generate a better message
-        if (executionResult && (isGenericMessage(assistantMessage) || actions.length > 0)) {
+        if (executionResult && actions.length > 0 && (isGenericMessage(assistantMessage) || !assistantMessage?.trim())) {
           finalMessage = generateResponse({
             originalMessage: originalMessageRef.current,
             toolCalls: actions,
@@ -322,6 +335,7 @@ export function useAICommands(options: UseAICommandsOptions) {
           content: finalMessage,
           timestamp: Date.now(),
           actionSummary: actionSummary || undefined,
+          ...(executionResult?.createdObjects?.length ? { createdObjects: executionResult.createdObjects } : {}),
         };
 
         setMessages((prev) => [...prev, assistantMsg]);

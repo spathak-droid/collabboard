@@ -36,14 +36,33 @@ import { useSelection } from '@/lib/hooks/useSelection';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { generateId } from '@/lib/utils/geometry';
 import { getUserColor } from '@/lib/utils/colors';
-import { supabase, updateBoard, fetchBoardMembers, ensureBoardAccess, fetchOnlineUserUids, type BoardMember } from '@/lib/supabase/client';
+import { supabase, updateBoard, fetchBoardMembers, ensureBoardAccess, hasBoardAccess, fetchOnlineUserUids, type BoardMember } from '@/lib/supabase/client';
 import { usePresenceHeartbeat } from '@/lib/hooks/usePresenceHeartbeat';
 import { ConnectionDots } from '@/components/canvas/objects/ConnectionDots';
 import { findNearestAnchor, resolveLinePoints } from '@/lib/utils/connectors';
 import { calculateAutoFit, calculateBoundingBox } from '@/lib/utils/autoFit';
 import { getVisibleObjects, getViewport, type Viewport } from '@/lib/utils/viewportCulling';
 import { STICKY_COLORS } from '@/types/canvas';
+import { rafThrottle } from '@/lib/utils/rafThrottle';
 import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextShape, TextBubbleShape, Frame as FrameType, PathShape, EmojiObject, AnchorPosition } from '@/types/canvas';
+
+type CanvasPointerPosition = {
+  x: number;
+  y: number;
+};
+
+/** Light background colors for the canvas (8 options). No blue/indigo to avoid grid line visibility issues. */
+const CANVAS_BACKGROUND_COLORS = [
+  '#ffffff', // white
+  '#f9fafb', // gray-50
+  '#f3f4f6', // gray-100
+  '#f5f5f4', // stone-100
+  '#f1f5f9', // slate-100
+  '#d1fae5', // green-100
+  '#fef3c7', // amber-100
+  '#fce7f3', // pink-100
+];
+
 // Refactored hooks
 import { useObjectBounds } from '@/lib/hooks/useObjectBounds';
 import { useFrameManagement } from '@/lib/hooks/useFrameManagement';
@@ -97,8 +116,11 @@ export default function BoardPage() {
   const [shapeStrokeColor, setShapeStrokeColor] = useState('#000000');
   const [shapeFillColor, setShapeFillColor] = useState('#E5E7EB');
   const [showAllUsers, setShowAllUsers] = useState(false);
+  const [showBackgroundPicker, setShowBackgroundPicker] = useState(false);
+  const [showClearCanvasModal, setShowClearCanvasModal] = useState(false);
   const titleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usersDropdownRef = useRef<HTMLDivElement>(null);
+  const backgroundPickerRef = useRef<HTMLDivElement>(null);
   
   // Check if snapshot was preloaded from dashboard (for instant loading)
   const preloadIndicator = useRef<string | null>(null);
@@ -120,6 +142,8 @@ export default function BoardPage() {
     connectionStatus,
     onlineUsers,
     awareness,
+    canvasBackgroundColor,
+    setCanvasBackgroundColor,
     createObject,
     createObjectsBatch,
     updateObject,
@@ -191,6 +215,15 @@ export default function BoardPage() {
   
   // Selection Area - persistent selection rectangle
   const [selectionArea, setSelectionArea] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  const [canvasPointerCoords, setCanvasPointerCoords] = useState<CanvasPointerPosition | null>(null);
+  const updatePointerCoords = useMemo(
+    () =>
+      rafThrottle((coords: CanvasPointerPosition | null) => {
+        setCanvasPointerCoords(coords);
+      }),
+    []
+  );
 
   const stageRef = useRef<Konva.Stage>(null);
 
@@ -318,7 +351,8 @@ export default function BoardPage() {
     }
   }, [user, authLoading, router]);
 
-  // Enforce lock for non-owners on this board page (initial load + realtime updates)
+  // Enforce lock for non-owners on this board page (initial load + realtime updates).
+  // Users who joined via secret key have board_access and are allowed in.
   useEffect(() => {
     if (!user || !boardId) return;
 
@@ -336,7 +370,8 @@ export default function BoardPage() {
       const isOwnerOfBoard = (data.owner_uid as string) === user.uid;
       const isLocked = !!data.is_locked;
       if (isLocked && !isOwnerOfBoard) {
-        router.replace('/dashboard');
+        const allowed = await hasBoardAccess(boardId, user.uid);
+        if (!cancelled && !allowed) router.replace('/dashboard');
       }
     };
 
@@ -349,12 +384,13 @@ export default function BoardPage() {
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'boards', filter: `id=eq.${boardId}` },
-        (payload) => {
+        async (payload) => {
           const updated = payload.new as { owner_uid?: string; is_locked?: boolean } | null;
           if (!updated) return;
           const isOwnerOfBoard = updated.owner_uid === user.uid;
           if (updated.is_locked && !isOwnerOfBoard) {
-            router.replace('/dashboard');
+            const allowed = await hasBoardAccess(boardId, user.uid);
+            if (!allowed) router.replace('/dashboard');
           }
         }
       )
@@ -385,6 +421,19 @@ export default function BoardPage() {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showAllUsers]);
+
+  // Close background color picker on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (backgroundPickerRef.current && !backgroundPickerRef.current.contains(e.target as Node)) {
+        setShowBackgroundPicker(false);
+      }
+    };
+    if (showBackgroundPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showBackgroundPicker]);
 
   // Frame warning cleanup is handled by useFrameManagement hook
 
@@ -613,6 +662,38 @@ export default function BoardPage() {
     return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
   }, [selectionArea, selectedIds, objects, objectsMap, getObjectBounds]);
 
+  /** Smoothly pan/zoom to focus on objects the AI just created (e.g. after "create a christmas tree"). */
+  const handleFocusOnCreated = useCallback(
+    (createdObjects: WhiteboardObject[]) => {
+      if (createdObjects.length === 0) return;
+      const vw = typeof window !== 'undefined' ? window.innerWidth : 1920;
+      const vh = typeof window !== 'undefined' ? window.innerHeight : 1080;
+      const autoFit = calculateAutoFit(createdObjects, vw, vh, 80);
+      if (!autoFit || !Number.isFinite(autoFit.scale)) return;
+      const targetScale = Math.max(0.1, Math.min(5, autoFit.scale));
+      const targetPosition = autoFit.position;
+      const state = useCanvasStore.getState();
+      const startScale = state.scale;
+      const startPosition = { ...state.position };
+      const durationMs = 350;
+      const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+      const start = performance.now();
+      const tick = (now: number) => {
+        const elapsed = now - start;
+        const t = Math.min(1, elapsed / durationMs);
+        const eased = easeOutCubic(t);
+        setScale(startScale + (targetScale - startScale) * eased);
+        setPosition({
+          x: startPosition.x + (targetPosition.x - startPosition.x) * eased,
+          y: startPosition.y + (targetPosition.y - startPosition.y) * eased,
+        });
+        if (t < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    },
+    [setScale, setPosition]
+  );
+
   const aiCommands = useAICommands({
     boardId,
     createObject,
@@ -625,6 +706,7 @@ export default function BoardPage() {
     selectedIds,
     selectionArea: selectionAreaForAI,
     viewport: { position, scale },
+    onFocusOnCreated: handleFocusOnCreated,
   });
   const frameManagement = useFrameManagement(objects);
   const manipulation = useObjectManipulation(objects, objectsMap, updateObject);
@@ -1294,6 +1376,7 @@ export default function BoardPage() {
       
       const x = (pointerPosition.x - position.x) / scale;
       const y = (pointerPosition.y - position.y) / scale;
+      updatePointerCoords({ x, y });
       
       // Use fast cursor sync if connected, otherwise fall back to Yjs awareness
       if (cursorSyncConnected) {
@@ -1307,8 +1390,12 @@ export default function BoardPage() {
         connectorDrawing.handleDrawingMouseMove(x, y);
       }
     },
-    [position, scale, updateCursor, cursorSyncConnected, sendFastCursor, connectorDrawing, objectsMap, objects]
+    [position, scale, updateCursor, cursorSyncConnected, sendFastCursor, connectorDrawing, objectsMap, objects, updatePointerCoords]
   );
+
+  const handleStageMouseLeave = useCallback(() => {
+    updatePointerCoords(null);
+  }, [updatePointerCoords]);
 
   // Connector drawing functions moved to useConnectorDrawing hook
   // intersectsRect moved to useObjectBounds hook
@@ -1988,80 +2075,137 @@ export default function BoardPage() {
         </div>
         
         <div className="flex items-center gap-3">
-          {/* Collaborator avatars */}
-          <div className="relative" ref={usersDropdownRef}>
+          {canvasPointerCoords && (
+            <div className="pointer-events-none inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/80 px-3 py-1 text-[11px] font-semibold text-gray-700 shadow-lg backdrop-blur">
+              <span className="text-slate-700">Pointer</span>
+              <span className="text-slate-500">
+                x: {canvasPointerCoords.x.toFixed(1)} y: {canvasPointerCoords.y.toFixed(1)}
+              </span>
+            </div>
+          )}
+          {/* Canvas background color */}
+          <div className="relative" ref={backgroundPickerRef}>
             <button
-              onClick={() => setShowAllUsers((prev: boolean) => !prev)}
-              className="flex items-center gap-1.5 px-1.5 py-1 rounded-full bg-gray-100 border border-gray-200 hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-              title="View collaborators"
+              type="button"
+              onClick={() => setShowBackgroundPicker((prev) => !prev)}
+              className="p-1.5 rounded-md transition-colors hover:bg-gray-100 border border-transparent hover:border-gray-200"
+              title="Canvas background"
+              aria-label="Change canvas background color"
             >
-              <div className="flex -space-x-1.5">
-                {visibleCollabs.map((c, i) => (
-                  <div
-                    key={c.uid}
-                    className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-gray-100 shadow-sm relative hover:z-20 hover:scale-110 transition-transform"
-                    style={{
-                      backgroundColor: c.color,
-                      zIndex: MAX_VISIBLE - i,
-                    }}
-                    title={c.name + (c.isYou ? ' (You)' : '')}
-                  >
-                    {c.name.charAt(0).toUpperCase()}
-                  </div>
-                ))}
-
-                {overflowCount > 0 && (
-                  <div
-                    className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 text-[10px] font-bold border-2 border-gray-100 shadow-sm hover:bg-gray-300 transition-colors relative z-0"
-                  >
-                    +{overflowCount}
-                  </div>
-                )}
-              </div>
-              
-              {/* Dropdown chevron icon */}
-              <svg 
-                className="w-3 h-3 text-gray-600 flex-shrink-0" 
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              {/* Colorful swatches icon for background */}
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="none">
+                <rect x="2" y="2" width="7" height="7" rx="1" fill="#dbeafe" stroke="#93c5fd" strokeWidth="0.8" />
+                <rect x="11" y="2" width="7" height="7" rx="1" fill="#fce7f3" stroke="#f9a8d4" strokeWidth="0.8" />
+                <rect x="2" y="11" width="7" height="7" rx="1" fill="#d1fae5" stroke="#6ee7b7" strokeWidth="0.8" />
+                <rect x="11" y="11" width="7" height="7" rx="1" fill="#fef3c7" stroke="#fcd34d" strokeWidth="0.8" />
               </svg>
             </button>
-
-            {/* Dropdown listing all collaborators */}
-            {showAllUsers && (
-              <div className="absolute right-0 top-full mt-1.5 bg-white rounded-lg shadow-xl border border-gray-200 py-2 px-1 min-w-[220px] z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                <div className="px-2.5 pb-1.5 mb-1 border-b border-gray-100 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
-                  Collaborators — {collaborators.length}
+            {showBackgroundPicker && (
+              <div className="absolute right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-200 p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-150 min-w-[280px]">
+                <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide text-center pb-4">
+                  Background
                 </div>
-                <div className="max-h-60 overflow-y-auto">
-                  {collaborators.map((c) => (
-                    <div
-                      key={c.uid}
-                      className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
+                <div className="grid grid-cols-4 gap-6 min-w-[232px]">
+                  {CANVAS_BACKGROUND_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      onClick={() => {
+                        setCanvasBackgroundColor(color);
+                        setShowBackgroundPicker(false);
+                      }}
+                      className="min-w-[40px] min-h-[40px] w-10 h-10 rounded-lg border-2 border-gray-200 hover:border-gray-400 transition-colors shadow-sm flex items-center justify-center box-border shrink-0"
+                      style={{ backgroundColor: color }}
+                      title={color}
+                      aria-label={`Set background to ${color}`}
                     >
-                      <div
-                        className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white"
-                        style={{
-                          backgroundColor: c.color,
-                        }}
-                      >
-                        {c.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs text-gray-800 truncate leading-tight">
-                          {c.name}
-                          {c.isYou && (
-                            <span className="text-gray-400 ml-1 text-[10px]">(You)</span>
-                          )}
+                      {canvasBackgroundColor === color && (
+                        <span className="flex items-center justify-center text-gray-700 pointer-events-none">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
                         </span>
-                      </div>
-                    </div>
+                      )}
+                    </button>
                   ))}
                 </div>
               </div>
+            )}
+          </div>
+          {/* Collaborator avatars */}
+            <div className="relative" ref={usersDropdownRef}>
+              <button
+                onClick={() => setShowAllUsers((prev: boolean) => !prev)}
+              className="flex items-center gap-1.5 px-1.5 py-1 rounded-full bg-gray-100 border border-gray-200 hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                title="View collaborators"
+              >
+                <div className="flex -space-x-1.5">
+                  {visibleCollabs.map((c, i) => (
+                    <div
+                      key={c.uid}
+                      className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white border-2 border-gray-100 shadow-sm relative hover:z-20 hover:scale-110 transition-transform"
+                      style={{
+                        backgroundColor: c.color,
+                        zIndex: MAX_VISIBLE - i,
+                      }}
+                      title={c.name + (c.isYou ? ' (You)' : '')}
+                    >
+                      {c.name.charAt(0).toUpperCase()}
+                    </div>
+                  ))}
+
+                  {overflowCount > 0 && (
+                    <div
+                      className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-gray-700 text-[10px] font-bold border-2 border-gray-100 shadow-sm hover:bg-gray-300 transition-colors relative z-0"
+                    >
+                      +{overflowCount}
+                    </div>
+                  )}
+                </div>
+                
+                {/* Dropdown chevron icon */}
+                <svg 
+                  className="w-3 h-3 text-gray-600 flex-shrink-0" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {/* Dropdown listing all collaborators */}
+              {showAllUsers && (
+                <div className="absolute right-0 top-full mt-1.5 bg-white rounded-lg shadow-xl border border-gray-200 py-2 px-1 min-w-[220px] z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="px-2.5 pb-1.5 mb-1 border-b border-gray-100 text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+                    Collaborators — {collaborators.length}
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {collaborators.map((c) => (
+                      <div
+                        key={c.uid}
+                        className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
+                      >
+                        <div
+                          className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white"
+                          style={{
+                            backgroundColor: c.color,
+                          }}
+                        >
+                          {c.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-xs text-gray-800 truncate leading-tight">
+                            {c.name}
+                            {c.isYou && (
+                              <span className="text-gray-400 ml-1 text-[10px]">(You)</span>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
             )}
           </div>
 
@@ -2069,8 +2213,56 @@ export default function BoardPage() {
           <div className="text-[11px] text-gray-500">
             Objects: <strong>{objects.length}</strong>
           </div>
+          <button
+            type="button"
+            onClick={() => objects.length > 0 && setShowClearCanvasModal(true)}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+            title="Clear canvas"
+            disabled={objects.length === 0}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            Clear canvas
+          </button>
         </div>
       </div>
+
+      {/* Clear canvas confirmation modal */}
+      {showClearCanvasModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50"
+            aria-hidden
+            onClick={() => setShowClearCanvasModal(false)}
+          />
+          <div className="relative bg-white rounded-xl shadow-xl border border-gray-200 p-6 max-w-sm w-full animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Clear canvas?</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              This will remove all objects from the board. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowClearCanvasModal(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  clearObjects();
+                  setShowClearCanvasModal(false);
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
+              >
+                Clear canvas
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Toolbar />
       
@@ -2135,6 +2327,8 @@ export default function BoardPage() {
         boardId={boardId}
         objects={objects}
         stageRef={stageRef}
+        backgroundColor={canvasBackgroundColor ?? undefined}
+        onStageMouseLeave={handleStageMouseLeave}
         onStagePointerDown={activeTool === 'draw' ? handleStagePointerDown : undefined}
         onStagePointerMove={activeTool === 'draw' ? handleStagePointerMove : undefined}
         onStagePointerUp={activeTool === 'draw' ? handleStagePointerUp : undefined}
@@ -2623,6 +2817,7 @@ export default function BoardPage() {
         isReconnecting={aiCommands.isReconnecting}
         onSendMessage={aiCommands.sendCommand}
         onReconnect={aiCommands.reconnect}
+        onFocusOnCreated={handleFocusOnCreated}
       />
     </div>
   );

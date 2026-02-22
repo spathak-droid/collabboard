@@ -38,6 +38,7 @@ import type {
   ChangeColorArgs,
   DeleteObjectArgs,
   ArrangeInGridArgs,
+  CreateStickyNotesInGridArgs,
   AnalyzeObjectsArgs,
   CreateSWOTAnalysisArgs,
   CreateUserJourneyMapArgs,
@@ -348,6 +349,8 @@ export interface ExecuteToolCallsOptions {
 export interface ExecutionResult {
   createdIds: string[];
   modifiedIds: string[];
+  /** Created objects (for focus-on-created). Empty if none created. */
+  createdObjects: WhiteboardObject[];
   summary: string;
 }
 
@@ -1006,11 +1009,12 @@ export function executeToolCalls(
               pos.y += radius;
             }
             
+            const rotation = args.rotation ?? 0;
             const baseFields = {
               id,
               x: pos.x,
               y: pos.y,
-              rotation: 0,
+              rotation,
               zIndex: nextZIndex++,
               createdBy: ops.userId,
               createdAt: currentTime,
@@ -1145,11 +1149,12 @@ export function executeToolCalls(
             }
           }
           
+          const rotation = args.rotation ?? 0;
           const baseFields = {
             id,
             x: pos.x,
             y: pos.y,
-            rotation: 0,
+            rotation,
             zIndex: nextZIndex++,
             createdBy: ops.userId,
             createdAt: Date.now(),
@@ -1692,6 +1697,18 @@ export function executeToolCalls(
         break;
       }
 
+      case 'clearCanvas': {
+        const count = ops.objects.length;
+        if (ops.clearObjects) {
+          ops.clearObjects();
+          descriptions.push(count > 0 ? `Cleared all ${count} objects from the board` : 'Canvas was already empty');
+        } else if (count > 0) {
+          ops.deleteObjects(ops.objects.map((o) => o.id));
+          descriptions.push(`Deleted all ${count} objects`);
+        }
+        break;
+      }
+
       case 'getBoardState': {
         descriptions.push(
           `Read board state (${ops.objects.length} objects)`,
@@ -1712,6 +1729,98 @@ export function executeToolCalls(
         const result = runArrangeInGrid(args.objectIds, ops, options?.selectionArea ?? null, true, args.frameId, args.rows, args.columns);
         modifiedIds.push(...result.modifiedIds);
         descriptions.push(result.summary);
+        break;
+      }
+
+      case 'createStickyNotesInGrid': {
+        const args = call.arguments as CreateStickyNotesInGridArgs;
+        const rows = args.rows ?? 2;
+        const columns = args.columns ?? 3;
+        const rawItems = Array.isArray(args.stickies) ? args.stickies : (args as { items?: Array<{ text?: string; color?: string }> }).items;
+        const items: Array<{ text?: string; color?: string }> = Array.isArray(rawItems) ? rawItems : [];
+        const objectType = (args as CreateStickyNotesInGridArgs).objectType ?? 'sticky';
+        const shapeType = (args as CreateStickyNotesInGridArgs).shapeType ?? 'rect';
+        const count = Math.min(items.length, rows * columns);
+        if (count === 0) break;
+        const isShape = objectType === 'rect' || objectType === 'circle' || objectType === 'triangle' || objectType === 'star';
+        const cellW = isShape ? 150 : 200;
+        const cellH = isShape ? 150 : 200;
+        const GAP = 20;
+        const gridWidth = columns * cellW + (columns - 1) * GAP;
+        const gridHeight = rows * cellH + (rows - 1) * GAP;
+        const vp = options?.viewport
+          ? getViewportCenterPosition(options.viewport as ViewportState)
+          : { x: 200, y: 200 };
+        const gridStartPos = findFreePositionWithBoxes(
+          getPlacementBoxes(),
+          gridWidth,
+          gridHeight,
+          vp.x - gridWidth / 2,
+          vp.y - gridHeight / 2,
+        );
+        const positions = calculateGridPositions(count, cellW, cellH, rows, columns, gridStartPos.x, gridStartPos.y);
+        const currentTime = Date.now();
+        const shapeColorArray = ['#EF4444', '#3B82F6', '#10B981', '#A855F7', '#F97316'];
+        for (let i = 0; i < count; i++) {
+          const id = generateId();
+          const item = items[i];
+          const text = (item?.text ?? '').trim() || (isShape ? `Item ${i + 1}` : 'Note');
+          const color = item?.color;
+          if (isShape) {
+            const width = cellW;
+            const height = cellH;
+            const shapeColor = color ? resolveShapeColor(color) : shapeColorArray[i % shapeColorArray.length];
+            const pos = { ...positions[i] };
+            if (objectType === 'circle') {
+              const radius = Math.round((width + height) / 4);
+              pos.x += radius;
+              pos.y += radius;
+            }
+            const baseFields = {
+              id,
+              x: pos.x,
+              y: pos.y,
+              rotation: 0,
+              zIndex: nextZIndex++,
+              createdBy: ops.userId,
+              createdAt: currentTime,
+            };
+            let createdObj: WhiteboardObject;
+            if (objectType === 'circle') {
+              const radius = Math.round((width + height) / 4);
+              createdObj = { ...baseFields, type: 'circle', radius, fill: shapeColor, stroke: '#000000', strokeWidth: 2, text } as CircleShape;
+            } else if (objectType === 'triangle') {
+              createdObj = { ...baseFields, type: 'triangle', width, height, fill: shapeColor, stroke: '#000000', strokeWidth: 2, text } as TriangleShape;
+            } else if (objectType === 'star') {
+              createdObj = { ...baseFields, type: 'star', width, height, fill: shapeColor, stroke: '#000000', strokeWidth: 2, text } as StarShape;
+            } else {
+              createdObj = { ...baseFields, type: 'rect', width, height, fill: shapeColor, stroke: '#000000', strokeWidth: 2, text } as RectShape;
+            }
+            tempObjects.push(createdObj);
+            objectsToCreate.push(createdObj);
+            createdIds.push(id);
+          } else {
+            const obj: StickyNote = {
+              id,
+              type: 'sticky',
+              x: positions[i].x,
+              y: positions[i].y,
+              width: 200,
+              height: 200,
+              color: resolveStickyColor(color),
+              text,
+              rotation: 0,
+              zIndex: nextZIndex++,
+              createdBy: ops.userId,
+              createdAt: currentTime,
+            };
+            tempObjects.push(obj);
+            objectsToCreate.push(obj);
+            createdIds.push(id);
+          }
+        }
+        const typeLabel = isShape ? (objectType === 'rect' ? 'rectangles' : objectType + 's') : 'sticky notes';
+        descriptions.push(`Created ${count} ${typeLabel} in a ${rows}×${columns} grid on the canvas`);
         break;
       }
 
@@ -2072,22 +2181,37 @@ export function executeToolCalls(
         const gap = 80; // Gap between stages for connector lines
         
         // Calculate total dimensions
-        const totalWidth = orientation === 'horizontal' 
+        const totalWidth = orientation === 'horizontal'
           ? (stageWidth * stages.length) + (gap * (stages.length - 1))
           : stageWidth;
         const totalHeight = orientation === 'vertical'
           ? (stageHeight * stages.length) + (gap * (stages.length - 1))
           : stageHeight;
-        
-        // Determine starting position
-        let startX = args.x ?? Math.random() * 300 + 100;
-        let startY = args.y ?? Math.random() * 300 + 100;
-        
-        // Use viewport center if available and position not specified
-        if (!args.x && !args.y && options?.viewport) {
-          const center = getViewportCenterPosition(options.viewport);
-          startX = center.x - totalWidth / 2;
-          startY = center.y - totalHeight / 2;
+        const framePadding = 40;
+        const boxWidth = totalWidth + framePadding * 2;
+        const boxHeight = totalHeight + framePadding * 2;
+
+        // Determine starting position: use explicit x,y, else find free space (viewport-centered preferred)
+        let startX: number;
+        let startY: number;
+        if (args.x != null && args.y != null) {
+          startX = args.x;
+          startY = args.y;
+        } else {
+          const preferred = options?.viewport
+            ? getViewportCenterPosition(options.viewport)
+            : { x: 200, y: 200 };
+          const preferredStartX = preferred.x - totalWidth / 2;
+          const preferredStartY = preferred.y - totalHeight / 2;
+          const pos = findFreePositionWithBoxes(
+            getPlacementBoxes(),
+            boxWidth,
+            boxHeight,
+            preferredStartX - framePadding,
+            preferredStartY - framePadding,
+          );
+          startX = pos.x + framePadding;
+          startY = pos.y + framePadding;
         }
         
         // Color palette for stages
@@ -2183,7 +2307,6 @@ export function executeToolCalls(
         }
         
         // Add frame around entire journey map
-        const framePadding = 40;
         const frameId = generateId();
         const frameObj: Frame = {
           id: frameId,
@@ -2231,21 +2354,31 @@ export function executeToolCalls(
         // Calculate total dimensions
         const totalWidth = (frameWidth * columns.length) + (frameGap * (columns.length - 1));
         const totalHeight = frameHeight;
-        
-        // Determine starting position
-        let startX = args.x ?? Math.random() * 300 + 100;
-        let startY = args.y ?? Math.random() * 300 + 100;
-        
-        // Use viewport center if available and position not specified
-        if (!args.x && !args.y && options?.viewport) {
-          const center = getViewportCenterPosition(options.viewport);
-          startX = center.x - totalWidth / 2;
-          startY = center.y - totalHeight / 2;
+
+        // Determine starting position: use explicit x,y, else find free space (viewport-centered preferred)
+        let startX: number;
+        let startY: number;
+        if (args.x != null && args.y != null) {
+          startX = args.x;
+          startY = args.y;
+        } else {
+          const preferred = options?.viewport
+            ? getViewportCenterPosition(options.viewport)
+            : { x: 200, y: 200 };
+          const pos = findFreePositionWithBoxes(
+            getPlacementBoxes(),
+            totalWidth,
+            totalHeight,
+            preferred.x - totalWidth / 2,
+            preferred.y - totalHeight / 2,
+          );
+          startX = pos.x;
+          startY = pos.y;
         }
-        
+
         const currentTime = Date.now();
         let totalNotesCreated = 0;
-        
+
         // Use LLM-provided content if available, otherwise use default examples
         const defaultContent: Record<string, string[]> = {
           'What Went Well': [
@@ -2367,21 +2500,31 @@ export function executeToolCalls(
         // Calculate total dimensions (2 columns: Pros and Cons)
         const totalWidth = (frameWidth * 2) + frameGap;
         const totalHeight = frameHeight;
-        
-        // Determine starting position
-        let startX = args.x ?? Math.random() * 300 + 100;
-        let startY = args.y ?? Math.random() * 300 + 100;
-        
-        // Use viewport center if available and position not specified
-        if (!args.x && !args.y && options?.viewport) {
-          const center = getViewportCenterPosition(options.viewport);
-          startX = center.x - totalWidth / 2;
-          startY = center.y - totalHeight / 2;
+
+        // Determine starting position: use explicit x,y, else find free space (viewport-centered preferred)
+        let startX: number;
+        let startY: number;
+        if (args.x != null && args.y != null) {
+          startX = args.x;
+          startY = args.y;
+        } else {
+          const preferred = options?.viewport
+            ? getViewportCenterPosition(options.viewport)
+            : { x: 200, y: 200 };
+          const pos = findFreePositionWithBoxes(
+            getPlacementBoxes(),
+            totalWidth,
+            totalHeight,
+            preferred.x - totalWidth / 2,
+            preferred.y - totalHeight / 2,
+          );
+          startX = pos.x;
+          startY = pos.y;
         }
-        
+
         const currentTime = Date.now();
         let totalNotesCreated = 0;
-        
+
         // Create Pros column
         const prosFrameX = startX;
         const prosFrameY = startY;
@@ -2528,6 +2671,7 @@ export function executeToolCalls(
   return {
     createdIds,
     modifiedIds,
+    createdObjects: objectsToCreate,
     summary:
       descriptions.length > 0
         ? descriptions.join('. ')
@@ -2786,25 +2930,26 @@ function runArrangeInGrid(
   // Priority 2: Selection area
   else if (selectionArea && selectionArea.width > 0 && selectionArea.height > 0) {
     boundingBox = selectionArea;
-  } 
-  // Priority 3: Calculate from objects' current bounds
+  }
+  // Priority 3: No frame and no selection — use a fixed canvas region so the grid is not placed inside
+  // whatever bounds the objects currently have (e.g. when they were created inside a frame).
   else {
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
+    const GAP_FOR_SIZE = 20;
+    let maxW = 0;
+    let maxH = 0;
     for (const obj of objects) {
-      const bounds = getObjectBounds(obj, objectMap);
-      minX = Math.min(minX, bounds.minX);
-      minY = Math.min(minY, bounds.minY);
-      maxX = Math.max(maxX, bounds.maxX);
-      maxY = Math.max(maxY, bounds.maxY);
+      const dim = getObjectVisualDimensions(obj, objectMap);
+      maxW = Math.max(maxW, dim.width);
+      maxH = Math.max(maxH, dim.height);
     }
+    const requiredWidth = columns * Math.max(maxW, 1) + (columns - 1) * GAP_FOR_SIZE;
+    const requiredHeight = rows * Math.max(maxH, 1) + (rows - 1) * GAP_FOR_SIZE;
+    const DEFAULT_CANVAS_ORIGIN = { x: 200, y: 200 };
     boundingBox = {
-      x: minX,
-      y: minY,
-      width: Math.max(maxX - minX, 1),
-      height: Math.max(maxY - minY, 1),
+      x: DEFAULT_CANVAS_ORIGIN.x,
+      y: DEFAULT_CANVAS_ORIGIN.y,
+      width: requiredWidth,
+      height: requiredHeight,
     };
   }
 

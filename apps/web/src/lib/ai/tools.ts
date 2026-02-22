@@ -52,6 +52,7 @@ export interface CreateShapeArgs {
   color?: string;
   colors?: string[]; // Array of hex colors to cycle through when creating multiple objects
   text?: string; // Optional text label to display inside the shape
+  rotation?: number; // Optional: rotation in degrees (e.g. 45 = tilted right)
   quantity?: number; // Optional: create multiple shapes
   rows?: number; // Optional: explicit grid rows (e.g., "4x2 grid" = rows:4)
   columns?: number; // Optional: explicit grid columns (e.g., "4x2 grid" = columns:2)
@@ -112,6 +113,20 @@ export interface ArrangeInGridArgs {
   columns?: number; // Optional: explicit number of columns
 }
 
+/** One-shot create + arrange on canvas (no frame). Used by create-and-arrange mini-agent. */
+export interface CreateStickyNotesInGridArgs {
+  rows: number;
+  columns: number;
+  /** 'sticky' | shape type. When rect/circle/triangle/star, creates shapes with optional text. */
+  objectType?: 'sticky' | 'rect' | 'circle' | 'triangle' | 'star';
+  /** For shapes, same as objectType; kept for server payload clarity. */
+  shapeType?: 'rect' | 'circle' | 'triangle' | 'star';
+  /** Content per cell: text + color (sticky: name or hex; shape: hex or name). */
+  stickies?: Array<{ text: string; color?: string }>;
+  /** Alias for stickies when creating shapes. */
+  items?: Array<{ text: string; color?: string }>;
+}
+
 export interface AnalyzeObjectsArgs {
   objectIds?: string[];
 }
@@ -170,9 +185,11 @@ export type ToolName =
   | 'updateText'
   | 'changeColor'
   | 'deleteObject'
+  | 'clearCanvas'
   | 'getBoardState'
   | 'arrangeInGrid'
   | 'arrangeInGridAndResize'
+  | 'createStickyNotesInGrid'
   | 'fitFrameToContents'
   | 'analyzeObjects'
   | 'createSWOTAnalysis'
@@ -192,7 +209,9 @@ export type ToolArgs =
   | UpdateTextArgs
   | ChangeColorArgs
   | DeleteObjectArgs
+  | Record<string, never> // clearCanvas (no args)
   | ArrangeInGridArgs
+  | CreateStickyNotesInGridArgs
   | FitFrameToContentsArgs
   | AnalyzeObjectsArgs
   | CreateSWOTAnalysisArgs
@@ -498,6 +517,15 @@ export const AI_TOOLS: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'clearCanvas',
+      description:
+        'Remove ALL objects from the whiteboard in one action. Use when the user says "clear canvas", "clear the board", "delete everything", "remove all", "clear all", "wipe the board", or similar. Do not use for deleting only some objects — use deleteObject for that.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'getBoardState',
       description:
         'Retrieve the current state of all objects on the whiteboard. Use this when you need to know what already exists before making changes (e.g. "move all pink sticky notes", "resize the frame").',
@@ -680,14 +708,14 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'createRetrospectiveBoard',
       description:
-        'Create a complete retrospective board with frames and sticky notes in ONE call. Creates vertical columns (frames) with sticky notes inside each. Default: 3 columns ("What Went Well", "What Didn\'t", "Action Items") with 3 sticky notes per column. You should generate appropriate example content for each note based on the column type.',
+        'Create a column-based board in ONE call (frames + sticky notes). Works for ANY user phrasing: infer column names and count from whatever they say (e.g. "say do mean", "start stop continue", "ideas concerns questions", "what we heard / what it means / what we\'ll do"). Default if no columns given: ["What Went Well", "What Didn\'t", "Action Items"]. Always generate noteContents that fit each column\'s meaning in context.',
       parameters: {
         type: 'object',
         properties: {
           columns: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Array of column names (default: ["What Went Well", "What Didn\'t", "Action Items"])',
+            description: 'Column titles inferred from the user message. Parse from any phrasing (2, 3, 4, or more columns).',
           },
           notesPerColumn: {
             type: 'number',

@@ -26,6 +26,10 @@ const ASPECT_MULTIPLIERS = {
   tall_narrow: { w: 0.5, h: 2 },
   small: { w: 0.6, h: 0.6 },
   large: { w: 1.5, h: 1.5 },
+  /** For nose, small details — ~50×50 so they don't dominate the face */
+  tiny: { w: 0.33, h: 0.33 },
+  /** For mouth only — short bar that fits inside head circle (~60×22) */
+  flat: { w: 0.4, h: 0.15 },
 };
 
 const GAP = 20;
@@ -447,6 +451,7 @@ function emitNode(node, x, y, allocWidth, allocHeight, toolCalls, idMap, genId, 
         color: resolveShapeColor(node.color),
         ...(node.text ? { text: node.text } : {}),
         ...(frameInfo ? { frameId: frameInfo.id } : {}),
+        ...(node.rotation != null ? { rotation: node.rotation } : {}),
       };
       
       // Only add x,y if explicitly requested or inside a frame

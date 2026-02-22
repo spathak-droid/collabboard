@@ -26,6 +26,7 @@ import { createGeminiClient } from './utils/gemini-adapter.js';
 import { routeCommand, executeSingleAgent, executeMiniAgent, classifyUserIntent, executeFromIntent, needsComplexSupervisor, executeComplexSupervisor } from './utils/command-router.js';
 import { detectMiniAgent } from './utils/mini-agents.js';
 import { executeCreativeComposer } from './utils/creative-composer.js';
+import { executeCreateAndArrangeAgent } from './utils/create-and-arrange-agent.js';
 
 dotenv.config();
 
@@ -329,6 +330,45 @@ function executeAnalyzeObjectsServerSide(objectIds, boardState) {
     countByColor,
     countByTypeAndColor,
   };
+}
+
+/**
+ * Generate a short, natural-language reply to show the user after an action.
+ * Uses the LLM so responses feel conversational instead of templated.
+ * Retries once on failure for reliability (e.g. creative composer, pros/cons, etc.).
+ */
+async function generateFriendlyReply(openai, userMessage, actionSummary) {
+  if (!actionSummary || typeof actionSummary !== 'string') return null;
+  const payload = {
+    model: 'gpt-4o-mini',
+    messages: [
+      {
+        role: 'system',
+        content: `You are a friendly whiteboard assistant. The user gave a command and we executed it. Reply in ONE short sentence (first person, conversational). Be natural and specific. Do not repeat the user's words verbatim. Do not say "Here's what I did" or list bullet points. Examples:
+- User: "clear the canvas" / Action: cleared the canvas → "All done! The canvas is clear."
+- User: "move all sticky notes to the right" / Action: moved 2 objects right → "I've moved both sticky notes to the right."
+- User: "create a 2x3 grid of sticky notes for pros and cons" / Action: composed pros and cons board → "I've set up a 2×3 grid of sticky notes for pros and cons."
+- User: "create 5 stars" / Action: created 5 stars → "I've added 5 stars to the board."
+Reply with only that one sentence, nothing else.`,
+      },
+      {
+        role: 'user',
+        content: `User said: "${userMessage}"\n\nWhat we did: ${actionSummary}\n\nReply in one short sentence:`,
+      },
+    ],
+    temperature: 0.6,
+    max_tokens: 80,
+  };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await openai.chat.completions.create(payload);
+      const text = response.choices?.[0]?.message?.content?.trim();
+      if (text) return text;
+    } catch (err) {
+      console.error(`generateFriendlyReply attempt ${attempt + 1} error:`, err?.message || err);
+    }
+  }
+  return null;
 }
 
 /**
@@ -702,6 +742,26 @@ async function handleAIMessage(ws, data) {
                 progressSent: false,
               };
             }
+          } else if (intent && intent.operation === 'CREATE_AND_ARRANGE') {
+            // Create-and-arrange mini-agent: one-shot create + arrange on canvas (no frame)
+            console.log('📐 Create-and-arrange command detected, routing to Create-and-Arrange Agent');
+            try {
+              const agentResult = await executeCreateAndArrangeAgent(openai, intent);
+              result = {
+                toolCalls: agentResult.toolCalls || [],
+                summary: agentResult.summary || "I've created and arranged the sticky notes in a grid.",
+                needsFollowUp: false,
+                progressSent: false,
+              };
+            } catch (arrangeError) {
+              console.error('Create-and-arrange agent failed:', arrangeError);
+              result = {
+                toolCalls: [],
+                summary: `Create and arrange failed: ${arrangeError.message}`,
+                needsFollowUp: false,
+                progressSent: false,
+              };
+            }
           } else if (intent && !intent.isMultiStep && intent.operation !== 'CONVERSATION') {
             // Execute directly from intent (bypass all agents!)
             let toolCalls = executeFromIntent(intent, { objects: boardState?.objects || [], selectedIds });
@@ -789,11 +849,18 @@ async function handleAIMessage(ws, data) {
                 // Color change summary
                 const count = toolCalls.length;
                 summary = `I've changed the color of ${count} object${count !== 1 ? 's' : ''}`;
+              } else if (intent.operation === 'CLEAR_CANVAS') {
+                summary = "I've cleared the canvas.";
               } else if (intent.operation === 'DELETE') {
-                // Delete summary
-                const deleteCall = toolCalls.find(tc => tc.name === 'deleteObject');
-                const count = deleteCall?.arguments?.objectIds?.length || 0;
-                summary = `I've deleted ${count} object${count !== 1 ? 's' : ''}`;
+                // Delete summary (clearCanvas or deleteObject)
+                const clearCall = toolCalls.find(tc => tc.name === 'clearCanvas');
+                if (clearCall) {
+                  summary = "I've cleared the canvas.";
+                } else {
+                  const deleteCall = toolCalls.find(tc => tc.name === 'deleteObject');
+                  const count = deleteCall?.arguments?.objectIds?.length || 0;
+                  summary = `I've deleted ${count} object${count !== 1 ? 's' : ''}`;
+                }
               } else if (intent.operation === 'MOVE') {
                 // Move summary
                 const count = toolCalls.length;
@@ -1021,37 +1088,46 @@ Current board context: ${boardState?.objects?.length || 0} objects on the board.
       }
     }
 
+    // Always generate an LLM reply when we have a summary (so user sees natural language, not templates)
+    const hasSummary = !!(result.summary || result.supervisorPlan?.summary);
+    let llmReply = null;
+    if (hasSummary) {
+      const summaryForLlm = result.summary || result.supervisorPlan?.summary || '';
+      llmReply = await generateFriendlyReply(openai, message, summaryForLlm);
+    }
+
     // Send final response only if we didn't send progress updates
-    // (if progress was sent, each step already got its own message)
     if (!result.progressSent) {
+      const assistantMessage = llmReply || result.summary || result.supervisorPlan?.summary || "I've completed the tasks";
       const response = {
         type: 'result',
         actions: result.toolCalls || [],
-        assistantMessage: result.summary || result.supervisorPlan?.summary || "I've completed the tasks",
+        assistantMessage,
         requiresFollowUp: result.needsFollowUp || false,
         remainingTasks: result.remainingTasks || null,
         supervisorPlan: result.supervisorPlan || null,
       };
-      
+
       // DEBUG: Log color changes being sent to client
       const colorChanges = response.actions.filter(a => a.name === 'changeColor');
       if (colorChanges.length > 0) {
         console.log('[SERVER SEND] changeColor actions:', JSON.stringify(colorChanges, null, 2));
       }
-      
-      // DEBUG: Log createShape with colors being sent to client
+
       const createShapes = response.actions.filter(a => a.name === 'createShape');
       for (const cs of createShapes) {
         const a = cs.arguments || {};
         console.log(`[SERVER SEND] createShape: type=${a.type}, qty=${a.quantity}, color=${a.color}, colorsLen=${a.colors?.length}`);
       }
-      
+
       ws.send(JSON.stringify(response));
     } else {
-      // Progress updates were sent, just send completion signal
+      // Progress updates were sent — still send an LLM-generated closing message so the user sees natural language
+      const assistantMessage = llmReply || result.summary || result.supervisorPlan?.summary || 'All set!';
       ws.send(JSON.stringify({
         type: 'complete',
         message: 'All tasks completed',
+        assistantMessage,
       }));
     }
   } catch (err) {

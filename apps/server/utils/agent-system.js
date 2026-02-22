@@ -161,20 +161,20 @@ export const CREATE_AGENT = {
       type: 'function',
       function: {
         name: 'createRetrospectiveBoard',
-        description: 'Create a complete retrospective board in ONE call (frames + sticky notes)',
+        description: 'Create a column-based board in ONE call (frames + sticky notes). Works for any user phrasing: infer column names and count from whatever they say; generate noteContents that fit each column\'s meaning.',
         parameters: {
           type: 'object',
           properties: {
             columns: {
               type: 'array',
               items: { type: 'string' },
-              description: 'Column names (default: ["What Went Well", "What Didn\'t", "Action Items"])',
+              description: 'Column titles parsed from the user message (any number of columns). Default if none: ["What Went Well", "What Didn\'t", "Action Items"]',
             },
             notesPerColumn: { type: 'number', description: 'Notes per column (default 3)' },
             noteContents: {
               type: 'array',
               items: { type: 'array', items: { type: 'string' } },
-              description: 'Generate example content for each note based on column type. 2D array: [[col1_note1, col1_note2, col1_note3], [col2_note1, col2_note2, col2_note3], ...]',
+              description: '2D array: one array per column, with sticky note text that fits that column\'s meaning. Generate from context.',
             },
             x: { type: 'number' },
             y: { type: 'number' },
@@ -310,15 +310,16 @@ export const CREATE_AGENT = {
   * **The stages should tell a logical progression or flow related to the user's topic**
   * **DO NOT create text/sticky notes with the prompt itself - generate the actual stages!**
   * Example: createUserJourneyMap({stages: ["Stage1", "Stage2", "Stage3", ...]})
-- Retrospective Board: Call createRetrospectiveBoard() - creates 3 frames + 9 sticky notes in ONE call
-  * DO NOT call createFrame 3 times + createStickyNote 9 times - use createRetrospectiveBoard instead!
-  * Default: 3 columns ("What Went Well", "What Didn't", "Action Items") with 3 notes each
-  * **CRITICAL: Generate appropriate example content for each note based on the column type**
-  * Examples of content:
-    - "What Went Well": ["Team collaboration", "Met deadlines", "Good code quality"]
-    - "What Didn't": ["Communication issues", "Technical debt", "Missed edge cases"]
-    - "Action Items": ["Improve stand-ups", "Add more tests", "Refactor module X"]
-  * Example: createRetrospectiveBoard({columns: ["What Went Well", "What Didn't", "Action Items"], noteContents: [["Team collaboration", "Met deadlines", "Good code quality"], ["Communication issues", "Technical debt", "Missed edge cases"], ["Improve stand-ups", "Add more tests", "Refactor module X"]]})
+- Retrospective Board (or any "board with columns"): Call createRetrospectiveBoard() - creates N frames + sticky notes in ONE call
+  * DO NOT call createFrame N times + createStickyNote M times - use createRetrospectiveBoard instead!
+  * **Works in ANY case**: Whatever the user says (any phrasing, any domain), parse column names from their words. "Say / do / mean" → 3 columns. "Start, stop, continue" → 3 columns. "Ideas / Concerns / Questions" → 3 columns. "What we heard / What it means / What we'll do" → 3 columns. If they name 2, 4, or 5 categories, use that many columns. Default if no columns given: ["What Went Well", "What Didn't", "Action Items"].
+  * **Determine how many columns** by counting the distinct column ideas in the user message. Default 3 notes per column unless user says otherwise.
+  * **CRITICAL: Generate example content that fits each column's meaning** - think about what each column title implies and write sticky note text that belongs there. This works for any context (customers, sprints, feedback, teaching, etc.).
+  * Examples (same logic for any other phrasing):
+    - "What Went Well / What Didn't / Action Items" → columns + noteContents for team retro
+    - "what clients say, do or mean" → ["What clients say", "What clients do", "What clients mean"] + content that fits (quotes, actions, emotions)
+    - "ideas, concerns, questions" → 3 columns with content for each
+  * Example: createRetrospectiveBoard({columns: [...parsed from user], notesPerColumn: 3, noteContents: [[...], [...], ...]})
 - Pros and Cons Board: Call createProsConsBoard() - creates 2 frames + 6 sticky notes in ONE call
   * **CRITICAL: YOU MUST generate contextually appropriate pros and cons based on the topic**
   * Analyze the user's topic and think about realistic pros and cons
@@ -970,9 +971,9 @@ Rules:
 6. **For templates (SWOT, User Journey Map, Retrospective Board)**: 
    - SWOT Analysis: CreateAgent task should say "Create SWOT analysis using createSWOTAnalysis tool"
    - User Journey Map: CreateAgent task should say "Create [topic] journey map with [N] stages: [stage names] using createUserJourneyMap tool"
-   - Retrospective Board: CreateAgent task should say "Create retrospective board using createRetrospectiveBoard tool"
+   - Retrospective Board: In ALL cases where the user asks for a board with columns (any names, any phrasing), output ONE task that lists the parsed column names: "Create retrospective board with columns: [list every column name you inferred] using createRetrospectiveBoard tool. Generate 3 sticky notes per column with example content appropriate to each column." If they did not name columns, use: "Create retrospective board using createRetrospectiveBoard tool."
    - **KEYWORDS THAT TRIGGER JOURNEY MAP**: "journey map", "stage map", "process map", "stages for", "steps for", "phases for", "map for", "map on", "stages on"
-   - **KEYWORDS THAT TRIGGER RETRO**: "retrospective", "retro board", "retro", "sprint retrospective"
+   - **KEYWORDS THAT TRIGGER RETRO**: "retrospective", "retro board", "retro", "sprint retrospective", "board with columns", "set up a board with", "board with X and Y columns", any request for a board with named columns/categories
    - **Pattern recognition**: "X stages for/on Y" OR "X stage map for/on Y" → Use createUserJourneyMap tool
    - DO NOT break these into multiple tasks - they are single tool calls
    - DO NOT create text/sticky notes with the prompt text - generate the actual stages!
@@ -982,6 +983,8 @@ Rules:
      * "3 stage map on how to study for exams" → ONE task: "Create study process journey with 3 stages: Preparation, Active Study, Review using createUserJourneyMap tool"
      * "5 stages for plant growth" → ONE task: "Create plant growth journey with 5 stages: Seed, Germination, Seedling, Vegetative, Flowering using createUserJourneyMap tool"
      * "set up retrospective board" → ONE task: "Create retrospective board using createRetrospectiveBoard tool"
+     * "retrospective board with what clients say, do or mean columns" → ONE task: "Create retrospective board with columns: What clients say, What clients do, What clients mean using createRetrospectiveBoard tool. Generate 3 sticky notes per column with example content appropriate to each column."
+     * Any "board with [X], [Y], [Z] columns" (e.g. "ideas concerns questions", "start stop continue") → ONE task with those column names listed; same pattern. Works in any case.
 7. **CRITICAL - Quantity parsing (VERY IMPORTANT):**
    - "a circle" = 1 circle (use "1" in task description)
    - "a star" = 1 star (use "1" in task description)
@@ -1341,6 +1344,14 @@ Response: {
     {"agent": "CreateAgent", "task": "Create retrospective board with 3 columns and 9 sticky notes using createRetrospectiveBoard tool", "reasoning": "Retro template - single tool creates 3 frames + 9 sticky notes", "waitForPrevious": false}
   ],
   "summary": "I'll create a retrospective board"
+}
+
+User: "Set up a retrospective board with what clients say, do or mean columns" OR "create a board with Start, Stop, Continue columns"
+Response: {
+  "plan": [
+    {"agent": "CreateAgent", "task": "Create retrospective board with columns: What clients say, What clients do, What clients mean using createRetrospectiveBoard tool. Generate 3 sticky notes per column with example content appropriate to each column.", "reasoning": "User specified custom column names - pass them to createRetrospectiveBoard and generate content", "waitForPrevious": false}
+  ],
+  "summary": "I'll set up a retrospective board with What clients say, What clients do, and What clients mean columns"
 }
 Response: {
   "plan": [

@@ -38,6 +38,7 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
   const [onlineUsers, setOnlineUsers] = useState<AwarenessState[]>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [boardTitle, setBoardTitleState] = useState<string>('');
+  const [canvasBackgroundColor, setCanvasBackgroundColorState] = useState<string | undefined>(undefined);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [awareness, setAwareness] = useState<any>(null);
 
@@ -164,18 +165,22 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
         unsubAwareness = provider.onAwarenessChange(updateOnlineUsers);
         updateOnlineUsers();
 
-        // --- board metadata (title) listener ---
+        // --- board metadata (title, backgroundColor) listener ---
         unsubMeta = provider.onMetaChange(() => {
           const title = provider.getMeta('title');
           if (title !== undefined) {
             setBoardTitleState(title);
           }
+          const bg = provider.getMeta('backgroundColor');
+          setCanvasBackgroundColorState(bg ?? undefined);
         });
-        // Load initial title if already in the Y.Doc
+        // Load initial title and background if already in the Y.Doc
         const initialTitle = provider.getMeta('title');
         if (initialTitle !== undefined) {
           setBoardTitleState(initialTitle);
         }
+        const initialBg = provider.getMeta('backgroundColor');
+        setCanvasBackgroundColorState(initialBg ?? undefined);
 
         // Load initial objects (may be empty until server syncs the snapshot)
         setObjects(provider.getAllObjects());
@@ -276,7 +281,12 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
   const setBoardTitle = useCallback((title: string) => {
     providerRef.current?.setMeta('title', title);
   }, []);
-  
+
+  const setCanvasBackgroundColor = useCallback((color: string) => {
+    providerRef.current?.setMeta('backgroundColor', color);
+    setCanvasBackgroundColorState(color);
+  }, []);
+
   const getBroadcastRate = useCallback(() => {
     return providerRef.current?.getBroadcastRate() || 0;
   }, []);
@@ -288,6 +298,8 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
     awareness,
     hasUnsavedChanges,
     boardTitle,
+    canvasBackgroundColor,
+    setCanvasBackgroundColor,
     createObject,
     createObjectsBatch,
     updateObject,

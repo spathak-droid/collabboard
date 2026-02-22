@@ -123,25 +123,16 @@ function getFrameInnerBounds(
   objects: WhiteboardObject[],
   padding = 40
 ): { x: number; y: number; width: number; height: number } | null {
-  console.log(`🔍 [Frame Bounds] Looking for frame: ${frameId}`);
   const frame = objects.find((o) => o.id === frameId && o.type === 'frame');
-  if (!frame || frame.type !== 'frame') {
-    console.error(`❌ [Frame Bounds] Frame ${frameId} not found! Available objects: ${objects.length}`);
-    return null;
-  }
-  
+  if (!frame || frame.type !== 'frame') return null;
+
   const frameObj = frame as Frame;
-  const bounds = {
+  return {
     x: frameObj.x + padding,
     y: frameObj.y + padding,
     width: Math.max(frameObj.width - padding * 2, 100),
     height: Math.max(frameObj.height - padding * 2, 100),
   };
-  
-  console.log(`✅ [Frame Bounds] Frame found at (${frameObj.x}, ${frameObj.y}), size: ${frameObj.width}x${frameObj.height}`);
-  console.log(`   Inner bounds: (${bounds.x}, ${bounds.y}), size: ${bounds.width}x${bounds.height}`);
-  
-  return bounds;
 }
 
 // ── Smart placement algorithm ──────────────────────────────
@@ -260,8 +251,35 @@ function findFreePositionWithBoxes(
     }
   }
 
-  // Fallback: if no free position found quickly, place far to the right of all objects
-  // Calculate maxX efficiently (single pass)
+  // Fallback: if spiral search exhausted, try random positions in a wider area
+  // This provides better "free space" distribution instead of stacking everything to the right
+  const randomAttempts = 50;
+  const searchRadius = 2000; // Search within a large radius around preferred position
+  
+  for (let attempt = 0; attempt < randomAttempts; attempt++) {
+    // Generate random position within search radius
+    const angle = Math.random() * Math.PI * 2; // Random angle
+    const distance = Math.random() * searchRadius; // Random distance from center
+    const randomX = preferredX + Math.cos(angle) * distance;
+    const randomY = preferredY + Math.sin(angle) * distance;
+    
+    // Check if this random position is free
+    candidate.x = randomX;
+    candidate.y = randomY;
+    hasOverlap = false;
+    for (const box of existingBoxes) {
+      if (boxesOverlap(candidate, box)) {
+        hasOverlap = true;
+        break;
+      }
+    }
+    
+    if (!hasOverlap) {
+      return { x: randomX, y: randomY };
+    }
+  }
+  
+  // Last resort fallback: place far to the right of all objects
   let maxX = preferredX;
   for (const box of existingBoxes) {
     const rightEdge = box.x + box.width;
@@ -350,6 +368,91 @@ export function executeToolCalls(
   // This ensures smart placement considers them for collision detection
   const tempObjects: WhiteboardObject[] = [];
   
+  // Track if this batch has multiple objects without explicit coordinates
+  // If so, we should lay them out in a grid from a single free space position
+  // EXCEPTION: Do NOT use group layout for creative compositions (tool calls from creative-composer.js)
+  // Creative compositions already have their own layout logic (stack_vertical, radial, etc.)
+  const isCreativeComposition = toolCalls.some(tc => tc.id.startsWith('plan_tc_'));
+  
+  // For creative compositions with explicit coordinates, find ONE anchor point and offset everything
+  let compositionAnchor: { x: number; y: number } | null = null;
+  if (isCreativeComposition) {
+    // Calculate bounding box of the composition (assumes layout engine used (0,0) as anchor)
+    const objectToolCalls = toolCalls.filter(tc => 
+      tc.name === 'createStickyNote' || tc.name === 'createShape' || 
+      tc.name === 'createText' || tc.name === 'createTextBubble' || tc.name === 'createFrame'
+    );
+    
+    if (objectToolCalls.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      
+      for (const tc of objectToolCalls) {
+        const args = tc.arguments as any;
+        if (args.x != null && args.y != null) {
+          const x = args.x;
+          const y = args.y;
+          const w = args.width ?? (tc.name === 'createStickyNote' ? 200 : 150);
+          const h = args.height ?? (tc.name === 'createStickyNote' ? 200 : 150);
+          // Creative composition circles emit center; others emit top-left
+          const isCircle = tc.name === 'createShape' && String(args.type || '').toLowerCase() === 'circle';
+          if (isCircle) {
+            const halfW = w / 2;
+            const halfH = h / 2;
+            minX = Math.min(minX, x - halfW);
+            minY = Math.min(minY, y - halfH);
+            maxX = Math.max(maxX, x + halfW);
+            maxY = Math.max(maxY, y + halfH);
+          } else {
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x + w);
+            maxY = Math.max(maxY, y + h);
+          }
+        }
+      }
+
+      if (Number.isFinite(minX)) {
+        const compositionWidth = maxX - minX;
+        const compositionHeight = maxY - minY;
+
+        // Find ONE free space for the entire composition
+        const vp = options?.viewport 
+          ? getViewportCenterPosition(options.viewport as ViewportState)
+          : { x: 200, y: 200 };
+        
+        const placementBoxes: PlacementBox[] = ops.objects
+          .filter((obj) => obj.type !== 'line')
+          .map((obj) => {
+            if (obj.type === 'circle') {
+              const r = (obj as CircleShape).radius;
+              return { x: obj.x - r, y: obj.y - r, width: r * 2, height: r * 2 };
+            }
+            if ('width' in obj && 'height' in obj) {
+              return { x: obj.x, y: obj.y, width: obj.width, height: obj.height };
+            }
+            return { x: obj.x, y: obj.y, width: 100, height: 100 };
+          });
+        
+        compositionAnchor = findFreePositionWithBoxes(
+          placementBoxes,
+          compositionWidth,
+          compositionHeight,
+          vp.x - compositionWidth / 2,
+          vp.y - compositionHeight / 2
+        );
+
+        // Adjust anchor to account for composition's minX/minY offset
+        compositionAnchor.x -= minX;
+        compositionAnchor.y -= minY;
+      }
+    }
+  }
+  
+  const objectsWithoutCoords = toolCalls.filter(tc => 
+    (tc.name === 'createStickyNote' || tc.name === 'createShape' || tc.name === 'createText' || tc.name === 'createTextBubble') &&
+    !hasExplicitCoordinates(tc.arguments as { x?: number; y?: number })
+  );
+  
   // Collect all objects to create for batch insertion
   const objectsToCreate: WhiteboardObject[] = [];
   
@@ -363,12 +466,11 @@ export function executeToolCalls(
   
   // Optimized helper to get placement boxes with caching
   // For bulk creation (many objects), this cache dramatically improves performance
+  // MUST be defined before shouldUseGroupLayout block to avoid temporal dead zone
   const getPlacementBoxes = (): PlacementBox[] => {
     const currentVersion = ops.objects.length + tempObjects.length;
-    if (cachedBoxes && cachedBoxesVersion === currentVersion) {
-      return cachedBoxes;
-    }
-    
+    if (cachedBoxes && cachedBoxesVersion === currentVersion) return cachedBoxes;
+
     // Recalculate boxes - incremental update would be faster but more complex
     // For now, full recalculation is acceptable since we cache the result
     const allObjs = getAllObjects();
@@ -398,6 +500,52 @@ export function executeToolCalls(
     return cachedBoxes;
   };
   
+  // Use group layout ONLY if:
+  // 1. There are 4+ objects without coordinates
+  // 2. This is NOT a creative composition (creative composer has its own layout)
+  const shouldUseGroupLayout = !isCreativeComposition && objectsWithoutCoords.length > 3;
+  
+  // Helper to apply composition anchor offset to coordinates
+  // When creative compositions use anchor (0,0), executor finds free space and offsets everything
+  const applyAnchorOffset = (x: number, y: number): { x: number; y: number } => {
+    if (compositionAnchor && isCreativeComposition) {
+      return {
+        x: x + compositionAnchor.x,
+        y: y + compositionAnchor.y
+      };
+    }
+    return { x, y };
+  };
+  
+  let groupLayoutStartPos: { x: number; y: number } | null = null;
+  let groupLayoutIndex = 0;
+
+  if (shouldUseGroupLayout) {
+    // Calculate grid dimensions for the group
+    const gridCols = Math.ceil(Math.sqrt(objectsWithoutCoords.length));
+    const gridRows = Math.ceil(objectsWithoutCoords.length / gridCols);
+    const avgSize = 200; // Approximate average object size
+    const GAP = 20;
+    const gridWidth = gridCols * avgSize + (gridCols - 1) * GAP;
+    const gridHeight = gridRows * avgSize + (gridRows - 1) * GAP;
+    
+    const vp = options?.viewport 
+      ? getViewportCenterPosition(options.viewport as ViewportState)
+      : { x: 200, y: 200 };
+    
+    // Find ONE free space position for the entire group
+    // IMPORTANT: Must check against existing objects to avoid overlaps
+    const placementBoxes = getPlacementBoxes();
+
+    groupLayoutStartPos = findFreePositionWithBoxes(
+      placementBoxes,
+      gridWidth,
+      gridHeight,
+      vp.x - gridWidth / 2,
+      vp.y - gridHeight / 2,
+    );
+  }
+
   // Helper to get bounding box from any object
   const getBoxFromObject = (obj: WhiteboardObject): PlacementBox => {
     if (obj.type === 'circle') {
@@ -426,12 +574,7 @@ export function executeToolCalls(
       case 'createStickyNote': {
         const args = call.arguments as CreateStickyNoteArgs;
         const quantity = args.quantity ?? 1;
-        
-        // Log frame context
-        if (args.frameId) {
-          console.log(`📦 [Client Executor] createStickyNote received frameId: ${args.frameId}`);
-        }
-        
+
         // Create multiple sticky notes with grid layout
         if (quantity > 1) {
           const currentTime = Date.now();
@@ -481,6 +624,7 @@ export function executeToolCalls(
             gridStartPos.y
           );
           
+          
           // Color handling: ONLY cycle colors if explicitly requested via colors array or color="random"
           const hasColorsArray = args.colors && Array.isArray(args.colors) && args.colors.length > 0;
           const colorArray: string[] = hasColorsArray
@@ -525,7 +669,8 @@ export function executeToolCalls(
           
           let pos: { x: number; y: number };
           if (hasExplicitCoordinates(args)) {
-            pos = { x: args.x!, y: args.y! };
+            // Apply composition anchor offset if this is part of a creative composition
+            pos = applyAnchorOffset(args.x!, args.y!);
           } else if (args.frameId) {
             // Place inside frame bounds
             const frameBounds = getFrameInnerBounds(args.frameId, ops.objects);
@@ -543,10 +688,24 @@ export function executeToolCalls(
               pos = findFreePositionWithBoxes(getPlacementBoxes(), 200, 200, preferredPos.x, preferredPos.y);
             }
           } else {
-            const preferredPos = options?.viewport 
-              ? getViewportCenterPosition(options.viewport as ViewportState)
-              : { x: 200, y: 200 };
-            pos = findFreePositionWithBoxes(getPlacementBoxes(), 200, 200, preferredPos.x, preferredPos.y);
+            // Check if we should use group layout
+            if (shouldUseGroupLayout && groupLayoutStartPos && !hasExplicitCoordinates(args)) {
+              const gridCols = Math.ceil(Math.sqrt(objectsWithoutCoords.length));
+              const avgSize = 200;
+              const GAP = 20;
+              const row = Math.floor(groupLayoutIndex / gridCols);
+              const col = groupLayoutIndex % gridCols;
+              pos = {
+                x: groupLayoutStartPos.x + col * (avgSize + GAP),
+                y: groupLayoutStartPos.y + row * (avgSize + GAP),
+              };
+              groupLayoutIndex++;
+            } else {
+              const preferredPos = options?.viewport 
+                ? getViewportCenterPosition(options.viewport as ViewportState)
+                : { x: 200, y: 200 };
+              pos = findFreePositionWithBoxes(getPlacementBoxes(), 200, 200, preferredPos.x, preferredPos.y);
+            }
           }
           
           const obj: StickyNote = {
@@ -766,22 +925,10 @@ export function executeToolCalls(
       case 'createShape': {
         const args = call.arguments as CreateShapeArgs;
         const quantity = args.quantity ?? 1;
-        
-        // Debug: log received arguments to verify colors array arrives from server
-        console.log(`[createShape] Received args: type=${args.type}, quantity=${quantity}, color=${args.color}, colorsLength=${args.colors?.length}, hasColors=${!!(args.colors && Array.isArray(args.colors) && args.colors.length > 0)}`);
-        if (args.colors && args.colors.length > 0) {
-          const unique = [...new Set(args.colors)];
-          console.log(`[createShape] Colors array unique values: ${unique.join(', ')}`);
-        }
-        
-        // Log frame context
+
         if (args.frameId) {
-          console.log(`📦 [Client Executor] createShape received frameId: ${args.frameId}`);
           const frame = ops.objects.find(o => o.id === args.frameId && o.type === 'frame');
-          if (frame && frame.type === 'frame') {
-            const frameObj = frame as Frame;
-            console.log(`   Frame found: ${frameObj.type} at (${frameObj.x}, ${frameObj.y}), size: ${frameObj.width}x${frameObj.height}`);
-          } else {
+          if (!frame || frame.type !== 'frame') {
             console.error(`   ⚠️ Frame ${args.frameId} NOT FOUND in objects!`);
           }
         }
@@ -845,14 +992,6 @@ export function executeToolCalls(
             gridStartPos.x,
             gridStartPos.y
           );
-          
-          // Log color cycling info for debugging
-          if (shouldCycleColors) {
-            const uniqueColors = [...new Set(shapeColorArray)];
-            const first3 = shapeColorArray.slice(0, 3).join(', ');
-            const last3 = shapeColorArray.slice(-3).join(', ');
-            console.log(`[createShape] Color cycling: ${quantity} ${args.type}s, ${shapeColorArray.length} colors in palette, unique: [${uniqueColors.join(', ')}], first3: [${first3}], last3: [${last3}]`);
-          }
           
           // Create all shapes with calculated positions
           for (let i = 0; i < quantity; i++) {
@@ -946,7 +1085,14 @@ export function executeToolCalls(
           
           let pos: { x: number; y: number };
           if (hasExplicitCoordinates(args)) {
-            pos = { x: args.x!, y: args.y! };
+            // Apply composition anchor offset if this is part of a creative composition
+            pos = applyAnchorOffset(args.x!, args.y!);
+            // Creative composition layout emits CENTER for circles; do not add radius. Others use top-left.
+            const isCircle = String(args.type || '').toLowerCase() === 'circle';
+            if (isCircle && !isCreativeComposition) {
+              pos.x += radius;
+              pos.y += radius;
+            }
           } else if (args.frameId) {
             // Place inside frame bounds
             const frameBounds = getFrameInnerBounds(args.frameId, ops.objects);
@@ -973,10 +1119,25 @@ export function executeToolCalls(
               }
             }
           } else {
-            const preferredPos = options?.viewport 
-              ? getViewportCenterPosition(options.viewport as ViewportState)
-              : { x: 200, y: 200 };
-            pos = findFreePositionWithBoxes(getPlacementBoxes(), placementSize, placementSize, preferredPos.x, preferredPos.y);
+            // Check if we should use group layout
+            if (shouldUseGroupLayout && groupLayoutStartPos) {
+              const gridCols = Math.ceil(Math.sqrt(objectsWithoutCoords.length));
+              const avgSize = 200;
+              const GAP = 20;
+              const row = Math.floor(groupLayoutIndex / gridCols);
+              const col = groupLayoutIndex % gridCols;
+              pos = {
+                x: groupLayoutStartPos.x + col * (avgSize + GAP),
+                y: groupLayoutStartPos.y + row * (avgSize + GAP),
+              };
+              groupLayoutIndex++;
+            } else {
+              const preferredPos = options?.viewport 
+                ? getViewportCenterPosition(options.viewport as ViewportState)
+                : { x: 200, y: 200 };
+              const placementBoxesBefore = getPlacementBoxes();
+              pos = findFreePositionWithBoxes(placementBoxesBefore, placementSize, placementSize, preferredPos.x, preferredPos.y);
+            }
             
             if (args.type === 'circle') {
               pos.x += radius;
@@ -1130,11 +1291,27 @@ export function executeToolCalls(
         let y = args.y;
         let containedIds: string[] = [];
         
+        // CRITICAL: Apply composition anchor offset FIRST, before any containment checks
+        // This ensures frames and their children are offset together
+        if (x !== undefined && y !== undefined) {
+          const offsetPos = applyAnchorOffset(x, y);
+          x = offsetPos.x;
+          y = offsetPos.y;
+        }
+        
         // Get all objects (including tempObjects from current batch)
         const allObjs = getAllObjects().filter(o => o.type !== 'line');
         
-        // If large frame (suggesting "include all objects"), calculate bounds
-        if ((width > 800 || height > 600) && allObjs.length > 0) {
+        // Identify recently created objects (within last 5 seconds) - these are likely from this AI session
+        const now = Date.now();
+        const recentThreshold = 5000; // 5 seconds
+        const recentObjects = allObjs.filter(o => 
+          o.createdAt && (now - o.createdAt) < recentThreshold
+        );
+        
+        // If large frame WITHOUT explicit coordinates (suggesting "include all objects"), calculate bounds
+        // If explicit coordinates provided, the AI is placing the frame intentionally - don't auto-wrap all
+        if ((width > 800 || height > 600) && allObjs.length > 0 && !hasExplicitCoordinates({x, y})) {
           // Calculate bounding box of all objects
           const objectMap = new Map(ops.objects.map(obj => [obj.id, obj]));
           let minX = Infinity;
@@ -1160,55 +1337,75 @@ export function executeToolCalls(
           // Mark all these objects as contained
           containedIds = allObjs.map(o => o.id);
         } 
-        // If medium frame + tempObjects exist = wrap only tempObjects (SWOT/journey map pattern)
-        else if (width >= 400 && width <= 1000 && height >= 250 && height <= 600 && tempObjects.length > 0) {
-          // Calculate bounds of ONLY tempObjects (recently created in this batch)
-          const objectMap = new Map<string, WhiteboardObject>();
-          ops.objects.forEach(obj => objectMap.set(obj.id, obj));
-          tempObjects.forEach(obj => objectMap.set(obj.id, obj));
+        // If recently created objects exist = wrap only recent objects (AI-created pattern)
+        // This handles cases where AI creates objects then immediately wraps them in a frame
+        else if (recentObjects.length > 0 && tempObjects.length > 0) {
+          // Prefer tempObjects (same batch) over recentObjects (multiple batches within 5 sec)
+          const objectsToWrap = tempObjects.length > 0 ? tempObjects.filter(o => o.type !== 'line') : recentObjects;
           
-          let minX = Infinity;
-          let minY = Infinity;
-          let maxX = -Infinity;
-          let maxY = -Infinity;
-          
-          for (const obj of tempObjects.filter(o => o.type !== 'line')) {
-            const bounds = getObjectBounds(obj, objectMap);
-            minX = Math.min(minX, bounds.minX);
-            minY = Math.min(minY, bounds.minY);
-            maxX = Math.max(maxX, bounds.maxX);
-            maxY = Math.max(maxY, bounds.maxY);
-          }
-          
-          if (Number.isFinite(minX)) {
-            // Add padding around objects
-            const PADDING = 40;
-            x = minX - PADDING;
-            y = minY - PADDING;
-            width = (maxX - minX) + (PADDING * 2);
-            height = (maxY - minY) + (PADDING * 2);
+          // If frame has explicit coords, check which recent objects are within bounds
+          // Use getObjectBounds so circles (center+radius) and other shapes are checked correctly
+          if (hasExplicitCoordinates({x, y})) {
+            const frameRight = x! + width;
+            const frameBottom = y! + height;
+            const objectMap = new Map<string, WhiteboardObject>();
+            ops.objects.forEach(obj => objectMap.set(obj.id, obj));
+            tempObjects.forEach(obj => objectMap.set(obj.id, obj));
+            containedIds = objectsToWrap
+              .filter(obj => {
+                const bounds = getObjectBounds(obj, objectMap);
+                return bounds.minX >= x! && bounds.minY >= y! && bounds.maxX <= frameRight && bounds.maxY <= frameBottom;
+              })
+              .map(o => o.id);
+          } else {
+            // Calculate bounds from recent objects and size frame accordingly
+            const objectMap = new Map<string, WhiteboardObject>();
+            ops.objects.forEach(obj => objectMap.set(obj.id, obj));
+            tempObjects.forEach(obj => objectMap.set(obj.id, obj));
             
-            // Mark only tempObjects as contained
-            containedIds = tempObjects.filter(o => o.type !== 'line').map(o => o.id);
+            let minX = Infinity;
+            let minY = Infinity;
+            let maxX = -Infinity;
+            let maxY = -Infinity;
+            
+            for (const obj of objectsToWrap) {
+              const bounds = getObjectBounds(obj, objectMap);
+              minX = Math.min(minX, bounds.minX);
+              minY = Math.min(minY, bounds.minY);
+              maxX = Math.max(maxX, bounds.maxX);
+              maxY = Math.max(maxY, bounds.maxY);
+            }
+            
+            if (Number.isFinite(minX)) {
+              // Add padding around objects
+              const PADDING = 40;
+              x = minX - PADDING;
+              y = minY - PADDING;
+              width = (maxX - minX) + (PADDING * 2);
+              height = (maxY - minY) + (PADDING * 2);
+              
+              // Mark only recent objects as contained
+              containedIds = objectsToWrap.map(o => o.id);
+            }
           }
         }
         else if (x !== undefined && y !== undefined) {
-          // Frame has explicit position, find objects within its bounds
+          // x,y already offset at top of createFrame; find objects within bounds
+          // Use getObjectBounds so circles (center+radius) are correct
           const frameRight = x + width;
           const frameBottom = y + height;
-          
+          const objectMapForBounds = new Map<string, WhiteboardObject>();
+          ops.objects.forEach(obj => objectMapForBounds.set(obj.id, obj));
+          tempObjects.forEach(obj => objectMapForBounds.set(obj.id, obj));
+
           for (const obj of allObjs) {
-            // Check if object is within frame bounds
-            if (obj.x >= x && obj.y >= y) {
-              const objRight = obj.x + ('width' in obj ? obj.width : 0);
-              const objBottom = obj.y + ('height' in obj ? obj.height : 0);
-              
-              if (objRight <= frameRight && objBottom <= frameBottom) {
-                containedIds.push(obj.id);
-              }
-            }
+            const bounds = getObjectBounds(obj, objectMapForBounds);
+            const inside =
+              bounds.minX >= x && bounds.minY >= y &&
+              bounds.maxX <= frameRight && bounds.maxY <= frameBottom;
+            if (inside) containedIds.push(obj.id);
           }
-        } else if (!hasExplicitCoordinates({ x, y })) {
+        } else {
           // Find free position if x/y not specified
           // Use cached boxes for better performance
           const preferredPos = options?.viewport 

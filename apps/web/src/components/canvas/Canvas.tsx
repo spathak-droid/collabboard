@@ -57,6 +57,13 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
     return () => window.removeEventListener('resize', updateDimensions);
   }, []);
   
+  // Track client mount so Stage is only rendered on the browser
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  const [isMounted, setIsMounted] = useState(false);
+  
   // Prevent browser back/forward swipe gestures
   useEffect(() => {
     const preventSwipeNavigation = (e: WheelEvent) => {
@@ -312,6 +319,19 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
     };
   }, [stageRef]);
 
+  const backgroundClass = theme === 'dark' ? 'bg-slate-950' : 'bg-gray-50';
+
+  if (!isMounted) {
+    return (
+      <div
+        className="w-full h-screen overflow-hidden"
+        style={{ touchAction: 'none', overscrollBehavior: 'none' }}
+      >
+        <div className={backgroundClass} />
+      </div>
+    );
+  }
+
   return (
     <div 
       className="w-full h-screen overflow-hidden"
@@ -332,7 +352,7 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
         scaleY={scale}
         x={position.x}
         y={position.y}
-        className={theme === 'dark' ? 'bg-slate-950' : 'bg-gray-50'}
+        className={backgroundClass}
         listening={true}
         perfectDrawEnabled={false}
       >

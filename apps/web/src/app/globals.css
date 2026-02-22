@@ -130,7 +130,7 @@ body {
   .text-balance {
     text-wrap: balance;
   }
-  
+
   /* Hide scrollbar while keeping scroll functionality */
   .hide-scrollbar {
     /* Firefox */

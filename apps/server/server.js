@@ -655,16 +655,9 @@ async function handleAIMessage(ws, data) {
               intent.colors = padded;
             }
           }
-          
-          // #region agent log
-          fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'server.js:590',message:'Intent classifier result',data:{operation:intent?.operation,isMultiStep:intent?.isMultiStep,objectType:intent?.objectType,shapeType:intent?.shapeType,quantity:intent?.quantity,color:intent?.color,colorsLength:intent?.colors?.length,creativeDescription:intent?.creativeDescription,userMessage:message},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-          // #endregion
 
           // CREATIVE commands go directly to the creative composer (Planner+Executor)
           if (intent && intent.operation === 'CREATIVE') {
-            // #region agent log
-            fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'server.js:593',message:'CREATIVE branch taken - routing to Planner+Executor',data:{creativeDescription:intent.creativeDescription,userMessage:message},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-            // #endregion
             console.log('🎨 Creative command detected, routing to Creative Composer (Planner+Executor)');
             
             let frameInfo = null;
@@ -693,11 +686,7 @@ async function handleAIMessage(ws, data) {
                 intent.creativeDescription,
                 frameInfo
               );
-              
-              // #region agent log
-              fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'server.js:620',message:'Creative composer result',data:{toolCallCount:composerResult?.toolCalls?.length,summary:composerResult?.summary,success:composerResult?.success},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-              // #endregion
-              
+
               result = {
                 toolCalls: composerResult.toolCalls || [],
                 summary: composerResult.summary || composerResult.message || "I've composed the requested design",
@@ -705,9 +694,6 @@ async function handleAIMessage(ws, data) {
                 progressSent: false,
               };
             } catch (creativeError) {
-              // #region agent log
-              fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'server.js:632',message:'Creative composer ERROR',data:{error:creativeError?.message},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-              // #endregion
               console.error('Creative composer failed:', creativeError);
               result = {
                 toolCalls: [],

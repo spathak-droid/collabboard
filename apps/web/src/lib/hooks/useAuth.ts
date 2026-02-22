@@ -38,12 +38,18 @@ const writeCache = (user: User | null) => {
 };
 
 export const useAuth = () => {
-  const cached = readCache();
-  const [user, setUser] = useState<User | null>(cached);
-  // If we have a cached user, skip the loading state entirely
-  const [loading, setLoading] = useState(!cached);
+  // Always start with null/true so server and client render the same (avoids hydration mismatch).
+  // Cache is applied in useEffect so client updates after first paint.
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const cached = readCache();
+    if (cached) {
+      setUser(cached);
+      setLoading(false);
+    }
+
     const unsubscribe = onAuthChange((firebaseUser) => {
       if (firebaseUser) {
         const u: User = {

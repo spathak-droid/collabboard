@@ -168,17 +168,13 @@ export async function executeCreativeComposer(openai, userMessage, boardState, c
   // ── Step 1: Planner LLM (gpt-5-nano) ─────────────────────
   const startTime = Date.now();
   const response = await openai.chat.completions.create({
-    model: 'gpt-5-nano',
+    model: 'gpt-4.1-mini',
     messages,
     tools: [CREATE_PLAN_TOOL],
     tool_choice: { type: 'function', function: { name: 'createPlan' } },
   });
   const planDuration = Date.now() - startTime;
   console.log(`📋 Planner responded in ${planDuration}ms`);
-
-  // #region agent log
-  fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'creative-composer.js:177',message:'Planner LLM response',data:{planDurationMs:planDuration,hasChoices:!!response?.choices?.length,toolCallCount:response?.choices?.[0]?.message?.tool_calls?.length,textContent:response?.choices?.[0]?.message?.content?.substring(0,200)},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
 
   const choice = response.choices[0];
   if (!choice) {
@@ -209,14 +205,20 @@ export async function executeCreativeComposer(openai, userMessage, boardState, c
   console.log(`📋 Plan: "${plan.title}", layout=${plan.layout}, ${plan.children?.length || 0} top-level children`);
 
   // ── Step 2: Layout Engine (deterministic) ─────────────────
+  // ALL creative compositions should use explicit positions with batch anchor
+  // This ensures objects stay together as a cohesive unit, not scattered individually
+  // - Frame-based: Keeps frames and children together
+  // - Non-frame: Keeps shapes in stack/radial/grid layouts together
+  const useExplicitPositions = true; // Always use explicit positions for creative compositions
+  
+  // CRITICAL: Use (0,0) as anchor for creative compositions
+  // Executor will find free space and offset all coordinates
+  const anchor = { x: 0, y: 0 };
+  
   const engineStart = Date.now();
-  const { toolCalls, summary } = planToToolCalls(plan, { x: 100, y: 100 }, frameInfo);
+  const { toolCalls, summary } = planToToolCalls(plan, anchor, frameInfo, useExplicitPositions);
   const engineDuration = Date.now() - engineStart;
-  console.log(`⚙️ Layout Engine produced ${toolCalls.length} tool calls in ${engineDuration}ms`);
-
-  // #region agent log
-  fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'963e0f'},body:JSON.stringify({sessionId:'963e0f',location:'creative-composer.js:210',message:'Layout engine output',data:{planTitle:plan?.title,planLayout:plan?.layout,childCount:plan?.children?.length,toolCallCount:toolCalls.length,engineDurationMs:engineDuration,firstToolCall:toolCalls[0]},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{});
-  // #endregion
+  console.log(`⚙️ Layout Engine produced ${toolCalls.length} tool calls in ${engineDuration}ms (explicit positions from (0,0) anchor for batch placement)`);
 
   // Convert to the format the client executor expects (add id field)
   const formattedToolCalls = toolCalls.map((tc, i) => ({

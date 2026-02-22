@@ -5,7 +5,7 @@
  * This allows the IndexedDB offline queue to work after page refresh.
  */
 
-const CACHE_NAME = 'collab-board-v1';
+const CACHE_NAME = 'collab-board-v2';
 const RUNTIME_CACHE = 'collab-board-runtime';
 
 // Files to cache on install (app shell)
@@ -65,6 +65,11 @@ self.addEventListener('fetch', (event) => {
 
   // Skip external URLs
   if (url.origin !== location.origin) {
+    return;
+  }
+
+  // Never intercept Next.js internals. Serving stale RSC/JS here causes hydration mismatches.
+  if (url.pathname.startsWith('/_next/')) {
     return;
   }
 

@@ -27,6 +27,7 @@ export interface Board {
   last_modified: string;
   thumbnail?: string;
   is_public: boolean;
+  is_locked: boolean;
 }
 
 export interface BoardSnapshot {
@@ -85,6 +86,7 @@ export const createBoard = async (board: {
       owner_uid: board.owner_uid,
       created_at: now,
       last_modified: now,
+      is_locked: false,
     })
     .select()
     .single();
@@ -126,6 +128,7 @@ export const fetchAllBoards = async (): Promise<BoardWithOwner[]> => {
       last_modified: row.last_modified as string,
       thumbnail: row.thumbnail as string | undefined,
       is_public: row.is_public as boolean,
+      is_locked: (row.is_locked as boolean) ?? false,
       owner_name: users?.display_name ?? null,
       owner_email: users?.email ?? null,
     };
@@ -134,17 +137,63 @@ export const fetchAllBoards = async (): Promise<BoardWithOwner[]> => {
 
 export const updateBoard = async (
   boardId: string,
-  updates: Partial<Pick<Board, 'title' | 'last_modified' | 'thumbnail'>>
+  updates: Partial<Pick<Board, 'title' | 'last_modified' | 'thumbnail' | 'is_locked'>>
 ): Promise<void> => {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('boards')
     .update(updates)
-    .eq('id', boardId);
+    .eq('id', boardId)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     console.error('[supabase] updateBoard failed:', error);
+    throw error;
+  }
+
+  // RLS/policy mismatches can return "no updated rows" without an explicit error.
+  if (!data) {
+    const noRowsError = new Error(
+      '[supabase] updateBoard failed: no rows were updated (missing row or blocked by policy)'
+    );
+    console.error(noRowsError.message, { boardId, updates });
+    throw noRowsError;
   }
 };
+
+/**
+ * Subscribe to realtime changes on the boards table (INSERT, UPDATE, DELETE).
+ * Call the callback when any board is created, updated (e.g. lock/unlock), or deleted
+ * so the dashboard can refetch and stay in sync across users.
+ * Requires Realtime enabled for the boards table (Supabase: Database → Replication → add "boards").
+ * @returns Unsubscribe function.
+ */
+export type BoardsChangePayload = {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  new: Record<string, unknown> | null;
+  old: Record<string, unknown> | null;
+};
+
+export function subscribeToBoardsChanges(onChange: (payload: BoardsChangePayload) => void): () => void {
+  const channel = supabase
+    .channel('boards-changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'boards' },
+      (payload) => {
+        onChange({
+          eventType: payload.eventType as 'INSERT' | 'UPDATE' | 'DELETE',
+          new: (payload.new as Record<string, unknown> | null) ?? null,
+          old: (payload.old as Record<string, unknown> | null) ?? null,
+        });
+      }
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
 
 // ── Board members ────────────────────────────────────────────
 

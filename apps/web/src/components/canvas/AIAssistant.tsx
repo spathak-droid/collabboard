@@ -17,11 +17,10 @@ import type { ChatMessage } from '@/lib/hooks/useAICommands';
 
 const SUGGESTED_COMMANDS = [
   'Create a SWOT analysis template',
-  'Add a yellow sticky note that says "Ideas"',
+  'Create a Christmas tree',
   'Create a 2x3 grid of sticky notes',
-  'Set up a retrospective board',
-  'Build a user journey map with 5 stages',
-  'Arrange sticky notes in a grid',
+  'Create a 10 story building',
+  'Build a user journey map with 5 stages'
 ];
 
 // ── Props ───────────────────────────────────────────────────
@@ -49,7 +48,7 @@ export const AIAssistant = ({
   const [inputValue, setInputValue] = useState('');
   const buttonRef = useRef<HTMLButtonElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -79,7 +78,7 @@ export const AIAssistant = ({
   }, [inputValue, isProcessing, onSendMessage]);
 
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSend();
@@ -87,6 +86,18 @@ export const AIAssistant = ({
     },
     [handleSend],
   );
+
+  const adjustTextareaHeight = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const capped = Math.min(Math.max(el.scrollHeight, 40), 160);
+    el.style.height = `${capped}px`;
+  }, []);
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [inputValue, adjustTextareaHeight]);
 
   const handleSuggestionClick = useCallback(
     (command: string) => {
@@ -135,7 +146,7 @@ export const AIAssistant = ({
                   <div>
                     <div className="flex items-center gap-1.5">
                       <h3 className="text-white font-semibold text-xs">
-                        AI Assistant
+                        Collab Assistant
                       </h3>
                       {/* Connection status indicator */}
                       <span className="text-[10px]">
@@ -191,7 +202,7 @@ export const AIAssistant = ({
                   </div>
                   <div className="bg-gray-100 rounded-xl rounded-tl-sm px-2.5 py-2 max-w-[85%]">
                     <p className="text-gray-800 text-xs">
-                      Hi! I can help you create and organize your whiteboard.
+                      Hi I am your Collab Assistant! I can help you create and organize your whiteboard.
                       Try a command or pick a suggestion below.
                     </p>
                   </div>
@@ -266,10 +277,9 @@ export const AIAssistant = ({
                     </button>
                   </div>
                 )}
-                <div className="flex gap-1.5">
-                  <input
+                <div className="flex gap-1.5 items-end">
+                  <textarea
                     ref={inputRef}
-                    type="text"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -281,7 +291,8 @@ export const AIAssistant = ({
                         : 'Type a command...'
                     }
                     disabled={isProcessing || !isConnected}
-                    className="flex-1 px-2.5 py-2 bg-gray-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all disabled:opacity-60"
+                    rows={1}
+                    className="flex-1 min-h-[40px] max-h-[160px] resize-none overflow-y-auto hide-scrollbar px-2.5 py-2 bg-gray-100 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all disabled:opacity-60"
                   />
                   <motion.button
                     onClick={handleSend}

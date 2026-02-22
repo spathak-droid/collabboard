@@ -30,6 +30,8 @@ const ASPECT_MULTIPLIERS = {
 
 const GAP = 20;
 const FRAME_PADDING = 40;
+// Extra padding for wrapper frame so start/end nodes (e.g. circles) are fully inside
+const WRAPPER_FRAME_PADDING = 80;
 
 // ── Color resolution ────────────────────────────────────────
 
@@ -126,11 +128,12 @@ function computeLayoutBounds(childSizes, layout, count) {
  * Convert a CompositionPlan into an array of positioned tool calls.
  *
  * @param {object} plan - The plan from the Planner LLM (createPlan arguments)
- * @param {{ x: number, y: number }} anchor - Top-left anchor for the composition
+ * @param {{ x: number, y: number }} anchor - Top-left anchor for the composition (optional, if null uses free space)
  * @param {object|null} frameInfo - Existing frame to compose inside { id, x, y, width, height }
+ * @param {boolean} useExplicitPositions - If false, omit x,y to let client find free space (default: false for top-level)
  * @returns {{ toolCalls: Array<{ name: string, arguments: object }>, summary: string }}
  */
-export function planToToolCalls(plan, anchor = { x: 100, y: 100 }, frameInfo = null) {
+export function planToToolCalls(plan, anchor = null, frameInfo = null, useExplicitPositions = false) {
   colorCounter = 0;
   const toolCalls = [];
   const idMap = new Map();
@@ -147,8 +150,8 @@ export function planToToolCalls(plan, anchor = { x: 100, y: 100 }, frameInfo = n
       }
     : null;
 
-  const startX = compositionArea ? compositionArea.x : anchor.x;
-  const startY = compositionArea ? compositionArea.y : anchor.y;
+  const startX = compositionArea ? compositionArea.x : (anchor ? anchor.x : 100);
+  const startY = compositionArea ? compositionArea.y : (anchor ? anchor.y : 100);
 
   const layout = plan.layout || 'columns';
   const children = plan.children || [];
@@ -162,7 +165,7 @@ export function planToToolCalls(plan, anchor = { x: 100, y: 100 }, frameInfo = n
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
     const pos = positions[i];
-    emitNode(child, pos.x, pos.y, pos.width, pos.height, toolCalls, idMap, generateTempId, frameInfo);
+    emitNode(child, pos.x, pos.y, pos.width, pos.height, toolCalls, idMap, generateTempId, frameInfo, useExplicitPositions);
   }
 
   emitConnectors(children, idMap, toolCalls);
@@ -170,16 +173,23 @@ export function planToToolCalls(plan, anchor = { x: 100, y: 100 }, frameInfo = n
   if (plan.wrapInFrame !== false && !frameInfo) {
     const contentBounds = computeContentBounds(toolCalls);
     if (contentBounds) {
+      // Use WRAPPER_FRAME_PADDING so start/end shapes (e.g. circles) are fully inside the frame
+      const framePadding = WRAPPER_FRAME_PADDING;
+      const frameArgs = {
+        title: plan.title || 'Composition',
+        width: contentBounds.width + framePadding * 2,
+        height: contentBounds.height + framePadding * 2,
+        fill: 'transparent',
+      };
+      
+      // Only add x,y if using explicit positions
+      if (useExplicitPositions) {
+        frameArgs.x = contentBounds.x - framePadding;
+        frameArgs.y = contentBounds.y - framePadding;
+      }
       toolCalls.push({
         name: 'createFrame',
-        arguments: {
-          title: plan.title || 'Composition',
-          x: contentBounds.x - FRAME_PADDING,
-          y: contentBounds.y - FRAME_PADDING,
-          width: contentBounds.width + FRAME_PADDING * 2,
-          height: contentBounds.height + FRAME_PADDING * 2,
-          fill: 'transparent',
-        },
+        arguments: frameArgs,
       });
     }
   }
@@ -277,12 +287,15 @@ function layoutHorizontal(childSizes, startX, startY) {
   const positions = [];
   let x = startX;
   const maxHeight = Math.max(...childSizes.map(s => s.height));
+  // Single center line so start/end shapes (e.g. circles) align with middle shapes
+  const centerY = startY + maxHeight / 2;
 
   for (const size of childSizes) {
-    const yOffset = Math.round((maxHeight - size.height) / 2);
+    // Center each node on the same axis (centerY - height/2)
+    const y = Math.round(centerY - size.height / 2);
     positions.push({
       x: Math.round(x),
-      y: Math.round(startY + yOffset),
+      y,
       width: size.width,
       height: size.height,
     });
@@ -295,11 +308,14 @@ function layoutVertical(childSizes, startX, startY) {
   const positions = [];
   let y = startY;
   const maxWidth = Math.max(...childSizes.map(s => s.width));
+  // Single center line so start/end shapes (e.g. circles) align with middle shapes
+  const centerX = startX + maxWidth / 2;
 
   for (const size of childSizes) {
-    const xOffset = Math.round((maxWidth - size.width) / 2);
+    // Center each node on the same axis (centerX - width/2)
+    const x = Math.round(centerX - size.width / 2);
     positions.push({
-      x: Math.round(startX + xOffset),
+      x,
       y: Math.round(y),
       width: size.width,
       height: size.height,
@@ -353,21 +369,27 @@ function layoutRadial(childSizes, startX, startY, count) {
 
 // ── Node emission (plan node → tool call) ───────────────────
 
-function emitNode(node, x, y, allocWidth, allocHeight, toolCalls, idMap, genId, frameInfo) {
+function emitNode(node, x, y, allocWidth, allocHeight, toolCalls, idMap, genId, frameInfo, useExplicitPositions = false) {
   const nodeId = genId();
 
   switch (node.type) {
     case 'sticky': {
       const size = getNodeSize(node);
+      const args = {
+        text: node.text || '',
+        color: resolveStickyColor(node.color),
+        ...(frameInfo ? { frameId: frameInfo.id } : {}),
+      };
+      
+      // Only add x,y if explicitly requested or inside a frame
+      if (useExplicitPositions || frameInfo) {
+        args.x = x;
+        args.y = y;
+      }
+      
       toolCalls.push({
         name: 'createStickyNote',
-        arguments: {
-          text: node.text || '',
-          x,
-          y,
-          color: resolveStickyColor(node.color),
-          ...(frameInfo ? { frameId: frameInfo.id } : {}),
-        },
+        arguments: args,
       });
       idMap.set(nodeId, toolCalls.length - 1);
       break;
@@ -375,31 +397,52 @@ function emitNode(node, x, y, allocWidth, allocHeight, toolCalls, idMap, genId, 
 
     case 'shape': {
       const size = getNodeSize(node);
+      const w = allocWidth || size.width;
+      const h = allocHeight || size.height;
+      const args = {
+        type: node.shape || 'rect',
+        width: w,
+        height: h,
+        color: resolveShapeColor(node.color),
+        ...(node.text ? { text: node.text } : {}),
+        ...(frameInfo ? { frameId: frameInfo.id } : {}),
+      };
+      
+      // Only add x,y if explicitly requested or inside a frame
+      // For circles, emit CENTER so alignment with rects (top-left) is correct on the executor
+      if (useExplicitPositions || frameInfo) {
+        const isCircle = (node.shape || '').toString().toLowerCase() === 'circle';
+        if (isCircle) {
+          args.x = x + w / 2;
+          args.y = y + h / 2;
+        } else {
+          args.x = x;
+          args.y = y;
+        }
+      }
+      
       toolCalls.push({
         name: 'createShape',
-        arguments: {
-          type: node.shape || 'rect',
-          x,
-          y,
-          width: allocWidth || size.width,
-          height: allocHeight || size.height,
-          color: resolveShapeColor(node.color),
-          ...(node.text ? { text: node.text } : {}),
-          ...(frameInfo ? { frameId: frameInfo.id } : {}),
-        },
+        arguments: args,
       });
       idMap.set(nodeId, toolCalls.length - 1);
       break;
     }
 
     case 'text': {
+      const args = {
+        text: node.text || '',
+      };
+      
+      // Only add x,y if explicitly requested
+      if (useExplicitPositions) {
+        args.x = x;
+        args.y = y;
+      }
+      
       toolCalls.push({
         name: 'createText',
-        arguments: {
-          text: node.text || '',
-          x,
-          y,
-        },
+        arguments: args,
       });
       idMap.set(nodeId, toolCalls.length - 1);
       break;
@@ -407,15 +450,21 @@ function emitNode(node, x, y, allocWidth, allocHeight, toolCalls, idMap, genId, 
 
     case 'textBubble': {
       const size = getNodeSize(node);
+      const args = {
+        text: node.text || '',
+        width: allocWidth || size.width,
+        height: allocHeight || size.height,
+      };
+      
+      // Only add x,y if explicitly requested
+      if (useExplicitPositions) {
+        args.x = x;
+        args.y = y;
+      }
+      
       toolCalls.push({
         name: 'createTextBubble',
-        arguments: {
-          text: node.text || '',
-          x,
-          y,
-          width: allocWidth || size.width,
-          height: allocHeight || size.height,
-        },
+        arguments: args,
       });
       idMap.set(nodeId, toolCalls.length - 1);
       break;
@@ -452,7 +501,10 @@ function emitNode(node, x, y, allocWidth, allocHeight, toolCalls, idMap, genId, 
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
         const pos = childPositions[i];
-        emitNode(child, pos.x, pos.y, pos.width, pos.height, toolCalls, idMap, genId, null);
+        // CRITICAL: Children must use same positioning mode as parent frame
+        // If frame uses explicit positions, children should too (and vice versa)
+        // Otherwise frame and children end up in different locations!
+        emitNode(child, pos.x, pos.y, pos.width, pos.height, toolCalls, idMap, genId, null, useExplicitPositions);
       }
 
       emitConnectors(children, idMap, toolCalls);
@@ -461,15 +513,24 @@ function emitNode(node, x, y, allocWidth, allocHeight, toolCalls, idMap, genId, 
       const frameW = Math.max(allocWidth || 0, childBounds.width + FRAME_PADDING * 2);
       const frameH = Math.max(allocHeight || 0, childBounds.height + FRAME_PADDING * 2);
 
+      const frameArgs = {
+        title: node.title || node.text || '',
+        width: frameW,
+        height: frameH,
+      };
+      
+      // CRITICAL FIX: If frame has children, it MUST include x,y coordinates
+      // because children were emitted with explicit positions relative to this frame's position.
+      // Without frame coordinates, executor places frame via free space separately from children,
+      // causing frame and children to be in different locations!
+      if (useExplicitPositions || frameInfo || children.length > 0) {
+        frameArgs.x = x;
+        frameArgs.y = y;
+      }
+
       toolCalls.push({
         name: 'createFrame',
-        arguments: {
-          title: node.title || node.text || '',
-          x,
-          y,
-          width: frameW,
-          height: frameH,
-        },
+        arguments: frameArgs,
       });
       idMap.set(nodeId, toolCalls.length - 1);
       break;
@@ -485,7 +546,7 @@ function emitNode(node, x, y, allocWidth, allocHeight, toolCalls, idMap, genId, 
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
         const pos = childPositions[i];
-        emitNode(child, pos.x, pos.y, pos.width, pos.height, toolCalls, idMap, genId, frameInfo);
+        emitNode(child, pos.x, pos.y, pos.width, pos.height, toolCalls, idMap, genId, frameInfo, useExplicitPositions);
       }
       emitConnectors(children, idMap, toolCalls);
       idMap.set(nodeId, -1);
@@ -494,17 +555,23 @@ function emitNode(node, x, y, allocWidth, allocHeight, toolCalls, idMap, genId, 
 
     default: {
       const size = getNodeSize(node);
+      const args = {
+        type: 'rect',
+        width: allocWidth || size.width,
+        height: allocHeight || size.height,
+        color: resolveShapeColor(node.color),
+        ...(node.text ? { text: node.text } : {}),
+      };
+      
+      // Only add x,y if explicitly requested
+      if (useExplicitPositions) {
+        args.x = x;
+        args.y = y;
+      }
+      
       toolCalls.push({
         name: 'createShape',
-        arguments: {
-          type: 'rect',
-          x,
-          y,
-          width: allocWidth || size.width,
-          height: allocHeight || size.height,
-          color: resolveShapeColor(node.color),
-          ...(node.text ? { text: node.text } : {}),
-        },
+        arguments: args,
       });
       idMap.set(nodeId, toolCalls.length - 1);
     }
@@ -562,10 +629,21 @@ function computeContentBounds(toolCalls) {
     const y = args.y ?? 0;
     const w = args.width ?? 200;
     const h = args.height ?? 200;
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x + w);
-    maxY = Math.max(maxY, y + h);
+    // Circles emit center; rects/stickies emit top-left
+    const isCircle = tc.name === 'createShape' && (args.type || '').toString().toLowerCase() === 'circle';
+    if (isCircle) {
+      const halfW = w / 2;
+      const halfH = h / 2;
+      minX = Math.min(minX, x - halfW);
+      minY = Math.min(minY, y - halfH);
+      maxX = Math.max(maxX, x + halfW);
+      maxY = Math.max(maxY, y + halfH);
+    } else {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + w);
+      maxY = Math.max(maxY, y + h);
+    }
   }
 
   if (!Number.isFinite(minX)) return null;

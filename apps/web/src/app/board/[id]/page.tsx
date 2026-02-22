@@ -240,6 +240,61 @@ export default function BoardPage() {
       router.push('/verify-email');
     }
   }, [user, authLoading, router]);
+
+  // Enforce lock for non-owners on this board page (initial load + realtime updates)
+  useEffect(() => {
+    if (!user || !boardId) return;
+
+    let cancelled = false;
+
+    const checkLock = async () => {
+      const { data, error } = await supabase
+        .from('boards')
+        .select('owner_uid, is_locked')
+        .eq('id', boardId)
+        .single();
+
+      if (cancelled || error || !data) return;
+
+      const isOwnerOfBoard = (data.owner_uid as string) === user.uid;
+      const isLocked = !!data.is_locked;
+      if (isLocked && !isOwnerOfBoard) {
+        router.replace('/dashboard');
+      }
+    };
+
+    checkLock().catch((err) => {
+      console.error('Failed to verify board lock status:', err);
+    });
+
+    const channel = supabase
+      .channel(`board-lock-${boardId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'boards', filter: `id=eq.${boardId}` },
+        (payload) => {
+          const updated = payload.new as { owner_uid?: string; is_locked?: boolean } | null;
+          if (!updated) return;
+          const isOwnerOfBoard = updated.owner_uid === user.uid;
+          if (updated.is_locked && !isOwnerOfBoard) {
+            router.replace('/dashboard');
+          }
+        }
+      )
+      .subscribe();
+
+    const lockCheckInterval = window.setInterval(() => {
+      checkLock().catch((err) => {
+        console.error('Failed to verify board lock status (poll):', err);
+      });
+    }, 5_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(lockCheckInterval);
+      supabase.removeChannel(channel);
+    };
+  }, [user, boardId, router]);
   
   // Close users dropdown on click outside
   useEffect(() => {

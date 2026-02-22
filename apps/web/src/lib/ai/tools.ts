@@ -226,12 +226,12 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           x: {
             type: 'number',
             description:
-              'X position on canvas in pixels. If omitted, auto-placed.',
+              'X position on canvas in pixels. ONLY provide this if user explicitly specifies a location (e.g., "at position X", "place at 100,200"). Otherwise, OMIT this parameter to enable automatic free-space placement.',
           },
           y: {
             type: 'number',
             description:
-              'Y position on canvas in pixels. If omitted, auto-placed.',
+              'Y position on canvas in pixels. ONLY provide this if user explicitly specifies a location (e.g., "at position Y", "place at 100,200"). Otherwise, OMIT this parameter to enable automatic free-space placement.',
           },
           color: {
             type: 'string',
@@ -271,11 +271,11 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           x: {
             type: 'number',
-            description: 'X position on canvas in pixels',
+            description: 'X position on canvas in pixels. ONLY provide if user explicitly specifies a location. Otherwise OMIT to enable automatic free-space placement.',
           },
           y: {
             type: 'number',
-            description: 'Y position on canvas in pixels',
+            description: 'Y position on canvas in pixels. ONLY provide if user explicitly specifies a location. Otherwise OMIT to enable automatic free-space placement.',
           },
           width: {
             type: 'number',
@@ -327,11 +327,11 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           x: {
             type: 'number',
-            description: 'X position on canvas in pixels',
+            description: 'X position on canvas in pixels. ONLY provide if user explicitly specifies a location. Otherwise OMIT to enable automatic free-space placement.',
           },
           y: {
             type: 'number',
-            description: 'Y position on canvas in pixels',
+            description: 'Y position on canvas in pixels. ONLY provide if user explicitly specifies a location. Otherwise OMIT to enable automatic free-space placement.',
           },
           width: {
             type: 'number',

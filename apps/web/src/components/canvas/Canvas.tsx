@@ -71,29 +71,34 @@ const CanvasComponent = ({ boardId, objects = [], children, onClick, onMouseMove
 
   const [isMounted, setIsMounted] = useState(false);
   
-  // Prevent browser back/forward swipe gestures
+  // Prevent browser back/forward swipe gestures (two-finger horizontal swipe)
   useEffect(() => {
     const preventSwipeNavigation = (e: WheelEvent) => {
-      // Prevent horizontal swipe navigation
-      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-        e.preventDefault();
-      }
+      const hasHorizontal = Math.abs(e.deltaX) > 0;
+      if (hasHorizontal) e.preventDefault();
     };
-    
-    const preventTouchNavigation = (e: TouchEvent) => {
-      // Prevent touch-based navigation
-      if (e.touches.length === 2) {
-        e.preventDefault();
-      }
+    const preventTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2) e.preventDefault();
     };
-    
-    // Add listeners to prevent browser navigation
-    document.addEventListener('wheel', preventSwipeNavigation, { passive: false });
-    document.addEventListener('touchmove', preventTouchNavigation, { passive: false });
-    
+    const preventTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 2) e.preventDefault();
+    };
+    const opts = { passive: false, capture: true } as const;
+    document.addEventListener('wheel', preventSwipeNavigation, opts);
+    document.addEventListener('touchstart', preventTouchStart, opts);
+    document.addEventListener('touchmove', preventTouchMove, opts);
+    const gestureOpts = { capture: true } as const;
+    const preventGesture = (e: Event) => e.preventDefault();
+    document.addEventListener('gesturestart', preventGesture, gestureOpts);
+    document.addEventListener('gesturechange', preventGesture, gestureOpts);
+    document.addEventListener('gestureend', preventGesture, gestureOpts);
     return () => {
-      document.removeEventListener('wheel', preventSwipeNavigation);
-      document.removeEventListener('touchmove', preventTouchNavigation);
+      document.removeEventListener('wheel', preventSwipeNavigation, opts);
+      document.removeEventListener('touchstart', preventTouchStart, opts);
+      document.removeEventListener('touchmove', preventTouchMove, opts);
+      document.removeEventListener('gesturestart', preventGesture, gestureOpts);
+      document.removeEventListener('gesturechange', preventGesture, gestureOpts);
+      document.removeEventListener('gestureend', preventGesture, gestureOpts);
     };
   }, []);
   

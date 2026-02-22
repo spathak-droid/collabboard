@@ -63,6 +63,34 @@ export default function BoardPage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
+  // Disable browser back/forward two-finger swipe while on canvas (only on board page)
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prevHtml = html.style.overscrollBehaviorX;
+    const prevBody = body.style.overscrollBehaviorX;
+    html.style.overscrollBehaviorX = 'none';
+    body.style.overscrollBehaviorX = 'none';
+    const onPopState = () => {
+      const boardPath = `/board/${boardId}`;
+      window.history.pushState({ boardNoBack: true }, '', boardPath);
+      router.replace(boardPath);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      html.style.overscrollBehaviorX = prevHtml;
+      body.style.overscrollBehaviorX = prevBody;
+    };
+  }, [boardId, router]);
+
+  // Push a history entry so we can intercept back gesture (popstate) and stay on board
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.history.pushState({ boardNoBack: true }, '', `/board/${boardId}`);
+  }, [boardId]);
+
   // Send heartbeat every 60s so other users know we're online
   usePresenceHeartbeat(user?.uid);
   

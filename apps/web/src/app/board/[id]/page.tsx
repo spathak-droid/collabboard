@@ -24,6 +24,7 @@ import { Cursors } from '@/components/canvas/Cursors';
 import { DisconnectBanner } from '@/components/canvas/DisconnectBanner';
 import { PropertiesSidebar } from '@/components/canvas/PropertiesSidebar';
 import { ZoomControl } from '@/components/canvas/ZoomControl';
+import { Minimap } from '@/components/canvas/Minimap';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { useYjs } from '@/lib/hooks/useYjs';
 import { useCursorSync } from '@/lib/hooks/useCursorSync';
@@ -187,6 +188,35 @@ export default function BoardPage() {
     for (const obj of objects) map.set(obj.id, obj);
     return map;
   }, [objects]);
+  const pendingTransformsRef = useRef<Map<string, Partial<WhiteboardObject>>>(new Map());
+
+  const enqueuePendingTransform = useCallback((shapeId: string, updates: Partial<WhiteboardObject>) => {
+    const existing = pendingTransformsRef.current.get(shapeId) ?? {};
+    pendingTransformsRef.current.set(shapeId, { ...existing, ...updates } as Partial<WhiteboardObject>);
+  }, []);
+
+  const clearPendingTransformIfSynced = useCallback(
+    (shapeId: string) => {
+      const pending = pendingTransformsRef.current.get(shapeId);
+      if (!pending) return;
+      const obj = objectsMap.get(shapeId);
+      if (!obj) {
+        pendingTransformsRef.current.delete(shapeId);
+        return;
+      }
+      const matches = Object.entries(pending).every(([key, value]) => {
+        const actual = (obj as Record<string, any>)[key];
+        if (typeof actual === 'number' && typeof value === 'number') {
+          return Math.abs(actual - value) < 0.5;
+        }
+        return actual === value;
+      });
+      if (matches) {
+        pendingTransformsRef.current.delete(shapeId);
+      }
+    },
+    [objectsMap]
+  );
 
   // Direct Konva updates for remote live drag (Yjs awareness + cursor server)
   // Must be after objectsMap is defined
@@ -446,7 +476,7 @@ export default function BoardPage() {
     (pointerX: number, pointerY: number) => {
       const rawX = (pointerX - position.x) / scale;
       const rawY = (pointerY - position.y) / scale;
-      const gridSpacing = gridMode === 'line' ? 40 : 24;
+      const gridSpacing = 40;
       const x = snapToGrid && gridMode !== 'none' ? Math.round(rawX / gridSpacing) * gridSpacing : rawX;
       const y = snapToGrid && gridMode !== 'none' ? Math.round(rawY / gridSpacing) * gridSpacing : rawY;
       return { x, y };
@@ -575,6 +605,13 @@ export default function BoardPage() {
     }
   }, [objects, manipulation.liveDragRef, manipulation.liveTransformRef]);
 
+  useEffect(() => {
+    if (pendingTransformsRef.current.size === 0) return;
+    pendingTransformsRef.current.forEach((_, id) => {
+      clearPendingTransformIfSynced(id);
+    });
+  }, [objects, clearPendingTransformIfSynced]);
+
   const handleShapeDragMoveWithBroadcast = useCallback(
     (shapeId: string, liveX: number, liveY: number) => {
       manipulation.handleShapeDragMove(shapeId, liveX, liveY);
@@ -656,6 +693,7 @@ export default function BoardPage() {
 
   const handleShapeUpdateWithClear = useCallback(
     (shapeId: string, updates: Partial<WhiteboardObject>) => {
+      enqueuePendingTransform(shapeId, updates);
       manipulation.updateShapeAndConnectors(shapeId, updates);
       clearLiveDrag(shapeId);
       clearCursorServerLiveDrag(shapeId);
@@ -1006,6 +1044,7 @@ export default function BoardPage() {
       }
 
       // Clear live drag overlays once final values are persisted
+      enqueuePendingTransform(frameId, updates);
       manipulation.liveDragRef.current.delete(frameId);
       frameDragStartRef.current.delete(frameId);
 
@@ -1057,14 +1096,13 @@ export default function BoardPage() {
         const map = new Map(objectsMap);
         manipulation.liveDragRef.current.forEach((pos: { x: number; y: number }, id: string) => {
           const obj = map.get(id) as WhiteboardObject | undefined;
-          if (obj) {
-            if (obj.type === 'line') {
-              const line = obj as LineShape;
-              const points = liveLinePointsRef.current.get(id) || line.points;
-              map.set(id, { ...obj, x: 0, y: 0, points } as WhiteboardObject);
-            } else {
-              map.set(id, { ...obj, x: pos.x, y: pos.y } as WhiteboardObject);
-            }
+          if (!obj) return;
+          if (obj.type === 'line') {
+            const line = obj as LineShape;
+            const points = liveLinePointsRef.current.get(id) || line.points;
+            map.set(id, { ...obj, x: 0, y: 0, points } as WhiteboardObject);
+          } else {
+            map.set(id, { ...obj, x: pos.x, y: pos.y } as WhiteboardObject);
           }
         });
         liveLinePointsRef.current.forEach((points: number[], id: string) => {
@@ -1075,19 +1113,28 @@ export default function BoardPage() {
         });
         manipulation.liveTransformRef.current.forEach((transform: { x: number; y: number; rotation: number; width?: number; height?: number; radius?: number }, id: string) => {
           const obj = map.get(id);
-          if (obj) {
-            // During transform, only update dimensions and rotation, NOT position
-            // Position will be finalized in handleTransformEnd
-            const updates: Partial<WhiteboardObject> & {
-              width?: number;
-              height?: number;
-              radius?: number;
-            } = { rotation: transform.rotation };
-            if (transform.width !== undefined) updates.width = transform.width;
-            if (transform.height !== undefined) updates.height = transform.height;
-            if (transform.radius !== undefined) updates.radius = transform.radius;
-            map.set(id, { ...obj, ...updates } as WhiteboardObject);
-          }
+          if (!obj) return;
+          const updates: Partial<WhiteboardObject> & {
+            x?: number;
+            y?: number;
+            width?: number;
+            height?: number;
+            radius?: number;
+          } = {
+            x: transform.x,
+            y: transform.y,
+            rotation: transform.rotation,
+          };
+          if (transform.width !== undefined) updates.width = transform.width;
+          if (transform.height !== undefined) updates.height = transform.height;
+          if (transform.radius !== undefined) updates.radius = transform.radius;
+          map.set(id, { ...obj, ...updates } as WhiteboardObject);
+        });
+        pendingTransformsRef.current.forEach((pending, id) => {
+          if (manipulation.liveTransformRef.current.has(id)) return;
+          const obj = map.get(id);
+          if (!obj) return;
+          map.set(id, { ...obj, ...pending } as WhiteboardObject);
         });
         return map;
       })();
@@ -1885,7 +1932,8 @@ export default function BoardPage() {
       <Toolbar onDelete={handleDelete} selectedCount={selectedIds.length} />
       
       <ZoomControl />
-      
+      <Minimap objects={objects} />
+
       {user && (
         <Cursors
           awareness={awareness}
@@ -2066,12 +2114,14 @@ export default function BoardPage() {
 
         {renderObjects.map((obj: WhiteboardObject) => {
           const renderObj = (liveObjectsMap.get(obj.id) ?? obj) as WhiteboardObject;
+          const hasLiveTransform = manipulation.liveTransformRef.current.has(obj.id);
+          const renderShapeObj = (hasLiveTransform ? obj : renderObj) as WhiteboardObject;
 
           if (renderObj.type === 'frame') {
             return (
               <Frame
                 key={obj.id}
-                data={renderObj as FrameType}
+                data={renderShapeObj as FrameType}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
@@ -2097,7 +2147,7 @@ export default function BoardPage() {
             return (
               <StickyNote
                 key={obj.id}
-                data={renderObj as StickyNoteType}
+                data={renderShapeObj as StickyNoteType}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={activeTool !== 'move'}
                 onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -2123,7 +2173,7 @@ export default function BoardPage() {
             return (
               <Rectangle
                 key={obj.id}
-                data={renderObj as RectShape}
+                data={renderShapeObj as RectShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
@@ -2149,7 +2199,7 @@ export default function BoardPage() {
             return (
               <Circle
                 key={obj.id}
-                data={renderObj as CircleShape}
+                data={renderShapeObj as CircleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
@@ -2204,7 +2254,7 @@ export default function BoardPage() {
             return (
               <Text
                 key={obj.id}
-                data={renderObj as TextShape}
+                data={renderShapeObj as TextShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={activeTool !== 'move'}
                 onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -2230,7 +2280,7 @@ export default function BoardPage() {
             return (
               <TextBubble
                 key={obj.id}
-                data={renderObj as TextBubbleShape}
+                data={renderShapeObj as TextBubbleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={activeTool !== 'move'}
                 onSelect={(e: Konva.KonvaEventObject<MouseEvent>) => {
@@ -2256,7 +2306,7 @@ export default function BoardPage() {
             return (
               <Triangle
                 key={obj.id}
-                data={renderObj as TriangleShape}
+                data={renderShapeObj as TriangleShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
@@ -2282,7 +2332,7 @@ export default function BoardPage() {
             return (
               <Star
                 key={obj.id}
-                data={renderObj as StarShape}
+                data={renderShapeObj as StarShape}
                 isSelected={isSelected(obj.id) && !selectionArea}
                 isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {

@@ -103,31 +103,14 @@ export function summarizeBoardState(
 }
 
 /**
- * Renders the board state summary as a concise string for the system prompt.
+ * Renders the board state summary as JSON for the system prompt.
+ * The model should use the exact id values from the objects array in tool calls.
  */
 export function boardStateToPromptString(
   summary: BoardStateSummary,
 ): string {
   if (summary.objectCount === 0) {
-    return 'The board is currently empty.';
+    return JSON.stringify({ objectCount: 0, objects: [] });
   }
-
-  const lines = summary.objects.map((obj) => {
-    const parts = [`id=${obj.id}`, `type=${obj.type}`, `pos=(${obj.x},${obj.y})`];
-    if (obj.width !== undefined) parts.push(`w=${obj.width}`);
-    if (obj.height !== undefined) parts.push(`h=${obj.height}`);
-    if (obj.radius !== undefined) parts.push(`r=${obj.radius}`);
-    if (obj.color) parts.push(`color=${obj.color}`);
-    if (obj.text) parts.push(`text="${obj.text}"`);
-    if (obj.name) parts.push(`name="${obj.name}"`);
-    if (obj.containedObjectIds && obj.containedObjectIds.length > 0) {
-      parts.push(`contains=[${obj.containedObjectIds.join(', ')}]`);
-    }
-    return parts.join(' ');
-  });
-
-  let result = `Board has ${summary.objectCount} object(s):\n`;
-  result += lines.join('\n');
-
-  return result;
+  return JSON.stringify(summary);
 }

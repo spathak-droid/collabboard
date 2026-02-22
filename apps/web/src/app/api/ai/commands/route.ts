@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     { role: 'system', content: SYSTEM_PROMPT },
     {
       role: 'system',
-      content: `Current board state:\n${boardContext}`,
+      content: `Current board state (JSON). Use the exact id values from the objects array in your tool calls:\n${boardContext}`,
     },
     ...conversationHistory.map((msg) => ({
       role: msg.role as 'user' | 'assistant',

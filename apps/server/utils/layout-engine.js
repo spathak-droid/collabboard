@@ -29,6 +29,8 @@ const ASPECT_MULTIPLIERS = {
 };
 
 const GAP = 20;
+/** Larger gap for flow layouts so connector lines between nodes are longer and more visible */
+const FLOW_GAP = 80;
 const FRAME_PADDING = 40;
 // Extra padding for wrapper frame so start/end nodes (e.g. circles) are fully inside
 const WRAPPER_FRAME_PADDING = 80;
@@ -87,16 +89,24 @@ function computeLayoutBounds(childSizes, layout, count) {
 
   switch (layout) {
     case 'columns':
-    case 'stack_horizontal':
-    case 'flow_horizontal': {
+    case 'stack_horizontal': {
       const totalWidth = childSizes.reduce((sum, s) => sum + s.width, 0) + GAP * (count - 1);
       const maxHeight = Math.max(...childSizes.map(s => s.height));
       return { width: totalWidth, height: maxHeight };
     }
-    case 'stack_vertical':
-    case 'flow_vertical': {
+    case 'flow_horizontal': {
+      const totalWidth = childSizes.reduce((sum, s) => sum + s.width, 0) + FLOW_GAP * (count - 1);
+      const maxHeight = Math.max(...childSizes.map(s => s.height));
+      return { width: totalWidth, height: maxHeight };
+    }
+    case 'stack_vertical': {
       const maxWidth = Math.max(...childSizes.map(s => s.width));
       const totalHeight = childSizes.reduce((sum, s) => sum + s.height, 0) + GAP * (count - 1);
+      return { width: maxWidth, height: totalHeight };
+    }
+    case 'flow_vertical': {
+      const maxWidth = Math.max(...childSizes.map(s => s.width));
+      const totalHeight = childSizes.reduce((sum, s) => sum + s.height, 0) + FLOW_GAP * (count - 1);
       return { width: maxWidth, height: totalHeight };
     }
     case 'grid': {
@@ -170,6 +180,9 @@ export function planToToolCalls(plan, anchor = null, frameInfo = null, useExplic
 
   emitConnectors(children, idMap, toolCalls);
 
+  // Emit branch nodes (e.g. "did not receive link" → ERROR) and their connectors
+  emitBranches(children, positions, layout, idMap, toolCalls, generateTempId, frameInfo, useExplicitPositions);
+
   if (plan.wrapInFrame !== false && !frameInfo) {
     const contentBounds = computeContentBounds(toolCalls);
     if (contentBounds) {
@@ -221,19 +234,19 @@ function computeChildPositions(children, layout, startX, startY, constraintArea)
   switch (layout) {
     case 'columns':
     case 'stack_horizontal':
-      return layoutHorizontal(childSizes, startX, startY);
+      return layoutHorizontal(childSizes, startX, startY, GAP);
     case 'stack_vertical':
-      return layoutVertical(childSizes, startX, startY);
+      return layoutVertical(childSizes, startX, startY, GAP);
     case 'grid':
       return layoutGrid(childSizes, startX, startY, children.length);
     case 'radial':
       return layoutRadial(childSizes, startX, startY, children.length);
     case 'flow_horizontal':
-      return layoutHorizontal(childSizes, startX, startY);
+      return layoutHorizontal(childSizes, startX, startY, FLOW_GAP);
     case 'flow_vertical':
-      return layoutVertical(childSizes, startX, startY);
+      return layoutVertical(childSizes, startX, startY, FLOW_GAP);
     default:
-      return layoutHorizontal(childSizes, startX, startY);
+      return layoutHorizontal(childSizes, startX, startY, GAP);
   }
 }
 
@@ -267,23 +280,25 @@ function computeChildPositionsUnconstrained(childSizes, layout, startX, startY, 
   switch (layout) {
     case 'columns':
     case 'stack_horizontal':
+      return layoutHorizontal(childSizes, startX, startY, GAP);
     case 'flow_horizontal':
-      return layoutHorizontal(childSizes, startX, startY);
+      return layoutHorizontal(childSizes, startX, startY, FLOW_GAP);
     case 'stack_vertical':
+      return layoutVertical(childSizes, startX, startY, GAP);
     case 'flow_vertical':
-      return layoutVertical(childSizes, startX, startY);
+      return layoutVertical(childSizes, startX, startY, FLOW_GAP);
     case 'grid':
       return layoutGrid(childSizes, startX, startY, count);
     case 'radial':
       return layoutRadial(childSizes, startX, startY, count);
     default:
-      return layoutHorizontal(childSizes, startX, startY);
+      return layoutHorizontal(childSizes, startX, startY, GAP);
   }
 }
 
 // ── Layout algorithms ───────────────────────────────────────
 
-function layoutHorizontal(childSizes, startX, startY) {
+function layoutHorizontal(childSizes, startX, startY, gap = GAP) {
   const positions = [];
   let x = startX;
   const maxHeight = Math.max(...childSizes.map(s => s.height));
@@ -299,12 +314,12 @@ function layoutHorizontal(childSizes, startX, startY) {
       width: size.width,
       height: size.height,
     });
-    x += size.width + GAP;
+    x += size.width + gap;
   }
   return positions;
 }
 
-function layoutVertical(childSizes, startX, startY) {
+function layoutVertical(childSizes, startX, startY, gap = GAP) {
   const positions = [];
   let y = startY;
   const maxWidth = Math.max(...childSizes.map(s => s.width));
@@ -320,7 +335,7 @@ function layoutVertical(childSizes, startX, startY) {
       width: size.width,
       height: size.height,
     });
-    y += size.height + GAP;
+    y += size.height + gap;
   }
   return positions;
 }
@@ -615,6 +630,114 @@ function findToolCallIndex(idMap, childIndex, children) {
     }
   }
   return -1;
+}
+
+/**
+ * Emit branch nodes (e.g. error/failure paths) and connectors from a main-flow node.
+ * Branch is placed below (flow_horizontal) or to the side (flow_vertical) of the source node.
+ */
+function emitBranches(children, positions, layout, idMap, toolCalls, genId, frameInfo, useExplicitPositions) {
+  const branchGap = FLOW_GAP;
+
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    const branch = child.branch;
+    if (!branch || !branch.steps || branch.steps.length === 0) continue;
+
+    const pos = positions[i];
+    const sourceCenterX = pos.x + pos.width / 2;
+    const sourceCenterY = pos.y + pos.height / 2;
+    const steps = branch.steps;
+    const direction = branch.direction || 'down';
+
+    const stepSizes = steps.map(step => getNodeSize(step));
+    let bx, by;
+
+    if (layout === 'flow_horizontal') {
+      if (direction === 'down') {
+        by = pos.y + pos.height + branchGap;
+        let yAcc = by;
+        const branchPositions = stepSizes.map((size, j) => {
+          const x = Math.round(sourceCenterX - size.width / 2);
+          const y = Math.round(yAcc);
+          yAcc += size.height + GAP;
+          return { x, y, width: size.width, height: size.height };
+        });
+        for (let j = 0; j < steps.length; j++) {
+          const stepPos = branchPositions[j];
+          emitNode(steps[j], stepPos.x, stepPos.y, stepPos.width, stepPos.height, toolCalls, idMap, genId, frameInfo, useExplicitPositions);
+          idMap.set(`plan_${i}_branch_${j}`, toolCalls.length - 1);
+        }
+      } else if (direction === 'up') {
+        const totalBranchHeight = stepSizes.reduce((sum, s) => sum + s.height, 0) + GAP * (steps.length - 1);
+        by = pos.y - totalBranchHeight - branchGap;
+        let yAcc = by;
+        for (let j = 0; j < steps.length; j++) {
+          const size = stepSizes[j];
+          bx = Math.round(sourceCenterX - size.width / 2);
+          const stepY = Math.round(yAcc);
+          yAcc += size.height + GAP;
+          emitNode(steps[j], bx, stepY, size.width, size.height, toolCalls, idMap, genId, frameInfo, useExplicitPositions);
+          idMap.set(`plan_${i}_branch_${j}`, toolCalls.length - 1);
+        }
+      } else {
+        bx = direction === 'right' ? pos.x + pos.width + branchGap : pos.x - stepSizes[0].width - branchGap;
+        let xAcc = direction === 'right' ? bx : bx + stepSizes[0].width;
+        for (let j = 0; j < steps.length; j++) {
+          const size = stepSizes[j];
+          const stepX = Math.round(direction === 'right' ? xAcc : xAcc - size.width);
+          const stepY = Math.round(sourceCenterY - size.height / 2);
+          emitNode(steps[j], stepX, stepY, size.width, size.height, toolCalls, idMap, genId, frameInfo, useExplicitPositions);
+          idMap.set(`plan_${i}_branch_${j}`, toolCalls.length - 1);
+          xAcc += (direction === 'right' ? size.width + GAP : -(size.width + GAP));
+        }
+      }
+    } else {
+      // flow_vertical: branch goes left/right or up/down
+      if (direction === 'right' || direction === 'left') {
+        bx = direction === 'right' ? pos.x + pos.width + branchGap : pos.x - stepSizes[0].width - branchGap;
+        let xAcc = direction === 'right' ? bx : bx + stepSizes[0].width;
+        for (let j = 0; j < steps.length; j++) {
+          const size = stepSizes[j];
+          const stepX = Math.round(direction === 'right' ? xAcc : xAcc - size.width);
+          const stepY = Math.round(sourceCenterY - size.height / 2);
+          emitNode(steps[j], stepX, stepY, size.width, size.height, toolCalls, idMap, genId, frameInfo, useExplicitPositions);
+          idMap.set(`plan_${i}_branch_${j}`, toolCalls.length - 1);
+          xAcc += (direction === 'right' ? size.width + GAP : -(size.width + GAP));
+        }
+      } else {
+        by = direction === 'down' ? pos.y + pos.height + branchGap : pos.y - stepSizes.reduce((s, sz) => s + sz.height, 0) - GAP * (steps.length - 1) - branchGap;
+        let yAcc = by;
+        for (let j = 0; j < steps.length; j++) {
+          const size = stepSizes[j];
+          bx = Math.round(sourceCenterX - size.width / 2);
+          const stepY = Math.round(yAcc);
+          emitNode(steps[j], bx, stepY, size.width, size.height, toolCalls, idMap, genId, frameInfo, useExplicitPositions);
+          idMap.set(`plan_${i}_branch_${j}`, toolCalls.length - 1);
+          yAcc += size.height + GAP;
+        }
+      }
+    }
+
+    const sourceIdx = findToolCallIndex(idMap, i, children);
+    const branch0Idx = idMap.get(`plan_${i}_branch_0`);
+    if (sourceIdx >= 0 && branch0Idx >= 0) {
+      toolCalls.push({
+        name: 'createConnector',
+        arguments: { fromIndex: sourceIdx, toIndex: branch0Idx, style: 'straight' },
+      });
+    }
+    for (let j = 0; j < steps.length - 1; j++) {
+      const fromIdx = idMap.get(`plan_${i}_branch_${j}`);
+      const toIdx = idMap.get(`plan_${i}_branch_${j + 1}`);
+      if (fromIdx >= 0 && toIdx >= 0) {
+        toolCalls.push({
+          name: 'createConnector',
+          arguments: { fromIndex: fromIdx, toIndex: toIdx, style: 'straight' },
+        });
+      }
+    }
+  }
 }
 
 // ── Bounds helpers ──────────────────────────────────────────

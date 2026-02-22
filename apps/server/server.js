@@ -344,7 +344,7 @@ const callOpenAI = traceable(
 
     const messages = [
       { role: 'system', content: AI_SYSTEM_PROMPT },
-      { role: 'system', content: `Current board state:\n${context}` },
+      { role: 'system', content: `Current board state (JSON). Use the exact id values from the objects array in your tool calls:\n${context}` },
       ...conversationHistory.map((msg) => ({ role: msg.role, content: msg.content })),
     ];
 
@@ -798,6 +798,10 @@ async function handleAIMessage(ws, data) {
                 // Move summary
                 const count = toolCalls.length;
                 summary = `I've moved ${count} object${count !== 1 ? 's' : ''}`;
+              } else if (intent.operation === 'ARRANGE') {
+                const arrangeCall = toolCalls.find(tc => tc.name === 'arrangeInGrid' || tc.name === 'arrangeInGridAndResize');
+                const count = arrangeCall?.arguments?.objectIds?.length ?? 0;
+                summary = count > 0 ? `I've arranged ${count} object${count !== 1 ? 's' : ''} in a grid` : `I've arranged the objects in a grid`;
               } else {
                 // Fallback for other operations
                 summary = `I've ${intent.operation.toLowerCase()}d ${quantity > 1 ? quantity + ' ' : ''}${intent.objectType}${quantity > 1 ? 's' : ''}`;

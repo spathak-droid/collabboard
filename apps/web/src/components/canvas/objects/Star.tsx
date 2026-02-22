@@ -28,8 +28,8 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
 
   const outerRadius = Math.max(20, Math.min(data.width, data.height) / 2);
   const innerRadius = outerRadius * 0.45;
-  const textAreaWidth = data.width * 0.5;
-  const textAreaHeight = data.height * 0.35;
+  const textAreaWidth = data.width * 0.4;
+  const textAreaHeight = data.height * 0.3;
   const resolvedTextFamily = data.textFamily ?? 'Inter';
   const hasRealText = typeof data.text === 'string' && data.text.trim().length > 0;
   const resolvedTextSize = useMemo(() => {
@@ -98,11 +98,25 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
     const stageScale = stage.scaleX();
     const curX = groupRef.current?.x() ?? data.x;
     const curY = groupRef.current?.y() ?? data.y;
+    const rotation = groupRef.current?.rotation() ?? data.rotation ?? 0;
+    const rad = (rotation * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
 
-    const editorX = containerRect.left + stagePos.x + (curX + data.width * 0.25) * stageScale;
-    const editorY = containerRect.top + stagePos.y + (curY + data.height * 0.35) * stageScale;
-    const editorWidth = Math.max(80, data.width * 0.5 * stageScale);
-    const editorHeight = Math.max(36, data.height * 0.35 * stageScale);
+    const localLeft = data.width * 0.3;
+    const localTop = data.height * 0.35;
+    const localW = data.width * 0.4;
+    const localH = data.height * 0.3;
+    const localCx = localLeft + localW / 2;
+    const localCy = localTop + localH / 2;
+    const stageCx = curX + localCx * cos - localCy * sin;
+    const stageCy = curY + localCx * sin + localCy * cos;
+    const editorWidth = Math.max(60, data.width * 0.4 * stageScale);
+    const editorHeight = Math.max(32, data.height * 0.3 * stageScale);
+    const screenCx = containerRect.left + stagePos.x + stageCx * stageScale;
+    const screenCy = containerRect.top + stagePos.y + stageCy * stageScale;
+    const editorX = screenCx - editorWidth / 2;
+    const editorY = screenCy - editorHeight / 2;
 
     const textarea = document.createElement('textarea');
     textarea.id = 'inline-shape-editor';
@@ -111,9 +125,12 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
     textarea.style.position = 'fixed';
     textarea.style.left = `${editorX}px`;
     textarea.style.top = `${editorY}px`;
+    textarea.style.transform = `rotate(${rotation}deg)`;
+    textarea.style.transformOrigin = '50% 50%';
     textarea.style.width = `${editorWidth}px`;
     textarea.style.height = `${editorHeight}px`;
-    textarea.style.padding = '0';
+    textarea.style.paddingLeft = '0';
+    textarea.style.paddingRight = '0';
     textarea.style.margin = '0';
     textarea.style.border = 'none';
     textarea.style.borderRadius = '0';
@@ -122,7 +139,18 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
     textarea.style.outline = 'none';
     textarea.style.boxShadow = 'none';
     textarea.style.resize = 'none';
-    textarea.style.overflow = 'hidden';
+    textarea.style.overflow = 'auto';
+    textarea.style.wordBreak = 'break-word';
+    textarea.style.overflowWrap = 'break-word';
+    textarea.style.textAlign = 'center';
+    const LINE_HEIGHT_MULTIPLIER = 1.25;
+    const applyVerticalCenterPadding = () => {
+      const fs = parseFloat(textarea.style.fontSize) || resolvedTextSize * stageScale;
+      const lineHeightPx = fs * LINE_HEIGHT_MULTIPLIER;
+      const padding = Math.max(0, (editorHeight - lineHeightPx) / 2);
+      textarea.style.paddingTop = `${padding}px`;
+      textarea.style.paddingBottom = `${padding}px`;
+    };
     const updateFontSize = () => {
       const fontSize = getAutoFitFontSize(
         textarea.value || ' ',
@@ -132,12 +160,13 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
         { minSize: 12, maxSize: 40 }
       );
       textarea.style.fontSize = `${fontSize * stageScale}px`;
+      applyVerticalCenterPadding();
     };
     textarea.style.fontFamily = resolvedTextFamily;
     textarea.style.fontSize = `${resolvedTextSize * stageScale}px`;
-    textarea.style.lineHeight = '1.25';
-    textarea.style.textAlign = 'center';
+    textarea.style.lineHeight = String(LINE_HEIGHT_MULTIPLIER);
     textarea.style.zIndex = '10000';
+    applyVerticalCenterPadding();
 
     document.body.appendChild(textarea);
     setIsEditingText(true);
@@ -217,7 +246,7 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
 
         {displayText && !isEditingText ? (
           <Text
-            x={data.width * 0.25}
+            x={data.width * 0.3}
             y={data.height * 0.35}
             text={displayText}
             fontSize={resolvedTextSize}
@@ -228,8 +257,8 @@ const StarComponent = ({ data, isSelected, isDraggable = true, onSelect, onUpdat
             verticalAlign="middle"
             listening={false}
             wrap="word"
-            width={data.width * 0.5}
-            height={data.height * 0.35}
+            width={data.width * 0.4}
+            height={data.height * 0.3}
             ellipsis
           />
         ) : null}

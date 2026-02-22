@@ -85,8 +85,7 @@ export const INTENT_CLASSIFIER = {
           },
           direction: {
             type: 'string',
-            enum: ['left', 'right', 'up', 'down'],
-            description: 'Direction for movement (e.g., "move right" = "right")',
+            description: 'Direction: "left", "right", "up", "down", or "to frame" when user says "move X to the frame" / "move all Y into the frame"',
           },
           targetFilter: {
             type: 'object',
@@ -224,8 +223,8 @@ When user specifies exact colors for multiple objects:
   * **CRITICAL: "create X with [color]" = CREATE operation, even if "color" keyword appears**
   * **CRITICAL - Frame Context: If user says "create X inside/in this", "create X in the frame", "create X here" → set targetFilter={useSelection:true}**
   * **CRITICAL - Frame Around Selection: If user says "create frame around/surrounding these/this/selected" → set targetFilter={useSelection:true}**
-  * **This tells the system to create objects inside the selected frame (if a frame is selected)**
-  * **Or wrap a frame around selected objects (if creating a frame)**
+  * **CRITICAL - Frame Around Object Type: If user says "create frame around [object type]" (e.g. "sticky notes", "circles", "all rectangles") with NO "these/selected/this" → set targetFilter by TYPE so the system finds those objects on the board. Do NOT set useSelection:true.**
+  * **This tells the system to create objects inside the selected frame (if a frame is selected), wrap a frame around selected objects (if these/selected), or wrap a frame around all objects of that type (if type specified).**
   * Examples:
     - "create 5 sticky notes with random color" → operation=CREATE (NOT CHANGE_COLOR)
     - "add 9 circles with different colors" → operation=CREATE (NOT CHANGE_COLOR)
@@ -235,6 +234,9 @@ When user specifies exact colors for multiple objects:
     - "create sticky notes here" → operation=CREATE, objectType=sticky, targetFilter={useSelection:true}
     - "create a frame around these" → operation=CREATE, objectType=frame, targetFilter={useSelection:true}
     - "add frame surrounding selected objects" → operation=CREATE, objectType=frame, targetFilter={useSelection:true}
+    - "create a frame around sticky notes" → operation=CREATE, objectType=frame, targetFilter={type:'sticky'}
+    - "add frame around all circles" → operation=CREATE, objectType=frame, targetFilter={shapeType:'circle'}
+    - "frame around the rectangles" → operation=CREATE, objectType=frame, targetFilter={shapeType:'rect'}
   
 - **UPDATE**: "write", "update text", "change text", "edit text", "set text to" (WITHOUT create/add/make at the start)
   * "write 'upcoming' in all pink notes" → operation=UPDATE, text="upcoming", targetFilter={color:'pink', type:'sticky'}
@@ -263,6 +265,8 @@ When user specifies exact colors for multiple objects:
   * "move right" → operation=MOVE, direction="right", targetFilter={useSelection:true}
   * "move all sticky notes left" → operation=MOVE, direction="left", targetFilter={type:'sticky'}
   * "move to 100, 200" → operation=MOVE, coordinates={x:100, y:200}, targetFilter={useSelection:true}
+  * **"move all sticky notes to the frame"** → operation=MOVE, direction="to frame", targetFilter={type:'sticky'}
+  * **"move these into the frame"** → operation=MOVE, direction="to frame", targetFilter={useSelection:true}
   
 - **RESIZE**: "resize", "make bigger/smaller" + dimensions (NOT for frames to fit contents)
   * "resize to 300x200" → operation=RESIZE, dimensions={width:300, height:200}
@@ -539,6 +543,14 @@ User: "resize to 300x200"
   "targetFilter": { "useSelection": true }
 }
 
+User: "move all sticky notes to the frame" OR "move these into the frame"
+{
+  "operation": "MOVE",
+  "direction": "to frame",
+  "targetFilter": { "type": "sticky" }
+}
+Note: Use direction "to frame" when user wants objects moved inside a frame. Use targetFilter.type for "all sticky notes", or useSelection for "these".
+
 User: "how many pink stars"
 {
   "operation": "ANALYZE",
@@ -570,6 +582,14 @@ User: "resize frame to fit contents" OR "fit frame to contents"
   "targetFilter": { "type": "frame" }
 }
 Note: This will fall through to mini-agent since it needs board context to find the frame.
+
+User: "create a frame around sticky notes" OR "add a frame around all sticky notes"
+{
+  "operation": "CREATE",
+  "objectType": "frame",
+  "targetFilter": { "type": "sticky" }
+}
+Note: Use type in targetFilter so the system finds sticky notes on the board; do NOT use useSelection when no selection is implied.
 
 User: "delete all red rectangles"
 {
@@ -973,61 +993,47 @@ export function executeFromIntent(intent, boardState) {
           title: intent.text || 'Frame',
         };
         
-        // If user has objects selected and is creating a frame, wrap the frame around selected objects
+        // Determine objects to wrap: from selection OR from targetFilter type/shapeType (e.g. "frame around sticky notes")
+        let objectsToWrap = [];
         if (intent.targetFilter?.useSelection && boardState?.selectedIds && boardState.selectedIds.length > 0) {
-          console.log(`📦 [Frame Context] Creating frame around ${boardState.selectedIds.length} selected objects`);
-          console.log(`   Selected IDs: ${JSON.stringify(boardState.selectedIds)}`);
-          
-          // Calculate bounding box of selected objects
-          const selectedObjects = boardState.objects?.filter(obj => 
-            boardState.selectedIds.includes(obj.id)
-          ) || [];
-          
-          if (selectedObjects.length > 0) {
-            // Find min/max coordinates
-            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            
-            for (const obj of selectedObjects) {
-              if (obj.type === 'line') continue; // Skip lines
-              
-              let objMinX = obj.x;
-              let objMinY = obj.y;
-              let objMaxX = obj.x;
-              let objMaxY = obj.y;
-              
-              if (obj.type === 'circle') {
-                const radius = obj.radius || 50;
-                objMinX = obj.x - radius;
-                objMinY = obj.y - radius;
-                objMaxX = obj.x + radius;
-                objMaxY = obj.y + radius;
-              } else if (obj.type === 'star') {
-                objMaxX = obj.x + (obj.width || 180);
-                objMaxY = obj.y + (obj.height || 180);
-              } else if (obj.width && obj.height) {
-                objMaxX = obj.x + obj.width;
-                objMaxY = obj.y + obj.height;
-              }
-              
-              console.log(`   Object ${obj.id} (${obj.type}): min(${objMinX}, ${objMinY}) max(${objMaxX}, ${objMaxY})`);
-              
-              minX = Math.min(minX, objMinX);
-              minY = Math.min(minY, objMinY);
-              maxX = Math.max(maxX, objMaxX);
-              maxY = Math.max(maxY, objMaxY);
+          objectsToWrap = boardState.objects?.filter(obj => boardState.selectedIds.includes(obj.id)) || [];
+          console.log(`📦 [Frame Context] Creating frame around ${objectsToWrap.length} selected objects`);
+        } else if (intent.targetFilter && (intent.targetFilter.type || intent.targetFilter.shapeType) && boardState?.objects) {
+          objectsToWrap = findMatchingObjects(boardState, intent.targetFilter);
+          console.log(`📦 [Frame Context] Creating frame around ${objectsToWrap.length} objects by type (targetFilter: ${JSON.stringify(intent.targetFilter)})`);
+        }
+        if (objectsToWrap.length > 0) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          for (const obj of objectsToWrap) {
+            if (obj.type === 'line') continue; // Skip lines
+            let objMinX = obj.x;
+            let objMinY = obj.y;
+            let objMaxX = obj.x;
+            let objMaxY = obj.y;
+            if (obj.type === 'circle') {
+              const radius = obj.radius || 50;
+              objMinX = obj.x - radius;
+              objMinY = obj.y - radius;
+              objMaxX = obj.x + radius;
+              objMaxY = obj.y + radius;
+            } else if (obj.type === 'star') {
+              objMaxX = obj.x + (obj.width || 180);
+              objMaxY = obj.y + (obj.height || 180);
+            } else if (obj.width && obj.height) {
+              objMaxX = obj.x + obj.width;
+              objMaxY = obj.y + obj.height;
             }
-            
-            console.log(`   Combined bounds: min(${minX}, ${minY}) max(${maxX}, ${maxY})`);
-            
-            // Add padding
-            const PADDING = 40;
-            args.x = minX - PADDING;
-            args.y = minY - PADDING;
-            args.width = (maxX - minX) + (PADDING * 2);
-            args.height = (maxY - minY) + (PADDING * 2);
-            
-            console.log(`✅ [Frame Context] Frame bounds calculated: (${args.x}, ${args.y}), size: ${args.width}x${args.height}`);
+            minX = Math.min(minX, objMinX);
+            minY = Math.min(minY, objMinY);
+            maxX = Math.max(maxX, objMaxX);
+            maxY = Math.max(maxY, objMaxY);
           }
+          const PADDING = 40;
+          args.x = minX - PADDING;
+          args.y = minY - PADDING;
+          args.width = (maxX - minX) + (PADDING * 2);
+          args.height = (maxY - minY) + (PADDING * 2);
+          console.log(`✅ [Frame Context] Frame bounds calculated: (${args.x}, ${args.y}), size: ${args.width}x${args.height}`);
         }
         
         // Add quantity if > 1
@@ -1154,33 +1160,63 @@ export function executeFromIntent(intent, boardState) {
     }
     
     case 'MOVE': {
-      // Find matching objects and move them
       const targets = findMatchingObjects(boardState, intent.targetFilter);
-      
-      targets.forEach((obj, i) => {
-        const args = {
-          objectId: obj.id,
-        };
-        
-        // Prefer direction over coordinates (viewport-aware)
-        if (intent.direction) {
-          args.direction = intent.direction;
-        } else if (intent.coordinates) {
-          args.x = intent.coordinates.x;
-          args.y = intent.coordinates.y;
-        } else {
-          // Fallback: no movement specified
-          console.warn(`⚠️  MOVE operation missing direction or coordinates for object ${obj.id}`);
-          return;
+      const isMoveToFrame = intent.direction && String(intent.direction).toLowerCase().replace(/\s+/g, ' ') === 'to frame';
+
+      if (isMoveToFrame && targets.length > 0) {
+        // Resolve frame: selected frame, or first frame on board
+        let frame = null;
+        if (boardState?.selectedIds?.length === 1 && boardState?.objects) {
+          frame = boardState.objects.find(o => o.id === boardState.selectedIds[0] && o.type === 'frame');
         }
-        
-        toolCalls.push({
-          id: `move_${i}`,
-          name: 'moveObject',
-          arguments: args,
+        if (!frame && boardState?.objects) {
+          frame = boardState.objects.find(o => o.type === 'frame');
+        }
+        if (!frame) {
+          console.warn('⚠️  MOVE to frame: no frame found on board or selected');
+          break;
+        }
+        const fx = frame.x ?? 0;
+        const fy = frame.y ?? 0;
+        const fw = Math.max(frame.width ?? 400, 200);
+        const fh = Math.max(frame.height ?? 400, 200);
+        const PADDING = 24;
+        const innerW = fw - PADDING * 2;
+        const innerH = fh - PADDING * 2;
+        const N = targets.length;
+        const cols = Math.ceil(Math.sqrt(N));
+        const rows = Math.ceil(N / cols);
+        const cellW = innerW / cols;
+        const cellH = innerH / rows;
+        targets.forEach((obj, i) => {
+          const row = Math.floor(i / cols);
+          const col = i % cols;
+          const objW = obj.width ?? 200;
+          const objH = obj.height ?? 200;
+          const x = fx + PADDING + col * cellW + (cellW - objW) / 2;
+          const y = fy + PADDING + row * cellH + (cellH - objH) / 2;
+          toolCalls.push({
+            id: `move_${i}`,
+            name: 'moveObject',
+            arguments: { objectId: obj.id, x: Math.round(x), y: Math.round(y) },
+          });
         });
-      });
-      
+        console.log(`✅ [MOVE to frame] Moving ${targets.length} objects into frame ${frame.id}`);
+      } else {
+        targets.forEach((obj, i) => {
+          const args = { objectId: obj.id };
+          if (intent.direction && ['left', 'right', 'up', 'down'].includes(String(intent.direction).toLowerCase())) {
+            args.direction = intent.direction.toLowerCase();
+          } else if (intent.coordinates) {
+            args.x = intent.coordinates.x;
+            args.y = intent.coordinates.y;
+          } else {
+            console.warn(`⚠️  MOVE operation missing direction or coordinates for object ${obj.id}`);
+            return;
+          }
+          toolCalls.push({ id: `move_${i}`, name: 'moveObject', arguments: args });
+        });
+      }
       break;
     }
     
@@ -1226,8 +1262,28 @@ export function executeFromIntent(intent, boardState) {
     case 'ARRANGE': {
       // Arrange selected objects in grid
       const targets = findMatchingObjects(boardState, intent.targetFilter);
-      
-      if (targets.length > 0) {
+      const useSelection = intent.targetFilter?.useSelection && boardState?.selectedIds?.length > 0;
+
+      // When user selected a single frame and said "space sticky notes to grid" → arrange contents inside the frame
+      if (useSelection && targets.length === 1 && targets[0].type === 'frame') {
+        const frame = targets[0];
+        const containedIds = Array.isArray(frame.containedObjectIds) ? frame.containedObjectIds : [];
+        if (containedIds.length > 0) {
+          toolCalls.push({
+            id: 'arrange_0',
+            name: intent.method === 'resize' ? 'arrangeInGridAndResize' : 'arrangeInGrid',
+            arguments: {
+              objectIds: containedIds,
+              frameId: frame.id,
+            },
+          });
+        } else {
+          // Frame has no containedObjectIds (e.g. legacy data) — let agent resolve from board state
+          console.log('ℹ️  [ARRANGE] Single frame selected but no containedObjectIds, falling through to agent');
+          return null;
+        }
+      } else if (targets.length > 0) {
+        // Normal case: arrange the selected (or matched) objects
         toolCalls.push({
           id: 'arrange_0',
           name: intent.method === 'resize' ? 'arrangeInGridAndResize' : 'arrangeInGrid',
@@ -1236,7 +1292,6 @@ export function executeFromIntent(intent, boardState) {
           },
         });
       }
-      
       break;
     }
     

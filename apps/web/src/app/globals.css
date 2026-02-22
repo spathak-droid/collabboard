@@ -142,4 +142,13 @@ body {
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  /* Inline shape editor: hide scrollbar when text overflows */
+  #inline-shape-editor {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  #inline-shape-editor::-webkit-scrollbar {
+    display: none;
+  }
 }

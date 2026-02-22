@@ -12,6 +12,7 @@ import { Circle, Group, Line, Rect, Text, Transformer } from 'react-konva';
 import type Konva from 'konva';
 import type { StickyNote as StickyNoteType } from '@/types/canvas';
 import { getAutoFitFontSize } from '@/lib/utils/autoFitText';
+import { useCanvasStore } from '@/lib/store/canvas';
 
 interface StickyNoteProps {
   data: StickyNoteType;
@@ -23,6 +24,8 @@ interface StickyNoteProps {
   onDragMove?: (id: string, x: number, y: number) => void;
   onTransformMove?: (id: string, x: number, y: number, rotation: number, dimensions?: { width?: number; height?: number }) => void;
 }
+
+const MIN_STICKY_SIZE = 50;
 
 const StickyNoteComponent = ({
   data,
@@ -38,13 +41,34 @@ const StickyNoteComponent = ({
   const transformerRef = useRef<Konva.Transformer>(null);
   const [isEditingText, setIsEditingText] = useState(false);
   const [isTransforming, setIsTransforming] = useState(false);
+  const localTransformRef = useRef<{ x: number; y: number; width: number; height: number; rotation: number } | null>(null);
+  const committedTransformRef = useRef<{ x: number; y: number; width: number; height: number; rotation: number } | null>(null);
   
   // Track base dimensions at transform start to prevent compounding scale
   const baseDimensionsRef = useRef<{ width: number; height: number } | null>(null);
 
+  useEffect(() => {
+    const committed = committedTransformRef.current;
+    if (!committed) return;
+    const matches =
+      Math.abs(data.x - committed.x) < 1 &&
+      Math.abs(data.y - committed.y) < 1 &&
+      Math.abs(data.width - committed.width) < 1 &&
+      Math.abs(data.height - committed.height) < 1 &&
+      Math.abs(data.rotation - committed.rotation) < 1;
+    if (matches) {
+      localTransformRef.current = null;
+      committedTransformRef.current = null;
+    }
+  }, [data.x, data.y, data.width, data.height, data.rotation]);
+
   // Use data dimensions directly - Konva's scale will handle the visual sizing during transform
-  const noteWidth = data.width;
-  const noteHeight = data.height;
+  const renderX = localTransformRef.current?.x ?? data.x;
+  const renderY = localTransformRef.current?.y ?? data.y;
+  const renderRotation = localTransformRef.current?.rotation ?? data.rotation;
+  const noteWidth = localTransformRef.current?.width ?? data.width;
+  const noteHeight = localTransformRef.current?.height ?? data.height;
+  const scale = useCanvasStore((state) => state.scale);
   const foldSize = 34;
   const textAreaWidth = noteWidth - 28;
   const textAreaHeight = noteHeight - 30;
@@ -136,6 +160,8 @@ const StickyNoteComponent = ({
     // #region agent log
     fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'StickyNote.tsx:handleTransformStart',message:'Transform START',data:{id:data.id,width:data.width,height:data.height,rotation:data.rotation},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
     // #endregion
+    localTransformRef.current = null;
+    committedTransformRef.current = null;
     baseDimensionsRef.current = { width: data.width, height: data.height };
     setIsTransforming(true);
     window.dispatchEvent(new Event('object-transform-start'));
@@ -148,6 +174,13 @@ const StickyNoteComponent = ({
       const scaleY = node.scaleY();
       const liveWidth = baseDimensionsRef.current.width * scaleX;
       const liveHeight = baseDimensionsRef.current.height * scaleY;
+      console.log('[StickyNote] transform live', {
+        scale,
+        id: data.id,
+        liveWidth,
+        liveHeight,
+        base: baseDimensionsRef.current,
+      });
       
       // During transform, let Konva handle the visual scaling
       // We only need to broadcast the dimensions for multiplayer sync
@@ -164,8 +197,8 @@ const StickyNoteComponent = ({
 
     const scaleX = node.scaleX();
     const scaleY = node.scaleY();
-    const newWidth = Math.max(120, baseDimensionsRef.current.width * scaleX);
-    const newHeight = Math.max(120, baseDimensionsRef.current.height * scaleY);
+    const newWidth = Math.max(MIN_STICKY_SIZE, baseDimensionsRef.current.width * scaleX);
+    const newHeight = Math.max(MIN_STICKY_SIZE, baseDimensionsRef.current.height * scaleY);
 
     node.scaleX(1);
     node.scaleY(1);
@@ -173,6 +206,16 @@ const StickyNoteComponent = ({
     const finalX = node.x();
     const finalY = node.y();
     const finalRotation = node.rotation();
+
+    const committed = {
+      x: finalX,
+      y: finalY,
+      width: newWidth,
+      height: newHeight,
+      rotation: finalRotation,
+    };
+    localTransformRef.current = committed;
+    committedTransformRef.current = committed;
 
     if (transformerRef.current) {
       transformerRef.current.forceUpdate();
@@ -211,11 +254,23 @@ const StickyNoteComponent = ({
 
     const curX = groupRef.current?.x() ?? data.x;
     const curY = groupRef.current?.y() ?? data.y;
+    const rotation = groupRef.current?.rotation() ?? data.rotation ?? 0;
+    const rad = (rotation * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
 
-    const editorX = containerRect.left + stagePos.x + (curX + 14) * stageScale;
-    const editorY = containerRect.top + stagePos.y + (curY + 16) * stageScale;
+    const textAreaW = noteWidth - 28;
+    const textAreaH = noteHeight - 30;
+    const localCx = 14 + textAreaW / 2;
+    const localCy = 16 + textAreaH / 2;
+    const stageCx = curX + localCx * cos - localCy * sin;
+    const stageCy = curY + localCx * sin + localCy * cos;
     const editorWidth = Math.max(100, (data.width - 28) * stageScale);
     const editorHeight = Math.max(56, (data.height - 30) * stageScale);
+    const screenCx = containerRect.left + stagePos.x + stageCx * stageScale;
+    const screenCy = containerRect.top + stagePos.y + stageCy * stageScale;
+    const editorX = screenCx - editorWidth / 2;
+    const editorY = screenCy - editorHeight / 2;
 
     const textarea = document.createElement('textarea');
     textarea.id = 'inline-shape-editor';
@@ -224,9 +279,12 @@ const StickyNoteComponent = ({
     textarea.style.position = 'fixed';
     textarea.style.left = `${editorX}px`;
     textarea.style.top = `${editorY}px`;
+    textarea.style.transform = `rotate(${rotation}deg)`;
+    textarea.style.transformOrigin = '50% 50%';
     textarea.style.width = `${editorWidth}px`;
     textarea.style.height = `${editorHeight}px`;
-    textarea.style.padding = '0';
+    textarea.style.paddingLeft = '0';
+    textarea.style.paddingRight = '0';
     textarea.style.margin = '0';
     textarea.style.border = 'none';
     textarea.style.borderRadius = '0';
@@ -237,6 +295,14 @@ const StickyNoteComponent = ({
     textarea.style.resize = 'none';
     textarea.style.overflow = 'hidden';
     textarea.style.fontFamily = resolvedTextFamily;
+    const LINE_HEIGHT_MULTIPLIER = 1.28;
+    const applyVerticalCenterPadding = () => {
+      const fs = parseFloat(textarea.style.fontSize) || resolvedTextSize * stageScale;
+      const lineHeightPx = fs * LINE_HEIGHT_MULTIPLIER;
+      const padding = Math.max(0, (editorHeight - lineHeightPx) / 2);
+      textarea.style.paddingTop = `${padding}px`;
+      textarea.style.paddingBottom = `${padding}px`;
+    };
     const updateFontSize = () => {
       const fontSize = getAutoFitFontSize(
         textarea.value || ' ',
@@ -245,12 +311,15 @@ const StickyNoteComponent = ({
         resolvedTextFamily,
         { minSize: 12, maxSize: 42 }
       );
-      textarea.style.fontSize = `${fontSize * stageScale}px`;
+      const scaledFontSize = fontSize * stageScale;
+      textarea.style.fontSize = `${scaledFontSize}px`;
+      applyVerticalCenterPadding();
     };
     textarea.style.fontSize = `${resolvedTextSize * stageScale}px`;
-    textarea.style.lineHeight = '1.28';
+    textarea.style.lineHeight = String(LINE_HEIGHT_MULTIPLIER);
     textarea.style.textAlign = 'center';
     textarea.style.zIndex = '10000';
+    applyVerticalCenterPadding();
 
     document.body.appendChild(textarea);
     setIsEditingText(true);
@@ -307,16 +376,22 @@ const StickyNoteComponent = ({
       <Group
         ref={groupRef}
         id={data.id}
-        x={data.x}
-        y={data.y}
-        rotation={data.rotation}
+        x={renderX}
+        y={renderY}
+        rotation={renderRotation}
         draggable={isDraggable}
-        onClick={(e) => {
-          // #region agent log
-          fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'StickyNote.tsx:onClick',message:'StickyNote clicked',data:{id:data.id,isSelected},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
-          // #endregion
-          onSelect(e);
-        }}
+      onClick={(e) => {
+        // #region agent log
+        fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'859e57'},body:JSON.stringify({sessionId:'859e57',location:'StickyNote.tsx:onClick',message:'StickyNote clicked',data:{id:data.id,isSelected},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+        // #endregion
+        console.log('[StickyNote] clicked', {
+          id: data.id,
+          width: data.width,
+          height: data.height,
+          scale: useCanvasStore.getState().scale,
+        });
+        onSelect(e);
+      }}
         onTap={onSelect}
         onDblClick={handleTextEdit}
         onDragStart={handleDragStart}
@@ -403,10 +478,46 @@ const StickyNoteComponent = ({
             'middle-left',
           ]}
           boundBoxFunc={(oldBox, newBox) => {
-            if (newBox.width < 120 || newBox.height < 120) {
-              return oldBox;
+            const minSize = MIN_STICKY_SIZE;
+            const needsWidthClamp = newBox.width < minSize;
+            const needsHeightClamp = newBox.height < minSize;
+            console.log('[StickyNote] boundBox', {
+              scale,
+              id: data.id,
+              newWidth: newBox.width,
+              newHeight: newBox.height,
+              minSize,
+              clampWidth: needsWidthClamp,
+              clampHeight: needsHeightClamp,
+              activeAnchor: transformerRef.current?.getActiveAnchor(),
+            });
+            if (!needsWidthClamp && !needsHeightClamp) {
+              return newBox;
             }
-            return newBox;
+
+            const activeAnchor = transformerRef.current?.getActiveAnchor() ?? '';
+            const width = Math.max(minSize, newBox.width);
+            const height = Math.max(minSize, newBox.height);
+            let x = newBox.x;
+            let y = newBox.y;
+
+            if (needsWidthClamp) {
+              if (activeAnchor.includes('left')) {
+                x = oldBox.x + (oldBox.width - width);
+              } else if (activeAnchor.includes('right')) {
+                x = oldBox.x;
+              }
+            }
+
+            if (needsHeightClamp) {
+              if (activeAnchor.includes('top')) {
+                y = oldBox.y + (oldBox.height - height);
+              } else if (activeAnchor.includes('bottom')) {
+                y = oldBox.y;
+              }
+            }
+
+            return { ...newBox, x, y, width, height };
           }}
         />
       )}

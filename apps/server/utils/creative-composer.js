@@ -48,6 +48,11 @@ const PLANNER_PROMPT = `You are the Planner for a collaborative whiteboard. Your
 **Connectors:**
 - Add connectTo: "straight" or "curved" on a node to connect it to the NEXT sibling
 
+**Branches (failure/error paths):**
+- For flowcharts, a node can have an optional "branch" for alternative paths (e.g. "if email fails", "did not receive link").
+- Use branch: { direction: "down", steps: [ ... ] } — steps are shapes/nodes that connect from this node, then to each other. Use "down" for flow_horizontal (branch below main flow), "right" or "left" for flow_vertical.
+- Typical pattern: one step for the condition (e.g. "did not receive link" in yellow/amber), then one for the outcome (e.g. "ERROR" in red). The layout engine will place the branch and draw the lines.
+
 **RULES:**
 1. ALWAYS call createPlan — never return just text
 2. Pick the layout that best matches the user's intent
@@ -92,6 +97,22 @@ User: "flowchart for user signup"
     { type: "shape", shape: "rect", text: "Enter Email", color: "blue", connectTo: "straight" },
     { type: "shape", shape: "rect", text: "Verify Email", color: "blue", connectTo: "straight" },
     { type: "shape", shape: "rect", text: "Create Password", color: "blue", connectTo: "straight" },
+    { type: "shape", shape: "circle", text: "Done", color: "green" }
+  ]})
+
+User: "password reset flowchart with branch if they did not receive the reset link to an error"
+→ createPlan({ title: "Password Reset Flowchart", layout: "flow_horizontal", wrapInFrame: true, children: [
+    { type: "shape", shape: "circle", text: "Start", color: "green", connectTo: "straight" },
+    { type: "shape", shape: "rect", text: "Enter Email", color: "blue", connectTo: "straight" },
+    { type: "shape", shape: "rect", text: "Receive Reset Link", color: "blue", connectTo: "straight",
+      branch: { direction: "down", steps: [
+        { type: "shape", shape: "rect", text: "did not receive link", color: "amber" },
+        { type: "shape", shape: "rect", text: "ERROR", color: "red" }
+      ]}
+    },
+    { type: "shape", shape: "rect", text: "Click Reset Link", color: "blue", connectTo: "straight" },
+    { type: "shape", shape: "rect", text: "Enter New Password", color: "blue", connectTo: "straight" },
+    { type: "shape", shape: "rect", text: "Confirm Password", color: "blue", connectTo: "straight" },
     { type: "shape", shape: "circle", text: "Done", color: "green" }
   ]})
 

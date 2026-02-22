@@ -149,6 +149,24 @@ export const CREATE_PLAN_TOOL = {
               type: 'string',
               description: 'Connect this node to the NEXT sibling with a connector line. Value is the connector style: "straight" or "curved".',
             },
+            // Optional branch (e.g. error/failure path) from this node
+            branch: {
+              type: 'object',
+              description: 'Optional side branch from this node (e.g. "if email fails", "did not receive link" → ERROR). Layout engine places it to the side/up/down based on main flow.',
+              properties: {
+                direction: {
+                  type: 'string',
+                  enum: ['down', 'up', 'left', 'right'],
+                  description: 'Where to draw the branch relative to main flow: "down" for flow_horizontal (branch below), "right"/"left" for flow_vertical.',
+                },
+                steps: {
+                  type: 'array',
+                  description: 'Nodes in the branch (e.g. condition then error). Each step is connected in order; first step connects from this node.',
+                  items: { $ref: '#/$defs/PlanNode' },
+                },
+              },
+              required: ['direction', 'steps'],
+            },
           },
           required: ['type'],
         },

@@ -1,11 +1,11 @@
 /**
- * Infinite Grid Component — supports line grid, dot grid, or none
+ * Infinite Grid Component — line grid or none
  */
 
 'use client';
 
 import { useMemo, memo } from 'react';
-import { Line, Circle } from 'react-konva';
+import { Line } from 'react-konva';
 
 interface GridProps {
   scale: number;
@@ -13,19 +13,17 @@ interface GridProps {
   width: number;
   height: number;
   theme?: 'light' | 'dark';
-  gridMode?: 'none' | 'line' | 'dot';
+  gridMode?: 'none' | 'line';
 }
 
 const GridComponent = ({ scale, position, width, height, theme = 'light', gridMode = 'line' }: GridProps) => {
   const gridConfig = useMemo(() => {
     const baseGridSize = 50;
+    const gridSize = baseGridSize * 2;
     const startX = -position.x / scale;
     const startY = -position.y / scale;
     const endX = (width - position.x) / scale;
     const endY = (height - position.y) / scale;
-
-    // Use smaller grid for dots, larger for lines
-    const gridSize = gridMode === 'dot' ? baseGridSize : baseGridSize * 2;
 
     return {
       gridSize,
@@ -34,35 +32,12 @@ const GridComponent = ({ scale, position, width, height, theme = 'light', gridMo
       endX: Math.ceil(endX / gridSize) * gridSize,
       endY: Math.ceil(endY / gridSize) * gridSize,
     };
-  }, [scale, position, width, height, gridMode]);
+  }, [scale, position, width, height]);
 
   const elements = useMemo(() => {
     if (gridMode === 'none') return [];
 
     const { startX, startY, endX, endY, gridSize } = gridConfig;
-
-    if (gridMode === 'dot') {
-      const dots: React.ReactElement[] = [];
-      const dotColor = theme === 'dark' ? '#475569' : '#cbd5e1';
-      const dotRadius = Math.max(1, 1.5 / scale);
-
-      for (let x = startX; x <= endX; x += gridSize) {
-        for (let y = startY; y <= endY; y += gridSize) {
-          dots.push(
-            <Circle
-              key={`d-${x}-${y}`}
-              x={x}
-              y={y}
-              radius={dotRadius}
-              fill={dotColor}
-              listening={false}
-              perfectDrawEnabled={false}
-            />
-          );
-        }
-      }
-      return dots;
-    }
 
     // Line grid
     const lines: React.ReactElement[] = [];

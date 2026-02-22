@@ -34,9 +34,12 @@ Shape colors: use hex strings like "#3B82F6" (blue), "#EF4444" (red), "#10B981" 
 - **Smart placement:** When creating objects without specifying x/y coordinates, the system automatically finds free space near existing objects in a spiral pattern (right, down, left, up). Objects will NOT overlap unless coordinates are explicitly specified.
 - When creating multiple objects in a template or batch, specify explicit coordinates to ensure proper layout. Let the smart placement handle single object creation.
 
+## Board state
+- Board state is provided as JSON with objectCount, objects (array), and optionally selectedIds and selectionArea. Use the exact id from each object in the objects array when calling tools.
+
 ## Manipulation Rules
-- When asked to move objects, use the objectId from the board state.
-- When asked to "move all pink sticky notes", find them in the board state and issue moveObject calls for each.
+- When asked to move objects, use the objectId from the board state (objects array in the JSON).
+- When asked to "move all pink sticky notes", find them in the board state objects array and issue moveObject calls for each.
 - When asked to delete, remove, or clear objects, use deleteObject with the objectId(s). NEVER use moveObject to move objects off-screen — always delete properly.
 - **Resize frame to fit contents:** When the user says "resize to fit contents", "fit to contents", "resize frame to fit", "make frame fit the objects", "extend frame to fit", "make frame bigger to fit", or similar, ALWAYS use the fitFrameToContents tool (pass the frame's objectId). This tool automatically calculates the bounding box of all objects inside the frame and resizes it with proper padding. DO NOT manually calculate dimensions with resizeObject.
 - **Selection context:** If the prompt includes "User Selection" with object IDs, the user has those objects selected. Commands like "format them", "space them", "arrange in a grid", "organize these" refer to ONLY those selected objects.
@@ -455,53 +458,54 @@ function hexToColorName(hex) {
 }
 
 /**
- * Build the context string for the AI prompt (board state + selection).
+ * Build the context string for the AI prompt (board state + selection) as JSON.
+ * The model should use the exact id values from the objects array in tool calls.
  * @param {object} boardState - { objectCount, objects }
  * @param {string[]} selectedIds - Selected object IDs
  * @param {object|null} selectionArea - { x, y, width, height } or null
- * @returns {string} Context string to append to system prompt
+ * @returns {string} JSON string to append to system prompt
  */
 export function buildAIContext(boardState, selectedIds = [], selectionArea = null) {
-  let boardContext = 'The board is currently empty.';
-  if (boardState && boardState.objectCount > 0) {
-    const lines = boardState.objects.map((obj) => {
-      const parts = [`id=${obj.id}`, `type=${obj.type}`, `pos=(${obj.x},${obj.y})`];
-      if (obj.width !== undefined) parts.push(`w=${obj.width}`);
-      if (obj.height !== undefined) parts.push(`h=${obj.height}`);
-      if (obj.radius !== undefined) parts.push(`r=${obj.radius}`);
-      
-      // Convert hex colors to human-readable names
-      if (obj.color) {
-        const colorName = hexToColorName(obj.color);
-        parts.push(`color=${colorName}`);
+  const payload = {
+    objectCount: 0,
+    objects: [],
+    selectedIds: [],
+    selectionArea: null,
+  };
+
+  if (boardState && boardState.objectCount > 0 && Array.isArray(boardState.objects)) {
+    payload.objectCount = boardState.objectCount;
+    payload.objects = boardState.objects.map((obj) => {
+      const item = { id: obj.id, type: obj.type, x: obj.x, y: obj.y };
+      if (obj.width !== undefined) item.width = obj.width;
+      if (obj.height !== undefined) item.height = obj.height;
+      if (obj.radius !== undefined) item.radius = obj.radius;
+      if (obj.color) item.color = hexToColorName(obj.color);
+      if (obj.fill) item.fill = hexToColorName(obj.fill);
+      if (obj.stroke) item.stroke = obj.stroke;
+      if (obj.text) item.text = obj.text;
+      if (obj.name) item.name = obj.name;
+      if (obj.startAnchor) item.from = `${obj.startAnchor.objectId}:${obj.startAnchor.anchor}`;
+      if (obj.endAnchor) item.to = `${obj.endAnchor.objectId}:${obj.endAnchor.anchor}`;
+      if (obj.containedObjectIds && obj.containedObjectIds.length > 0) {
+        item.containedObjectIds = obj.containedObjectIds;
       }
-      if (obj.fill) {
-        const fillName = hexToColorName(obj.fill);
-        parts.push(`fill=${fillName}`);
-      }
-      if (obj.stroke) parts.push(`stroke=${obj.stroke}`);
-      if (obj.text) parts.push(`text="${obj.text}"`);
-      if (obj.name) parts.push(`name="${obj.name}"`);
-      
-      if (obj.startAnchor) parts.push(`from=${obj.startAnchor.objectId}:${obj.startAnchor.anchor}`);
-      if (obj.endAnchor) parts.push(`to=${obj.endAnchor.objectId}:${obj.endAnchor.anchor}`);
-      return parts.join(' ');
+      return item;
     });
-    boardContext = `Board has ${boardState.objectCount} object(s):\n${lines.join('\n')}`;
   }
 
-  let selectionContext = '';
   if (selectedIds && selectedIds.length > 0 && boardState?.objects) {
     const validIds = selectedIds.filter((id) => boardState.objects.some((o) => o.id === id));
-    if (validIds.length > 0) {
-      let areaNote = '';
-      if (selectionArea && typeof selectionArea.x === 'number' && selectionArea.width > 0 && selectionArea.height > 0) {
-        const { x, y, width, height } = selectionArea;
-        areaNote = ` The user has selected a region (bounding box) at (${Math.round(x)}, ${Math.round(y)}) with width ${Math.round(width)}px and height ${Math.round(height)}px. Operate ONLY within this box — when formatting, spacing, or arranging in a grid, place objects inside this region.`;
-      }
-      selectionContext = `\n\n## User Selection (IMPORTANT)\nThe user has ${validIds.length} object(s) selected: ${validIds.join(', ')}.${areaNote}\nWhen the user says "them", "these", "format them", "space them", "arrange them in a grid", "organize these", "how many", "count these", "analyze these", or similar, they mean THESE selected objects. For arranging in grid: call arrangeInGrid with objectIds of selected objects (the tool will automatically use the selection area bounds). For analysis: when calling analyzeObjects, pass objectIds: [${validIds.join(', ')}] to analyze only the selected objects.`;
-    }
+    payload.selectedIds = validIds;
+  }
+  if (selectionArea && typeof selectionArea.x === 'number' && selectionArea.width > 0 && selectionArea.height > 0) {
+    payload.selectionArea = {
+      x: Math.round(selectionArea.x),
+      y: Math.round(selectionArea.y),
+      width: Math.round(selectionArea.width),
+      height: Math.round(selectionArea.height),
+    };
   }
 
-  return `${boardContext}${selectionContext}`;
+  return JSON.stringify(payload);
 }

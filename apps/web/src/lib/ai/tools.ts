@@ -513,7 +513,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'arrangeInGrid',
       description:
-        'Arrange the selected objects into an evenly spaced grid (positions only, keeps original sizes). Use when the user says "arrange in grid", "space them evenly", "organize in a grid", etc. Can optionally arrange within a frame\'s bounds.',
+        'Arrange the selected objects into an evenly spaced grid (positions only, keeps original sizes). Use when the user says "arrange in grid", "space them evenly", "organize in a grid", etc. Grid is on the canvas by default; only pass frameId when the user explicitly says "in the frame" or "inside this frame".',
       parameters: {
         type: 'object',
         properties: {
@@ -524,7 +524,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           frameId: {
             type: 'string',
-            description: 'Optional: ID of frame to arrange objects within. If provided, arranges objects to fit within this frame\'s bounds.',
+            description: 'Optional. ONLY pass when user explicitly asks to arrange inside a frame (e.g. "in this frame", "inside the frame"). Do NOT pass for plain "arrange in a grid" — then the grid uses canvas/selection area.',
           },
           rows: {
             type: 'number',
@@ -544,7 +544,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'arrangeInGridAndResize',
       description:
-        'Arrange objects in a grid AND resize them to perfectly fit the selection area or frame. Use when the user says "resize and space them evenly", "resize to fit", "make them the same size and space evenly", etc.',
+        'Arrange objects in a grid AND resize them to perfectly fit the selection area or frame. Use when the user says "resize and space them evenly", "resize to fit", "make them the same size and space evenly", etc. Only pass frameId when user explicitly says "in the frame" or "inside this frame".',
       parameters: {
         type: 'object',
         properties: {
@@ -555,7 +555,7 @@ export const AI_TOOLS: ChatCompletionTool[] = [
           },
           frameId: {
             type: 'string',
-            description: 'Optional: ID of frame to arrange objects within. If provided, resizes and arranges objects to fit within this frame\'s bounds.',
+            description: 'Optional. ONLY when user explicitly asks to arrange inside a frame. Do NOT pass for plain "arrange in a grid" or "resize and space evenly".',
           },
         },
         required: ['objectIds'],

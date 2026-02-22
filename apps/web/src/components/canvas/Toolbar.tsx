@@ -193,15 +193,6 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
                   <span>Line grid</span>
                   <span className={`h-3 w-3 rounded-full border-2 ${gridMode === 'line' ? 'border-slate-900 bg-slate-900' : 'border-slate-300'}`} />
                 </button>
-                <button
-                  onClick={() => setGridMode('dot')}
-                  className={`flex w-full items-center justify-between rounded-md px-1.5 py-1.5 text-xs transition-colors ${
-                    gridMode === 'dot' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-700 hover:bg-white/50'
-                  }`}
-                >
-                  <span>Dot grid</span>
-                  <span className={`h-3 w-3 rounded-full border-2 ${gridMode === 'dot' ? 'border-slate-900 bg-slate-900' : 'border-slate-300'}`} />
-                </button>
               </div>
             </div>
           )}

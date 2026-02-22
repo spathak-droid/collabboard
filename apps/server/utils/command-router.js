@@ -158,7 +158,7 @@ export async function executeSingleAgent(openai, agent, userMessage, boardState,
       role: 'system', 
       content: agent.systemPrompt,
     },
-    { role: 'user', content: `Current board state:\n${context}\n\nYour task: ${userMessage}` },
+    { role: 'user', content: `Current board state (JSON). Use the exact id values from the objects array in your tool calls:\n${context}\n\nYour task: ${userMessage}` },
   ];
 
   const startTime = Date.now();

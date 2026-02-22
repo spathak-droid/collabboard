@@ -21,9 +21,9 @@ export interface Viewport {
 }
 
 /**
- * Get object bounds in canvas coordinates
+ * Get object bounds in canvas coordinates (for minimap and viewport culling).
  */
-function getObjectBounds(obj: WhiteboardObject): {
+export function getObjectBounds(obj: WhiteboardObject): {
   minX: number;
   minY: number;
   maxX: number;

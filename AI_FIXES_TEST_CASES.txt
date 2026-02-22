@@ -179,6 +179,103 @@ Test these to verify all fixes work together:
 
 
 =================================================================
+TEST CASE 5: FRAME AROUND OBJECT TYPE - "Create a frame around sticky notes" (no selection)
+=================================================================
+
+PROBLEM:
+- User said "create a frame around sticky notes" with no selection
+- Intent returned targetFilter: { useSelection: true }
+- Expected: Frame created around all sticky notes on the board (using board state)
+- Actual: Frame created with default placement (selection-based path used, but selectedIds empty)
+
+ROOT CAUSE:
+- Intent classifier only had rules for "frame around these/selected" → useSelection: true
+- No rule for "frame around [object type]" (e.g. sticky notes, circles)
+- executeFromIntent only computed frame bounds from selectedIds, not from type-based filter
+
+FIX APPLIED:
+- Intent classifier: "create frame around [object type]" → targetFilter by type (e.g. type: 'sticky'), not useSelection
+- executeFromIntent: When creating a frame, if no selection, use findMatchingObjects(boardState, targetFilter) when targetFilter has type or shapeType; compute bounds from those objects
+
+TEST PROMPTS:
+1. [No selection, board has several sticky notes] "create a frame around sticky notes"
+   Expected: One frame created that encompasses all sticky notes (with padding)
+
+2. [No selection, board has circles] "add a frame around all circles"
+   Expected: Frame created around all circles
+
+3. [Select some objects] "create a frame around these"
+   Expected: Frame around selected objects only (unchanged behavior)
+
+FILES MODIFIED:
+- apps/server/utils/intent-classifier.js (prompt rules + few-shot example; executeFromIntent frame branch)
+
+
+=================================================================
+TEST CASE 6: GRID VS FRAME - "Arrange the 6 sticky notes in a grid" (no frameId)
+=================================================================
+
+PROBLEM:
+- User said "Arrange the 6 sticky notes in a grid" (no frame mentioned)
+- LLM returned arrangeInGrid with objectIds + frameId (a frame on the board)
+- Expected: Grid on canvas (selection area or viewport), not inside a frame
+- Actual: Grid arranged inside the frame (frameId was passed)
+
+ROOT CAUSE:
+- Grid and frame were not distinguished: model inferred "arrange in grid" could mean "in a frame"
+- Tool description said frameId was "optional" without "only when user asks for frame"
+
+FIX APPLIED:
+- OrganizeAgent: Added "Grid vs Frame" rule — only pass frameId when user explicitly says "in the frame" / "inside this frame" or when the only selection is a frame
+- arrangeInGrid/arrangeInGridAndResize parameter descriptions: "ONLY pass when user explicitly says in the frame... Do NOT pass for plain arrange in a grid"
+- Web tools.ts: Same frameId guidance for client-side AI
+
+TEST PROMPTS:
+1. [6 sticky notes on board, no frame selected] "Arrange the 6 sticky notes in a grid"
+   Expected: arrangeInGrid(objectIds: [...], no frameId) — grid on canvas/selection area
+
+2. [Frame selected] "Arrange these in a grid"
+   Expected: If selection is only the frame → arrangeInGrid with frameId. If selection is 6 stickies → no frameId.
+
+3. [Any] "Arrange them in a grid inside this frame"
+   Expected: arrangeInGrid with frameId
+
+FILES MODIFIED:
+- apps/server/utils/agent-system.js (OrganizeAgent prompt + arrangeInGrid/arrangeInGridAndResize frameId descriptions)
+- apps/web/src/lib/ai/tools.ts (arrangeInGrid, arrangeInGridAndResize descriptions)
+
+
+=================================================================
+TEST CASE 7: MOVE TO FRAME - "Move all sticky notes to the frame"
+=================================================================
+
+PROBLEM:
+- User said "move all sticky notes to the frame"
+- Intent: MOVE, targetFilter { type: sticky }, direction "to frame"
+- Mini agent (or intent path) said "it moved" but nothing moved
+
+ROOT CAUSE:
+- moveObject only supports direction: left|right|up|down or (x,y). There is no "to frame" — client treated direction "to frame" as invalid and did nothing (or 0,0 movement).
+- Mini agent returns a text message (summary) + tool calls; if tool calls are invalid, user still sees "I moved them" but client doesn't execute a real move.
+
+FIX APPLIED:
+- executeFromIntent: When MOVE direction is "to frame", resolve frame (selected or first on board), compute grid positions inside frame bounds, emit moveObject(objectId, x, y) for each target.
+- Intent classifier: direction schema allows "to frame"; prompt + few-shot for "move all sticky notes to the frame" → direction "to frame", targetFilter type sticky.
+- Mini agent: "to the frame" / "into the frame" commands return null so intent path handles them (board state needed for frame bounds).
+
+TEST PROMPTS:
+1. [Board has sticky notes and one frame] "move all sticky notes to the frame"
+   Expected: All sticky notes move inside the frame in a grid layout
+
+2. [Frame selected] "move these into the frame"
+   Expected: Selected objects move inside the selected frame
+
+FILES MODIFIED:
+- apps/server/utils/intent-classifier.js (MOVE case "to frame" handling; direction schema; prompt + few-shot)
+- apps/server/utils/mini-agents.js (exclude "to the frame" from MINI_MOVE so intent handles it)
+
+
+=================================================================
 VALIDATION CHECKLIST
 =================================================================
 
@@ -197,6 +294,16 @@ FRAME CONTEXT:
 ✓ Multiple objects gridded inside frame
 ✓ No frame selected = normal viewport placement
 ✓ Frame padding respected (40px)
+✓ "Create a frame around sticky notes" (no selection) creates frame around all stickies by type
+✓ "Create a frame around these" (with selection) creates frame around selected objects only
+
+GRID VS FRAME:
+✓ "Arrange the N sticky notes in a grid" (no frame mentioned) → arrangeInGrid without frameId (grid on canvas)
+✓ "Arrange in a grid inside this frame" → arrangeInGrid with frameId
+
+MOVE TO FRAME:
+✓ "Move all sticky notes to the frame" → moveObject(id, x, y) for each with positions inside frame (not direction "to frame")
+✓ User sees actual movement, not just "it moved" with no change
 
 PROMPT RELIABILITY:
 ✓ No intermittent failures on large quantities

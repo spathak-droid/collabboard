@@ -153,6 +153,15 @@ export function useDirectKonvaUpdates({
         }
       }
     }
+
+    if (node.getType() === 'Line' && livePos.points?.length === 4) {
+      const currentPoints = (node as Konva.Line).points();
+      const [n1, n2, n3, n4] = livePos.points;
+      if (currentPoints.length !== 4 || n1 !== currentPoints[0] || n2 !== currentPoints[1] || n3 !== currentPoints[2] || n4 !== currentPoints[3]) {
+        (node as Konva.Line).points(livePos.points);
+        hasUpdates = true;
+      }
+    }
     if (livePos.radius !== undefined && (targetNode as any).radius) {
       const currentRadius = (targetNode as any).radius();
       if (Math.abs(currentRadius - livePos.radius) > 0.1) {

@@ -21,20 +21,6 @@ describe('Grid', () => {
     expect(container).toBeInTheDocument();
   });
 
-  it('renders dot grid without errors', () => {
-    const { container } = render(
-      <Grid
-        scale={1}
-        position={{ x: 0, y: 0 }}
-        width={1920}
-        height={1080}
-        gridMode="dot"
-      />
-    );
-
-    expect(container).toBeInTheDocument();
-  });
-
   it('renders nothing when gridMode is none', () => {
     const { container } = render(
       <Grid
@@ -87,7 +73,7 @@ describe('Grid', () => {
         position={{ x: 500, y: -300 }}
         width={1920}
         height={1080}
-        gridMode="dot"
+        gridMode="line"
       />
     );
 

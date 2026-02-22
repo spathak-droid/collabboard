@@ -7,6 +7,7 @@
 import { useCanvasStore } from '@/lib/store/canvas';
 import { useCallback, useState } from 'react';
 import ControlCameraIcon from '@mui/icons-material/ControlCamera';
+import CloseFullscreenIcon from '@mui/icons-material/CloseFullscreen';
 
 export const ZoomControl = () => {
   const { scale, setScale, resetView } = useCanvasStore();
@@ -31,6 +32,10 @@ export const ZoomControl = () => {
   const handleCloseCameraControls = useCallback(() => {
     setShowCameraControls(false);
   }, []);
+
+  const handleZoomTo10 = useCallback(() => {
+    setScale(0.1);
+  }, [setScale]);
 
   return (
     <>
@@ -91,6 +96,20 @@ export const ZoomControl = () => {
             title="Canvas controls"
           >
             <ControlCameraIcon className="w-4 h-4 text-gray-700" />
+          </button>
+
+
+          {/* Divider */}
+          <div className="w-px h-5 bg-gray-300" />
+
+          {/* Zoom to 10% Button */}
+          <button
+            onClick={handleZoomTo10}
+            disabled={scale <= 0.1}
+            className="p-1 rounded hover:bg-gray-100 transition-colors"
+            title="Zoom to 10%"
+          >
+            <CloseFullscreenIcon className="w-4 h-4 text-gray-700" />
           </button>
         </div>
       </div>

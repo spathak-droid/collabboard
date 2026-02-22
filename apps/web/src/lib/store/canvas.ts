@@ -23,7 +23,7 @@ export interface CanvasStore {
   setActiveTool: (tool: CanvasStore['activeTool']) => void;
 
   // View settings
-  gridMode: 'none' | 'line' | 'dot';
+  gridMode: 'none' | 'line';
   setGridMode: (mode: CanvasStore['gridMode']) => void;
   snapToGrid: boolean;
   setSnapToGrid: (enabled: boolean) => void;

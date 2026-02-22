@@ -42,10 +42,6 @@ export function useObjectManipulation(
    */
   const updateShapeAndConnectors = useCallback(
     (shapeId: string, updates: Partial<WhiteboardObject>) => {
-      // Clear live drag/transform positions — the real state is now being persisted
-      liveDragRef.current.delete(shapeId);
-      liveTransformRef.current.delete(shapeId);
-
       const currentObj = objects.find((o) => o.id === shapeId);
       if (!currentObj) return;
 

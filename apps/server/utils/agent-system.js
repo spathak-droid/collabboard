@@ -633,7 +633,7 @@ export const ORGANIZE_AGENT = {
             },
             frameId: {
               type: 'string',
-              description: 'Optional: ID of frame to arrange objects within',
+              description: 'Optional. ONLY pass when user explicitly says "in the frame" / "inside this frame" or when the only selection is a frame. Do NOT pass for plain "arrange in a grid" — grid then uses canvas/selection area.',
             },
             rows: {
               type: 'number',
@@ -663,7 +663,7 @@ export const ORGANIZE_AGENT = {
             },
             frameId: {
               type: 'string',
-              description: 'Optional: ID of frame to arrange objects within',
+              description: 'Optional. ONLY pass when user explicitly says "in the frame" / "inside this frame" or when the only selection is a frame. Do NOT pass for plain "arrange in a grid".',
             },
             rows: {
               type: 'number',
@@ -688,7 +688,13 @@ You MUST:
 - ONLY call organization tools
 - If user mentions arranging "in the frame" or "inside [frame name]", find the frame in board state and pass its ID as frameId parameter
 
-**CRITICAL - When user selects a frame:**
+**CRITICAL - Grid vs Frame (DO NOT confuse):**
+- **Grid** = arrange objects in a regular grid pattern (rows × columns). This can be on the canvas or inside a frame.
+- **Frame** = a container; arranging "in a frame" means fitting the grid within that frame's bounds.
+- **Only pass frameId when BOTH are true:** (1) User explicitly says "in the frame", "inside this frame", "within the frame", "in that frame", or (2) User's selection is exactly one frame (and they mean "arrange the contents of this frame"). Otherwise do NOT pass frameId.
+- "Arrange the 6 sticky notes in a grid" = grid on canvas (no frameId). "Arrange these in a grid inside this frame" = pass frameId.
+
+**CRITICAL - When user selects a frame (and only a frame):**
 - If the selection ONLY contains a frame ID (no other objects), you MUST:
   1. Find that frame in the board state
   2. Look at the frame's containedObjectIds array
@@ -701,16 +707,14 @@ You MUST:
 **Tool Selection:**
 - Use arrangeInGrid when: "space them evenly", "arrange in grid", "organize these"
   → Only repositions objects, keeps their original sizes
-  → If arranging in a frame: pass frameId parameter to arrange within frame bounds
+  → Pass frameId ONLY when user explicitly asks for arrangement inside a frame (see Grid vs Frame above)
 - Use arrangeInGridAndResize when: "resize and space them evenly", "resize to fit", "make them the same size and space evenly"
   → Repositions AND resizes objects to perfectly fill the selection area or frame
-  → If arranging in a frame: pass frameId parameter
+  → Pass frameId ONLY when user explicitly asks for arrangement inside a frame
 
-**Frame Context:**
-- When user says "arrange these in the frame" or "space evenly in [frame name]":
-  1. Find the frame in board state by name or type
-  2. Get the objects inside the frame from containedObjectIds
-  3. Pass those object IDs + frameId to arrangeInGrid or arrangeInGridAndResize
+**Frame Context (when to pass frameId):**
+- ONLY when user says "arrange these in the frame", "space evenly in [frame name]", "in this frame", "inside the frame", or when the only selected object is a frame and they mean its contents.
+- When user says "arrange the N sticky notes in a grid" or "arrange in grid" without mentioning a frame: do NOT pass frameId (grid will use selection area or canvas).
 
 **Grid Dimension Control:**
 - When user says "1x5 grid", "2x3 grid", "1 row 3 columns", etc., extract the explicit dimensions

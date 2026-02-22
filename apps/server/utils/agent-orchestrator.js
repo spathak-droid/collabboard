@@ -23,7 +23,7 @@ export async function createExecutionPlan(openai, userMessage, boardState, conte
       // Enable prompt caching for system prompt (remains constant)
       cache_control: { type: 'ephemeral' }
     },
-    { role: 'system', content: `Current board state:\n${context}` },
+    { role: 'system', content: `Current board state (JSON). Use the exact id values from the objects array in your tool calls:\n${context}` },
     { role: 'user', content: userMessage },
   ];
 
@@ -68,7 +68,7 @@ export async function executeTask(openai, task, boardState, context, previousRes
   console.log(`🤖 ${agentName} executing: ${task.task}`);
 
   // Build context for the worker agent
-  let taskContext = `Current board state:\n${context}\n\nYour task: ${task.task}`;
+  let taskContext = `Current board state (JSON). Use the exact id values from the objects array in your tool calls:\n${context}\n\nYour task: ${task.task}`;
   
   // If this task depends on previous results, include them
   if (task.waitForPrevious && previousResults.length > 0) {

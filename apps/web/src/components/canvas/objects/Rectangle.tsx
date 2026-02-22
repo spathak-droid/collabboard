@@ -186,11 +186,25 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
 
     const curX = groupRef.current?.x() ?? data.x;
     const curY = groupRef.current?.y() ?? data.y;
+    const rotation = groupRef.current?.rotation() ?? data.rotation ?? 0;
+    const rad = (rotation * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
 
-    const editorX = containerRect.left + stagePos.x + (curX + data.width * 0.05) * stageScale;
-    const editorY = containerRect.top + stagePos.y + (curY + data.height * 0.1) * stageScale;
+    const localLeft = data.width * 0.05;
+    const localTop = data.height * 0.1;
+    const localW = data.width * 0.9;
+    const localH = data.height * 0.8;
+    const localCx = localLeft + localW / 2;
+    const localCy = localTop + localH / 2;
+    const stageCx = curX + localCx * cos - localCy * sin;
+    const stageCy = curY + localCx * sin + localCy * cos;
     const editorWidth = Math.max(90, data.width * 0.9 * stageScale);
     const editorHeight = Math.max(42, data.height * 0.8 * stageScale);
+    const screenCx = containerRect.left + stagePos.x + stageCx * stageScale;
+    const screenCy = containerRect.top + stagePos.y + stageCy * stageScale;
+    const editorX = screenCx - editorWidth / 2;
+    const editorY = screenCy - editorHeight / 2;
 
     const textarea = document.createElement('textarea');
     textarea.id = 'inline-shape-editor';
@@ -199,9 +213,12 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
     textarea.style.position = 'fixed';
     textarea.style.left = `${editorX}px`;
     textarea.style.top = `${editorY}px`;
+    textarea.style.transform = `rotate(${rotation}deg)`;
+    textarea.style.transformOrigin = '50% 50%';
     textarea.style.width = `${editorWidth}px`;
     textarea.style.height = `${editorHeight}px`;
-    textarea.style.padding = '0';
+    textarea.style.paddingLeft = '0';
+    textarea.style.paddingRight = '0';
     textarea.style.margin = '0';
     textarea.style.border = 'none';
     textarea.style.borderRadius = '0';
@@ -211,6 +228,15 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
     textarea.style.boxShadow = 'none';
     textarea.style.resize = 'none';
     textarea.style.overflow = 'hidden';
+    textarea.style.textAlign = 'center';
+    const LINE_HEIGHT_MULTIPLIER = 1.25;
+    const applyVerticalCenterPadding = () => {
+      const fs = parseFloat(textarea.style.fontSize) || resolvedTextSize * stageScale;
+      const lineHeightPx = fs * LINE_HEIGHT_MULTIPLIER;
+      const padding = Math.max(0, (editorHeight - lineHeightPx) / 2);
+      textarea.style.paddingTop = `${padding}px`;
+      textarea.style.paddingBottom = `${padding}px`;
+    };
     const updateFontSize = () => {
       const fontSize = getAutoFitFontSize(
         textarea.value || ' ',
@@ -220,11 +246,13 @@ const RectangleComponent = ({ data, isSelected, isDraggable = true, onSelect, on
         { minSize: 12, maxSize: 48 }
       );
       textarea.style.fontSize = `${fontSize * stageScale}px`;
+      applyVerticalCenterPadding();
     };
     textarea.style.fontFamily = resolvedTextFamily;
     textarea.style.fontSize = `${resolvedTextSize * stageScale}px`;
-    textarea.style.lineHeight = '1.25';
+    textarea.style.lineHeight = String(LINE_HEIGHT_MULTIPLIER);
     textarea.style.zIndex = '10000';
+    applyVerticalCenterPadding();
 
     document.body.appendChild(textarea);
     setIsEditingText(true);

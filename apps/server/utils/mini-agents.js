@@ -551,7 +551,7 @@ export async function executeComplexSupervisor(openai, userMessage, boardState, 
   
   const messages = [
     { role: 'system', content: COMPLEX_SUPERVISOR.systemPrompt },
-    { role: 'user', content: `Command: ${userMessage}\n\nCurrent board state:\n${context}` },
+    { role: 'user', content: `Command: ${userMessage}\n\nCurrent board state (JSON). Use the exact id values from the objects array in your tool calls:\n${context}` },
   ];
 
   const startTime = Date.now();
@@ -699,7 +699,10 @@ export function detectMiniAgent(command, hasSelection = false) {
     return MINI_COLOR;
   }
   
-  // MOVE patterns (simple directional)
+  // MOVE patterns (simple directional only; "move to the frame" needs intent path for frame resolution)
+  if (/to (the )?frame|into (the )?frame/i.test(lower)) {
+    return null; // Let intent classifier handle "move X to the frame" (needs board state for frame bounds)
+  }
   if (/^move.*\b(right|left|up|down|outside)\b/i.test(lower) && !/and|then|,/.test(lower)) {
     return MINI_MOVE;
   }

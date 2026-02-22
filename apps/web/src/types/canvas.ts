@@ -2,7 +2,7 @@
  * Canvas object types and interfaces
  */
 
-export type ObjectType = 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'text' | 'textBubble' | 'frame' | 'path';
+export type ObjectType = 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'text' | 'textBubble' | 'frame' | 'path' | 'emoji';
 
 export interface BaseObject {
   id: string;
@@ -128,6 +128,13 @@ export interface Frame extends BaseObject {
   isAIContainer?: boolean; // True if AI created this for grouping/organizing objects, false/undefined for user-drawn frames
 }
 
+export interface EmojiObject extends BaseObject {
+  type: 'emoji';
+  width: number;
+  height: number;
+  emoji: string;
+}
+
 /** Freehand draw path: points are relative to (x, y). */
 export interface PathShape extends BaseObject {
   type: 'path';
@@ -136,7 +143,7 @@ export interface PathShape extends BaseObject {
   strokeWidth: number;
 }
 
-export type WhiteboardObject = StickyNote | RectShape | CircleShape | TriangleShape | StarShape | LineShape | TextShape | TextBubbleShape | Frame | PathShape;
+export type WhiteboardObject = StickyNote | RectShape | CircleShape | TriangleShape | StarShape | LineShape | TextShape | TextBubbleShape | Frame | PathShape | EmojiObject;
 
 export interface CanvasState {
   objects: Map<string, WhiteboardObject>;

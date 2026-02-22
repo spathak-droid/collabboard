@@ -6,7 +6,7 @@
 
 import { useCallback } from 'react';
 import { useCanvasStore } from '@/lib/store/canvas';
-import type { WhiteboardObject } from '@/types/canvas';
+import type { WhiteboardObject, PathShape } from '@/types/canvas';
 import { doRectsIntersect } from '@/lib/utils/geometry';
 
 export const useSelection = () => {
@@ -70,6 +70,34 @@ export const useSelection = () => {
             height: 30,
           };
         }
+
+        if (obj.type === 'path') {
+          const path = obj as PathShape;
+          const pts = path.points;
+          if (pts.length < 4) {
+            const w = Math.max(1, (path.strokeWidth ?? 2) * 2);
+            return { x: path.x, y: path.y, width: w, height: w };
+          }
+          let minX = path.x + pts[0];
+          let minY = path.y + pts[1];
+          let maxX = minX;
+          let maxY = minY;
+          for (let i = 2; i < pts.length; i += 2) {
+            const px = path.x + pts[i];
+            const py = path.y + pts[i + 1];
+            minX = Math.min(minX, px);
+            minY = Math.min(minY, py);
+            maxX = Math.max(maxX, px);
+            maxY = Math.max(maxY, py);
+          }
+          const padding = Math.max(1, (path.strokeWidth ?? 2) / 2);
+          return {
+            x: minX - padding,
+            y: minY - padding,
+            width: maxX - minX + padding * 2,
+            height: maxY - minY + padding * 2,
+          };
+        }
         
         // All other types have width/height
         const objWithDimensions = obj as WhiteboardObject & { width: number; height: number };
@@ -84,7 +112,7 @@ export const useSelection = () => {
       const selectedObjects = objects.filter((obj) => {
         return doRectsIntersect(rect, getObjectBounds(obj));
       });
-      
+
       setSelected(selectedObjects.map((obj) => obj.id));
     },
     [setSelected]

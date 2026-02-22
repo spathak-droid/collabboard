@@ -19,7 +19,7 @@ export interface CanvasStore {
   resetView: () => void;
   
   // Active tool
-  activeTool: 'select' | 'move' | 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'textBubble' | 'text' | 'frame' | 'draw' | null;
+  activeTool: 'select' | 'move' | 'sticky' | 'rect' | 'circle' | 'triangle' | 'star' | 'line' | 'textBubble' | 'text' | 'frame' | 'draw' | 'emoji' | null;
   setActiveTool: (tool: CanvasStore['activeTool']) => void;
 
   // Draw tool options (when activeTool === 'draw')
@@ -27,6 +27,11 @@ export interface CanvasStore {
   drawSize: number;
   setDrawColor: (color: string) => void;
   setDrawSize: (size: number) => void;
+
+  emojiCharacter: string;
+  setEmojiCharacter: (emoji: string) => void;
+  emojiPaletteOpen: boolean;
+  setEmojiPaletteOpen: (open: boolean) => void;
 
   // View settings
   gridMode: 'none' | 'line';
@@ -85,6 +90,11 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   drawSize: 4,
   setDrawColor: (color) => set({ drawColor: color }),
   setDrawSize: (size) => set({ drawSize: Math.max(1, Math.min(24, size)) }),
+
+  emojiCharacter: '😀',
+  setEmojiCharacter: (emoji) => set({ emojiCharacter: emoji }),
+  emojiPaletteOpen: false,
+  setEmojiPaletteOpen: (open) => set({ emojiPaletteOpen: open }),
 
   // View settings
   gridMode: 'line',

@@ -42,19 +42,16 @@ export function PerformanceMonitor({ awareness, currentUserId, getBroadcastRate 
   });
 
   const frameCountRef = useRef(0);
-  const broadcastCountRef = useRef(0);
   const receiveCountRef = useRef(0);
-  const lastAwarenessUpdateRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     if (!awareness) return;
 
     let frameId: number;
-    let lastFrameTime = performance.now();
     let lastStatsUpdate = performance.now();
 
     // Track FPS
-    const measureFPS = (currentTime: number) => {
+    const measureFPS = () => {
       frameCountRef.current++;
       frameId = requestAnimationFrame(measureFPS);
     };
@@ -70,7 +67,7 @@ export function PerformanceMonitor({ awareness, currentUserId, getBroadcastRate 
       let totalLatency = 0;
       let latencyCount = 0;
 
-      states.forEach((state, clientId) => {
+      states.forEach((state, _clientId) => {
         const user = state.user as { id: string } | undefined;
         const cursor = state.cursor as { lastUpdate: number } | undefined;
 

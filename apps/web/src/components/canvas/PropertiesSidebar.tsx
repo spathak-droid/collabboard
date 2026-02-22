@@ -37,7 +37,7 @@ export const PropertiesSidebar = ({
   onDelete,
   onDuplicate,
   onCopy,
-  onMove,
+  onMove: _onMove,
   isSelectionArea = false
 }: PropertiesSidebarProps) => {
   const [showStrokePicker, setShowStrokePicker] = useState(false);

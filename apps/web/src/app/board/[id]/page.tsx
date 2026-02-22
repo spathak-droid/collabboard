@@ -6,7 +6,7 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Rect as KonvaRect, Circle as KonvaCircle, Line as KonvaLine, Star as KonvaStar } from 'react-konva';
+import { Rect as KonvaRect, Circle as KonvaCircle, Line as KonvaLine, Star as KonvaStar, Text as KonvaText } from 'react-konva';
 import Konva from 'konva';
 import { Canvas } from '@/components/canvas/Canvas';
 import { Toolbar } from '@/components/canvas/Toolbar';
@@ -20,6 +20,7 @@ import { Text } from '@/components/canvas/objects/Text';
 import { TextBubble } from '@/components/canvas/objects/TextBubble';
 import { Frame } from '@/components/canvas/objects/Frame';
 import { Path } from '@/components/canvas/objects/Path';
+import { Emoji } from '@/components/canvas/objects/Emoji';
 import { SelectionArea } from '@/components/canvas/SelectionArea';
 import { DrawOptionsSidebar } from '@/components/canvas/DrawOptionsSidebar';
 import { Cursors } from '@/components/canvas/Cursors';
@@ -42,7 +43,7 @@ import { findNearestAnchor, resolveLinePoints } from '@/lib/utils/connectors';
 import { calculateAutoFit, calculateBoundingBox } from '@/lib/utils/autoFit';
 import { getVisibleObjects, getViewport, type Viewport } from '@/lib/utils/viewportCulling';
 import { STICKY_COLORS } from '@/types/canvas';
-import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextShape, TextBubbleShape, Frame as FrameType, PathShape, AnchorPosition } from '@/types/canvas';
+import type { WhiteboardObject, StickyNote as StickyNoteType, RectShape, CircleShape, TriangleShape, StarShape, LineShape, TextShape, TextBubbleShape, Frame as FrameType, PathShape, EmojiObject, AnchorPosition } from '@/types/canvas';
 // Refactored hooks
 import { useObjectBounds } from '@/lib/hooks/useObjectBounds';
 import { useFrameManagement } from '@/lib/hooks/useFrameManagement';
@@ -139,7 +140,21 @@ export default function BoardPage() {
     selectByRect,
   } = useSelection();
 
-  const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode, setScale, setPosition, selectionRect, drawColor, drawSize, minimapOpen } = useCanvasStore();
+  const {
+    activeTool,
+    setActiveTool,
+    scale,
+    position,
+    snapToGrid,
+    gridMode,
+    setScale,
+    setPosition,
+    selectionRect,
+    drawColor,
+    drawSize,
+    minimapOpen,
+    emojiCharacter,
+  } = useCanvasStore();
   const [previewPosition, setPreviewPosition] = useState<{ x: number; y: number } | null>(null);
   const isCreatingFrame = useRef(false);
   const pendingFrameRect = useRef<typeof selectionRect>(null);
@@ -724,6 +739,10 @@ export default function BoardPage() {
 
   const handleShapeUpdateWithClear = useCallback(
     (shapeId: string, updates: Partial<WhiteboardObject>) => {
+      // #region agent log
+      const obj = objectsMap.get(shapeId);
+      if (obj?.type === 'emoji' && ('width' in updates || 'height' in updates)) fetch('http://127.0.0.1:7742/ingest/88615bd7-9b92-45ab-a7f3-8f1c82f3db77',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba7bb2'},body:JSON.stringify({sessionId:'ba7bb2',location:'page.tsx:handleShapeUpdateWithClear',message:'Emoji resize update',data:{shapeId,width:updates.width,height:updates.height},timestamp:Date.now(),hypothesisId:'T3'})}).catch(()=>{});
+      // #endregion
       enqueuePendingTransform(shapeId, updates);
       manipulation.updateShapeAndConnectors(shapeId, updates);
       clearLiveDrag(shapeId);
@@ -1031,10 +1050,27 @@ export default function BoardPage() {
 
           createObject(textBubble);
           setActiveTool('select');
+        } else if (activeTool === 'emoji') {
+          const emojiObj: EmojiObject = {
+            id: generateId(),
+            type: 'emoji',
+            x,
+            y,
+            width: 140,
+            height: 140,
+            emoji: emojiCharacter || '😀',
+            rotation: 0,
+            zIndex: objects.length,
+            createdBy: user?.uid || '',
+            createdAt: Date.now(),
+          };
+
+          createObject(emojiObj);
+          setActiveTool('select');
         }
       }
     },
-    [activeTool, objects.length, objects, objectsMap, user, shapeFillColor, shapeStrokeColor, createObject, getPlacementCoordinates, setActiveTool, deselectAll, getConnectedObjectIds, getObjectBounds, selectObject, selectionArea]
+    [activeTool, objects.length, objects, objectsMap, user, shapeFillColor, shapeStrokeColor, emojiCharacter, createObject, getPlacementCoordinates, setActiveTool, deselectAll, getConnectedObjectIds, getObjectBounds, selectObject, selectionArea]
   );
 
   // Draw tool: pointer handlers for freehand path
@@ -2008,7 +2044,7 @@ export default function BoardPage() {
         </div>
       </div>
 
-      <Toolbar onDelete={handleDelete} selectedCount={selectedIds.length} />
+      <Toolbar />
       
       <ZoomControl onFitToContent={handleFitToContent} onZoomOut={handleZoomOutCentered} />
       {minimapOpen && <Minimap objects={objects} />}
@@ -2049,8 +2085,8 @@ export default function BoardPage() {
         <DrawOptionsSidebar />
       )}
 
-      {/* Show regular properties sidebar when no selection area (hide when draw tool so DrawOptions shows) */}
-      {!selectionArea && selectedIds.length > 0 && activeTool !== 'draw' && (
+      {/* Show regular properties sidebar when no selection area (hide when draw tool so DrawOptions shows; hide when only emojis selected) */}
+      {!selectionArea && selectedIds.length > 0 && activeTool !== 'draw' && !objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id)).every((obj: WhiteboardObject) => obj.type === 'emoji') && (
         <PropertiesSidebar
           selectedObjects={objects.filter((obj: WhiteboardObject) => selectedIds.includes(obj.id))}
           onStrokeColorChange={handleShapeStrokeColorChange}
@@ -2179,6 +2215,25 @@ export default function BoardPage() {
             strokeWidth={1.5}
             dash={[10, 8]}
             cornerRadius={16}
+            listening={false}
+          />
+        ) : null}
+
+        {previewPosition && activeTool === 'emoji' ? (
+          <KonvaText
+            x={previewPosition.x}
+            y={previewPosition.y}
+            width={140}
+            height={140}
+            text={emojiCharacter || '😀'}
+            fontSize={100}
+            align="center"
+            verticalAlign="middle"
+            fontFamily="Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif"
+            opacity={0.7}
+            stroke="#94a3b8"
+            strokeWidth={1.5}
+            dash={[10, 8]}
             listening={false}
           />
         ) : null}
@@ -2460,6 +2515,31 @@ export default function BoardPage() {
                 isDraggable={activeTool !== 'move'}
                 onSelect={(e) => {
                   // Don't select individual objects when selection area is active
+                  if (selectionArea) {
+                    e.evt.stopPropagation();
+                    return;
+                  }
+                  if (e.evt.shiftKey) {
+                    selectObject(obj.id, true);
+                  } else {
+                    selectObject(obj.id, false);
+                  }
+                }}
+                onUpdate={(updates) => handleShapeUpdateWithClear(obj.id, updates)}
+                onDragMove={handleShapeDragMoveWithBroadcast}
+                onTransformMove={handleShapeTransformMoveWithBroadcast}
+              />
+            );
+          }
+          
+          if (renderObj.type === 'emoji') {
+            return (
+              <Emoji
+                key={obj.id}
+                data={renderShapeObj as EmojiObject}
+                isSelected={isSelected(obj.id) && !selectionArea}
+                isDraggable={activeTool !== 'move'}
+                onSelect={(e) => {
                   if (selectionArea) {
                     e.evt.stopPropagation();
                     return;

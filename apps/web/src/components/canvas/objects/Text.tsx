@@ -32,7 +32,7 @@ const TextComponent = ({
   const transformerRef = useRef<Konva.Transformer>(null);
   const textRef = useRef<Konva.Text>(null);
   const [isEditingText, setIsEditingText] = useState(false);
-  const [editText, setEditText] = useState(data.text || '');
+  const [_editText, setEditText] = useState(data.text || '');
 
   const localPosRef = useRef<{ x: number; y: number; rotation: number } | null>(null);
   const committedPosRef = useRef<{ x: number; y: number; rotation: number } | null>(null);

@@ -4,12 +4,11 @@
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useCanvasStore } from '@/lib/store/canvas';
 import NearMeIcon from '@mui/icons-material/NearMe';
 import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
 import CropSquareIcon from '@mui/icons-material/CropSquare';
-import InsertPageBreakOutlinedIcon from '@mui/icons-material/InsertPageBreakOutlined';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
 import CategoryOutlinedIcon from '@mui/icons-material/CategoryOutlined';
 import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
@@ -17,19 +16,23 @@ import ChangeHistoryOutlinedIcon from '@mui/icons-material/ChangeHistoryOutlined
 import StarOutlineIcon from '@mui/icons-material/StarOutline';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import Grid3x3Icon from '@mui/icons-material/Grid3x3';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CropFreeIcon from '@mui/icons-material/CropFree';
+import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
 import PanToolIcon from '@mui/icons-material/PanTool';
 import BorderColorIcon from '@mui/icons-material/BorderColor';
+import { EMOJI_LIBRARY } from '@/lib/utils/emojis';
 
-interface ToolbarProps {
-  onDelete?: () => void;
-  onDuplicate?: () => void;
-  selectedCount?: number;
-}
-
-export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarProps) => {
-  const { activeTool, setActiveTool, gridMode, setGridMode, snapToGrid, setSnapToGrid } = useCanvasStore();
+export const Toolbar = () => {
+  const {
+    activeTool,
+    setActiveTool,
+    gridMode,
+    setGridMode,
+    emojiCharacter,
+    setEmojiCharacter,
+    emojiPaletteOpen,
+    setEmojiPaletteOpen,
+  } = useCanvasStore();
   const [hoveredTooltip, setHoveredTooltip] = useState<string | null>(null);
   const [isShapesMenuOpen, setIsShapesMenuOpen] = useState(false);
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
@@ -37,6 +40,11 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
   const shapesMenuRef = useRef<HTMLDivElement | null>(null);
   const viewMenuRef = useRef<HTMLDivElement | null>(null);
   const textMenuRef = useRef<HTMLDivElement | null>(null);
+  const emojiMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const handleEmojiToggle = useCallback(() => {
+    setEmojiPaletteOpen(!emojiPaletteOpen);
+  }, [emojiPaletteOpen, setEmojiPaletteOpen]);
 
   const tools = [
     {
@@ -99,6 +107,25 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
     },
   ];
 
+  const FAVORITE_EMOJIS = ['😀', '🥰', '🤑', '🙌', '👌', '❤️', '🚀', '🎯', '📌'];
+  const [emojiSearch, setEmojiSearch] = useState('');
+  const filteredEmojis = useMemo(() => {
+    const term = emojiSearch.trim().toLowerCase();
+    if (!term) return [];
+    return EMOJI_LIBRARY.filter((emoji) => emoji.label.includes(term));
+  }, [emojiSearch]);
+
+  const emojiButtonIcon = (
+    <EmojiEmotionsIcon sx={{ fontSize: 20 }} />
+  );
+
+  const handleEmojiSelect = (emoji: string) => {
+    setEmojiCharacter(emoji);
+    setActiveTool('emoji');
+    setEmojiPaletteOpen(false);
+    setHoveredTooltip(null);
+  };
+
   // Close menus when clicking outside
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -111,16 +138,19 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
       if (textMenuRef.current && !textMenuRef.current.contains(event.target as Node)) {
         setIsTextMenuOpen(false);
       }
+      if (emojiMenuRef.current && !emojiMenuRef.current.contains(event.target as Node)) {
+        setEmojiPaletteOpen(false);
+      }
     };
 
     window.addEventListener('mousedown', handlePointerDown);
     return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, []);
+  }, [setEmojiPaletteOpen]);
 
   const renderToolButton = (
     id: string,
     label: string,
-    icon: React.ReactNode,
+    icon: ReactNode,
     onClick?: () => void,
     isActive?: boolean
   ) => (
@@ -147,21 +177,6 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
     </button>
   );
 
-  const renderSwitch = (isOn: boolean) => (
-    <span
-      className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${
-        isOn ? 'bg-slate-900' : 'bg-slate-300'
-      }`}
-      aria-hidden="true"
-    >
-      <span
-        className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-          isOn ? 'translate-x-4' : 'translate-x-0.5'
-        }`}
-      />
-    </span>
-  );
-  
   return (
     <div className="fixed left-4 top-1/2 z-30 -translate-y-1/2">
       <div className="flex w-[48px] flex-col items-center gap-1 rounded-[12px] bg-white p-1.5 shadow-[6px_0_20px_rgba(0,0,0,0.15),0_4px_12px_rgba(0,0,0,0.1),0_12px_32px_rgba(0,0,0,0.08)]">
@@ -207,7 +222,12 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
         {/* Divider */}
         <div className="my-0.5 h-px w-6 bg-slate-200" />
 
-        {tools.filter(tool => tool.id !== 'text').map((tool) => renderToolButton(tool.id, tool.label, tool.icon))}
+        {tools.filter(tool => tool.id === 'select' || tool.id === 'move').map((tool) => renderToolButton(tool.id, tool.label, tool.icon))}
+
+        {/* Divider after hand (move) */}
+        <div className="my-0.5 h-px w-6 bg-slate-200" />
+
+        {tools.filter(tool => tool.id !== 'text' && tool.id !== 'select' && tool.id !== 'move').map((tool) => renderToolButton(tool.id, tool.label, tool.icon))}
         
         {/* Text button with dropdown menu */}
         <div ref={textMenuRef} className="relative">
@@ -298,9 +318,96 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
             </div>
           )}
         </div>
-        
-        {/* Divider */}
+
+        {/* Divider before emoji */}
         <div className="my-0.5 h-px w-6 bg-slate-200" />
+
+        <div ref={emojiMenuRef} className="relative mt-1">
+          {renderToolButton(
+            'emoji',
+            'Emoji',
+            emojiButtonIcon,
+            handleEmojiToggle,
+            emojiPaletteOpen || activeTool === 'emoji'
+          )}
+          {emojiPaletteOpen && (
+            <div className="absolute left-full top-0 z-50 ml-2 w-44 max-h-[280px] flex flex-col rounded-lg bg-white p-2 shadow-[0_4px_16px_rgba(0,0,0,0.12),0_12px_48px_rgba(0,0,0,0.08)] border border-slate-200">
+              <div className="flex flex-shrink-0 items-baseline gap-2">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                  Emojis
+                </span>
+                <input
+                  type="text"
+                  value={emojiSearch}
+                  onChange={(event) => setEmojiSearch(event.target.value)}
+                  placeholder="Search"
+                  className="min-w-0 flex-1 rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-700 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
+                />
+              </div>
+              <div className="emoji-scroll-hide mt-2 min-h-0 flex-1 overflow-y-auto">
+                {emojiSearch.trim().length === 0 && (
+                  <div className="flex-shrink-0">
+                    <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                      Favorites
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {FAVORITE_EMOJIS.map((symbol) => {
+                        const match = EMOJI_LIBRARY.find((item) => item.symbol === symbol);
+                        const label = match ? match.label : 'emoji';
+                        return (
+                          <button
+                            key={`fav-${symbol}`}
+                            type="button"
+                            onClick={() => handleEmojiSelect(symbol)}
+                            className={`flex h-8 w-8 items-center justify-center rounded-lg text-xl transition ${
+                              emojiCharacter === symbol
+                                ? 'border border-slate-900 bg-slate-100'
+                                : 'border border-transparent hover:bg-slate-50'
+                            }`}
+                            aria-label={label}
+                          >
+                            {symbol}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div className={emojiSearch.trim().length === 0 ? 'mt-2' : ''}>
+                  {emojiSearch.trim().length === 0 ? (
+                    <p className="text-[11px] text-slate-500">
+                      Type in the search box to show more emojis.
+                    </p>
+                  ) : filteredEmojis.length === 0 ? (
+                    <p className="text-[11px] text-slate-500">No matches found.</p>
+                  ) : (
+                    <div className="emoji-scroll-hide grid max-h-[160px] grid-cols-3 gap-1.5 overflow-y-auto">
+                      {filteredEmojis.map((emoji) => (
+                        <button
+                          key={emoji.symbol}
+                          type="button"
+                          onClick={() => handleEmojiSelect(emoji.symbol)}
+                          className={`flex h-8 items-center justify-center rounded-lg text-xl transition ${
+                            emojiCharacter === emoji.symbol
+                              ? 'border border-slate-900 bg-slate-100'
+                              : 'border border-transparent hover:bg-slate-50'
+                          }`}
+                        >
+                          <span role="img" aria-label={`Emoji ${emoji.label}`}>
+                            {emoji.symbol}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Divider */}
+        {/* <div className="my-0.5 h-px w-6 bg-slate-200" /> */}
         
         {/* AI/AutoAwesome button at the bottom */}
         {/* AI Assistant button - replaced with floating AIAssistant component */}
@@ -321,6 +428,13 @@ export const Toolbar = ({ onDelete, onDuplicate, selectedCount = 0 }: ToolbarPro
       </div>
       
       <style jsx>{`
+        .emoji-scroll-hide {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .emoji-scroll-hide::-webkit-scrollbar {
+          display: none;
+        }
         .ai-awesome-button {
           position: relative;
           animation: aiGlow 2.5s ease-in-out infinite;

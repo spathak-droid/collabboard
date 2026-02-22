@@ -364,5 +364,34 @@ After fixes:
 
 
 =================================================================
+TEST CASE 8: Next.js build - PageNotFoundError during "Collecting page data"
+=================================================================
+
+PROBLEM:
+- User ran `npm run build` (next build)
+- Expected: Build completes successfully
+- Actual: PageNotFoundError: Cannot find module for page: /api/ai/commands (and /_document, /api/invite-app, /login, etc.) during "Collecting page data"
+
+ROOT CAUSE:
+- app-paths-manifest.json was incomplete (only a subset of app routes) and used segment keys (e.g. /api/ai/commands/route) while the build looks up normalized paths (e.g. /api/ai/commands).
+- Next.js 14.2.x can produce an incomplete manifest and expects getPagePath(page) to resolve using normalized paths.
+
+FIX APPLIED:
+- Added scripts/patch-app-paths-manifest.js to (1) add normalized path keys for every existing manifest entry so lookup works, (2) discover app routes from src/app and add any missing entries.
+- In next.config.mjs, added a webpack plugin that runs in the edge compiler's "done" hook and calls patchManifest(serverDir, appDir).
+
+TEST PROMPTS:
+1. "Run the Next.js build" or `cd apps/web && npm run build`
+   Expected: Build completes; "Collecting page data" and "Generating static pages" succeed; no PageNotFoundError.
+
+2. Clean build: `rm -rf apps/web/.next && npm run build` (from apps/web)
+   Expected: Full build succeeds.
+
+FILES MODIFIED:
+- apps/web/scripts/patch-app-paths-manifest.js (new: normalize + discover app paths, patch manifest)
+- apps/web/next.config.mjs (webpack plugin to run patch after edge compiler writes manifest)
+
+
+=================================================================
 END OF TEST CASES
 =================================================================

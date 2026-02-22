@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test __tests__/utils/plan-schema.test.js __tests__/utils/layout-engine.test.js __tests__/utils/intent-classifier.test.js __tests__/utils/mini-agents.test.js"
   },
   "keywords": [
     "yjs",

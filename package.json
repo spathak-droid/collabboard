@@ -10,6 +10,7 @@
     "start:server": "cd apps/server && npm run start",
     "lint": "cd apps/web && npm run lint",
     "test": "cd apps/web && npm run test -- --run",
+    "test:server": "cd apps/server && npm run test",
     "check:server": "node --check apps/server/server.js"
   },
   "engines": {

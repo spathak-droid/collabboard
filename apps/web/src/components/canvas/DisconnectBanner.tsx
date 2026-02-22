@@ -18,6 +18,7 @@ interface DisconnectBannerProps {
 
 type BannerState = 
   | { type: 'hidden' }
+  | { type: 'connecting' }
   | { type: 'disconnected'; pendingCount: number }
   | { type: 'syncing'; pendingCount: number }
   | { type: 'synced'; message: string }
@@ -100,10 +101,11 @@ export const DisconnectBanner = ({ status }: DisconnectBannerProps) => {
 
   // Sync banner state with connection status
   useEffect(() => {
-    if (status.status === 'disconnected' && bannerState.type !== 'syncing' && bannerState.type !== 'synced') {
+    if (status.status === 'connecting') {
+      setBannerState({ type: 'connecting' });
+    } else if (status.status === 'disconnected' && bannerState.type !== 'syncing' && bannerState.type !== 'synced') {
       setBannerState({ type: 'disconnected', pendingCount: 0 });
-    } else if (status.status === 'connected' && bannerState.type === 'disconnected') {
-      // Connection restored but no pending changes
+    } else if (status.status === 'connected' && (bannerState.type === 'disconnected' || bannerState.type === 'connecting')) {
       setBannerState({ type: 'hidden' });
     }
   }, [status.status, bannerState.type]);
@@ -112,6 +114,15 @@ export const DisconnectBanner = ({ status }: DisconnectBannerProps) => {
     return null;
   }
   
+  // Connecting banner
+  if (bannerState.type === 'connecting') {
+    return (
+      <div className="fixed top-0 left-0 right-0 p-3 text-center text-white z-50 bg-blue-500">
+        Connecting to server...
+      </div>
+    );
+  }
+
   // Recovery banner (page refresh with pending changes)
   if (bannerState.type === 'recovery') {
     return (
@@ -132,7 +143,7 @@ export const DisconnectBanner = ({ status }: DisconnectBannerProps) => {
           </span>
         )}
         <div className="text-xs mt-1 opacity-90">
-          Your changes are being saved locally and will sync when reconnected
+          {status.message ?? 'Your changes are being saved locally and will sync when reconnected'}
         </div>
       </div>
     );

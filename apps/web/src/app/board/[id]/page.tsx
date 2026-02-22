@@ -139,7 +139,7 @@ export default function BoardPage() {
     selectByRect,
   } = useSelection();
 
-  const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode, setScale, setPosition, selectionRect, drawColor, drawSize } = useCanvasStore();
+  const { activeTool, setActiveTool, scale, position, snapToGrid, gridMode, setScale, setPosition, selectionRect, drawColor, drawSize, minimapOpen } = useCanvasStore();
   const [previewPosition, setPreviewPosition] = useState<{ x: number; y: number } | null>(null);
   const isCreatingFrame = useRef(false);
   const pendingFrameRect = useRef<typeof selectionRect>(null);
@@ -2011,7 +2011,7 @@ export default function BoardPage() {
       <Toolbar onDelete={handleDelete} selectedCount={selectedIds.length} />
       
       <ZoomControl onFitToContent={handleFitToContent} onZoomOut={handleZoomOutCentered} />
-      <Minimap objects={objects} />
+      {minimapOpen && <Minimap objects={objects} />}
 
       {user && (
         <Cursors

@@ -794,8 +794,8 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={board.id}
-                    className={`group relative overflow-hidden flex flex-col gap-4 rounded-[26px] border bg-white/90 p-4 shadow-[0_20px_80px_-40px_rgba(15,23,42,0.45)] transition hover:shadow-[0_30px_100px_-40px_rgba(15,23,42,0.55)] ${
-                      board.isLocked ? 'border-red-300' : 'border-slate-200/70'
+                    className={`group relative overflow-hidden flex flex-col gap-4 rounded-[26px] border p-4 shadow-[0_20px_80px_-40px_rgba(15,23,42,0.45)] transition hover:shadow-[0_30px_100px_-40px_rgba(15,23,42,0.55)] ${
+                      board.isLocked ? 'border-red-300 bg-slate-200/70' : 'border-slate-200/70 bg-white/90'
                     }`}
                   >
                     <div className="relative z-10 flex flex-1 flex-col justify-between gap-3">

@@ -37,6 +37,10 @@ export interface CanvasStore {
   // Drag-to-select rectangle
   selectionRect: { x: number; y: number; width: number; height: number } | null;
   setSelectionRect: (rect: CanvasStore['selectionRect']) => void;
+
+  // Minimap visibility (opens to the right when true)
+  minimapOpen: boolean;
+  setMinimapOpen: (open: boolean) => void;
 }
 
 export type ActiveTool = CanvasStore['activeTool'];
@@ -91,4 +95,8 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   // Drag-to-select rectangle
   selectionRect: null,
   setSelectionRect: (rect) => set({ selectionRect: rect }),
+
+  // Minimap (default closed; user opens via downbar button, shown bottom-right)
+  minimapOpen: false,
+  setMinimapOpen: (open) => set({ minimapOpen: open }),
 }));

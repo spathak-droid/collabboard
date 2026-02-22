@@ -245,6 +245,8 @@ function computeChildPositions(children, layout, startX, startY, constraintArea)
       return layoutHorizontal(childSizes, startX, startY, FLOW_GAP);
     case 'flow_vertical':
       return layoutVertical(childSizes, startX, startY, FLOW_GAP);
+    case 'freeform':
+      return layoutFreeform(children, childSizes, startX, startY);
     default:
       return layoutHorizontal(childSizes, startX, startY, GAP);
   }
@@ -291,6 +293,8 @@ function computeChildPositionsUnconstrained(childSizes, layout, startX, startY, 
       return layoutGrid(childSizes, startX, startY, count);
     case 'radial':
       return layoutRadial(childSizes, startX, startY, count);
+    case 'freeform':
+      return layoutHorizontal(childSizes, startX, startY, GAP);
     default:
       return layoutHorizontal(childSizes, startX, startY, GAP);
   }
@@ -380,6 +384,28 @@ function layoutRadial(childSizes, startX, startY, count) {
     });
   }
   return positions;
+}
+
+/**
+ * Use agent-provided placement: each child has x,y. Engine adds startX/startY offset.
+ * If any child is missing x or y, fall back to horizontal so we don't break.
+ */
+function layoutFreeform(children, childSizes, startX, startY) {
+  const allHaveXY = children.every(
+    (c) => typeof c.x === 'number' && typeof c.y === 'number'
+  );
+  if (!allHaveXY) {
+    return layoutHorizontal(childSizes, startX, startY, GAP);
+  }
+  return children.map((child, i) => {
+    const size = childSizes[i] || { width: 150, height: 150 };
+    return {
+      x: Math.round(startX + Number(child.x)),
+      y: Math.round(startY + Number(child.y)),
+      width: size.width,
+      height: size.height,
+    };
+  });
 }
 
 // ── Node emission (plan node → tool call) ───────────────────

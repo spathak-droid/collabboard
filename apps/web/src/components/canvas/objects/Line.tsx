@@ -77,8 +77,11 @@ const LineComponent = ({
 
   useEffect(() => {
     if (isSelected && !isConnected && transformerRef.current && shapeRef.current) {
-      transformerRef.current.nodes([shapeRef.current]);
-      transformerRef.current.getLayer()?.batchDraw();
+      const nodesFn = transformerRef.current.nodes;
+      if (typeof nodesFn === 'function') {
+        nodesFn.call(transformerRef.current, [shapeRef.current]);
+        transformerRef.current.getLayer()?.batchDraw();
+      }
     }
   }, [isSelected, isConnected, drawX, drawY, data.rotation]);
 

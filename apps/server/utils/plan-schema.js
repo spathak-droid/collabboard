@@ -1,10 +1,10 @@
 /**
  * Plan Schema — the contract between the Planner LLM and the Layout Engine.
  *
- * The LLM outputs a CompositionPlan (structured JSON describing WHAT to create).
- * The Layout Engine reads the plan and produces positioned tool calls (WHERE to put it).
- *
- * The LLM never outputs coordinates. It outputs structure and intent.
+ * The LLM outputs a CompositionPlan (WHAT to create, and optionally WHERE).
+ * For structured layouts (columns, grid, flow) the engine computes positions.
+ * For layout="freeform" the LLM MUST provide x,y on each child — the agent
+ * figures out constraints and placement, then outputs that JSON.
  */
 
 // ── Layout types ────────────────────────────────────────────
@@ -18,7 +18,7 @@ export const LAYOUT_TYPES = [
   'radial',           // Circle around a center node (mind maps)
   'flow_horizontal',  // Left-to-right with connectors (flowcharts)
   'flow_vertical',    // Top-to-bottom with connectors (org charts)
-  'freeform',         // No automatic layout — children specify relative hints
+  'freeform',         // Agent provides x,y for each child (placement JSON from the agent)
 ];
 
 // ── Node types ──────────────────────────────────────────────
@@ -73,7 +73,7 @@ export const CREATE_PLAN_TOOL = {
   type: 'function',
   function: {
     name: 'createPlan',
-    description: 'Output a structured composition plan. The layout engine will convert this into positioned whiteboard objects. You NEVER need to specify coordinates — just describe WHAT to create and HOW to arrange it.',
+    description: 'Output a composition plan. For layout=freeform you MUST provide x,y (pixels) on every child — you figure out constraints and placement, then output that JSON. For other layouts the engine computes positions.',
     parameters: {
       type: 'object',
       properties: {
@@ -126,6 +126,14 @@ export const CREATE_PLAN_TOOL = {
               type: 'string',
               enum: ['square', 'wide', 'tall', 'tall_narrow', 'small', 'large'],
               description: 'Size hint for the layout engine. Default is "square".',
+            },
+            x: {
+              type: 'number',
+              description: 'X position in pixels. REQUIRED for every child when layout=freeform (agent provides placement JSON). Top-left origin. Omit for non-freeform layouts.',
+            },
+            y: {
+              type: 'number',
+              description: 'Y position in pixels. REQUIRED for every child when layout=freeform (agent provides placement JSON). Top-left origin. Omit for non-freeform layouts.',
             },
             // Container node fields
             title: {

@@ -56,11 +56,12 @@ test.describe('Full Collaboration Flow', () => {
     const canvas = page.locator('canvas').first();
     await canvas.click({ position: { x: 200, y: 200 } });
     
-    // Tool should switch back to select
-    await expect(page.locator('[data-tool="select"]')).toHaveClass(/bg-blue-500/);
+    // Tool should switch back to select (active tool has aria-pressed or active class)
+    await expect(page.locator('[data-tool="select"]')).toHaveAttribute('aria-pressed', 'true');
     
-    // Click rectangle tool
-    await page.click('[data-tool="rect"]');
+    // Open shapes menu and click rectangle
+    await page.click('[data-tool="shapes"]');
+    await page.click('text=Rectangle');
     
     // Click on canvas to create rectangle
     await canvas.click({ position: { x: 400, y: 200 } });

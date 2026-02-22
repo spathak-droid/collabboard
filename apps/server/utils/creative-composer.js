@@ -1,14 +1,10 @@
 /**
  * Creative Composer — Planner + Executor architecture.
  *
- * The Planner LLM (gpt-5-nano) outputs a structured CompositionPlan:
- *   { title, layout, children: [{ type, text, color, shape, ... }] }
- *
- * The Layout Engine (deterministic, zero LLM calls) converts the plan
- * into positioned tool calls with concrete x/y coordinates.
- *
- * The LLM never outputs coordinates. It reasons about WHAT to create
- * and HOW to arrange it. The engine handles WHERE.
+ * The Planner outputs a CompositionPlan. For layout=freeform the agent
+ * MUST provide x,y on every child (placement JSON) — the agent figures
+ * out constraints and where each object goes. For other layouts the
+ * engine computes positions.
  */
 
 import { CREATE_PLAN_TOOL } from './plan-schema.js';
@@ -18,7 +14,11 @@ import { planToToolCalls } from './layout-engine.js';
 // Much simpler than the old creative composer prompt because
 // the LLM no longer needs to compute coordinates or sizes.
 
-const PLANNER_PROMPT = `You are the Planner for a collaborative whiteboard. Your ONLY job is to call the createPlan tool with a structured composition plan. You decide WHAT to create and HOW to arrange it. A layout engine will handle all positioning — you NEVER specify coordinates.
+const PLANNER_PROMPT = `You are the Planner for a collaborative whiteboard. Your ONLY job is to call the createPlan tool with a composition plan.
+
+**For figures (cat, robot, person, animal, vehicle, etc.):** Use layout="freeform" and YOU MUST provide x and y (pixels, top-left origin) for EVERY child. Figure out the constraints (what goes where so it looks right), then output the placement JSON — the engine will place objects exactly at those coordinates. Do NOT omit x,y for freeform.
+
+**For other compositions (kanban, flowchart, grid, etc.):** Omit x,y; the layout engine will compute positions.
 
 **Available node types:**
 - sticky: Colored card with text (for ideas, tasks, items)
@@ -37,6 +37,7 @@ const PLANNER_PROMPT = `You are the Planner for a collaborative whiteboard. Your
 - radial: Circle around center (mind maps)
 - flow_horizontal: Left-to-right with connectors (flowcharts)
 - flow_vertical: Top-to-bottom with connectors (org charts)
+- freeform: YOU provide x,y for each child. Use for figures (cat, robot, etc.) — you decide where each shape goes and output that placement JSON.
 
 **Color names:**
 - Sticky: yellow, pink, blue, green, orange (or "random")
@@ -67,6 +68,7 @@ const PLANNER_PROMPT = `You are the Planner for a collaborative whiteboard. Your
 11. Columns should contain sticky notes or shapes as children
 12. Set wrapInFrame=true for structured layouts, false for artistic/freeform ones
 13. CRITICAL: If the user mentions "flowchart", "flow", "process", "pipeline", "workflow", or "steps" — ALWAYS use flow_horizontal or flow_vertical layout AND add connectTo="straight" on EVERY node except the last. Flowcharts without connector lines are useless.
+14. For "cat", "robot", "person", "animal", or any figure made of shapes — use layout="freeform" and include x,y on every child. You are giving the placement JSON so objects align correctly. Ensure no overlap: x,y are top-left; leave at least 20px gap between shapes and account for each aspect's width/height (e.g. tall_narrow=75×300, wide=300×150).
 
 **EXAMPLES:**
 
@@ -149,6 +151,22 @@ User: "cooking recipe for fish and chips"
       { type: "sticky", text: "4. Deep fry chips then fish", color: "yellow" },
       { type: "sticky", text: "5. Serve with lemon & salt", color: "yellow" }
     ]}
+  ]})
+
+User: "create a cat with all the shapes we have" OR "draw a cat"
+→ Use layout="freeform" and provide x,y (top-left) for each child. Account for each shape's size: large=225×225, small=90×90, wide=300×150, tall_narrow=75×300, square=150×150. Place so shapes do NOT overlap (e.g. Leg Right x must be ≥ Leg Left x + 75 + 20). Example:
+createPlan({ title: "Cat", layout: "freeform", wrapInFrame: false, children: [
+    { type: "shape", shape: "circle", text: "Head", color: "orange", aspect: "large", x: 25, y: 50 },
+    { type: "shape", shape: "triangle", text: "Ear Left", color: "orange", aspect: "small", x: 0, y: 0 },
+    { type: "shape", shape: "triangle", text: "Ear Right", color: "orange", aspect: "small", x: 160, y: 0 },
+    { type: "shape", shape: "circle", text: "", color: "black", aspect: "small", x: 55, y: 95 },
+    { type: "shape", shape: "circle", text: "", color: "black", aspect: "small", x: 145, y: 95 },
+    { type: "shape", shape: "star", text: "Nose", color: "pink", aspect: "small", x: 92, y: 135 },
+    { type: "shape", shape: "rect", text: "Mouth", color: "pink", aspect: "wide", x: 0, y: 278 },
+    { type: "shape", shape: "rect", text: "Body", color: "orange", aspect: "wide", x: 0, y: 428 },
+    { type: "shape", shape: "rect", text: "Leg Left", color: "orange", aspect: "tall_narrow", x: 30, y: 578 },
+    { type: "shape", shape: "rect", text: "Leg Right", color: "orange", aspect: "tall_narrow", x: 195, y: 578 },
+    { type: "shape", shape: "triangle", text: "Tail", color: "orange", x: 310, y: 458 }
   ]})`;
 
 /**

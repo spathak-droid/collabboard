@@ -121,7 +121,7 @@ export const INTENT_CLASSIFIER = {
           },
           topic: {
             type: 'string',
-            description: 'When operation=CREATE_AND_ARRANGE and prosAndCons: true, the topic for pros/cons (e.g. "remote work", "electric cars"). Empty or generic if not specified.',
+            description: 'When operation=CREATE_AND_ARRANGE: the topic for sticky or shape content. Set whenever the user asks for content about something: "for pros and cons of X" (topic=X), "with text about X", "about X", "for X" (e.g. "solar issues", "project ideas", "student time management"). Empty if no topic requested.',
           },
         },
         required: ['operation'],
@@ -208,9 +208,10 @@ When user specifies exact colors for multiple objects:
 - **CREATE_AND_ARRANGE (create + arrange in one shot, no frame):**
   * Use when user asks to CREATE a grid of sticky notes OR shapes (rectangles, circles, stars, triangles) with explicit rows×columns, arranged on the canvas in one shot.
   * Set operation=CREATE_AND_ARRANGE, quantity=rows×columns, rows, columns. objectType=sticky for notes; objectType=shape and shapeType=rect|circle|star|triangle for shapes.
-  * For "for pros and cons": prosAndCons=true, topic=user topic or empty. For other purposes (e.g. "for student time management"): prosAndCons=false, topic="student time management" (or the stated purpose).
+  * For "for pros and cons": prosAndCons=true, topic=user topic or empty. For other content: set topic whenever user asks for text about something (e.g. "with text about solar issues" → topic="solar issues"; "for project ideas" → topic="project ideas").
   * Examples:
     - "create a 2x3 grid of sticky notes for pros and cons" → operation=CREATE_AND_ARRANGE, objectType=sticky, quantity=6, rows=2, columns=3, prosAndCons=true, topic=""
+    - "create 2x3 grid of pink sticky notes with detailed text about solar issues" → operation=CREATE_AND_ARRANGE, objectType=sticky, quantity=6, rows=2, columns=3, prosAndCons=false, topic="solar issues", color="#EC4899"
     - "create 2x3 grid of stickies for pros and cons of remote work" → operation=CREATE_AND_ARRANGE, objectType=sticky, quantity=6, rows=2, columns=3, prosAndCons=true, topic="remote work"
     - "4×4 grid of pink rectangles" → operation=CREATE_AND_ARRANGE, objectType=shape, shapeType=rect, quantity=16, rows=4, columns=4, color="#EC4899"
     - "4×2 grid of rectangles for student time management" → operation=CREATE_AND_ARRANGE, objectType=shape, shapeType=rect, quantity=8, rows=4, columns=2, prosAndCons=false, topic="student time management"

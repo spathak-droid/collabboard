@@ -156,6 +156,43 @@ export async function executeCreateAndArrangeAgent(openai, intent) {
           items = makePlaceholderStickies(quantity);
         }
       }
+    } else if (topic && quantity > 0) {
+      const systemPrompt = `You generate short, varied sticky note texts for a whiteboard grid. Topic: "${topic}". Each sticky: one line, 2-10 words, specific and varied (not generic). Return exactly ${quantity} entries in grid order (row by row). Use colors green, yellow, pink, or orange for variety.`;
+      const userPrompt = `Generate ${quantity} sticky note texts about: ${topic}. Each line should be a distinct point or idea.`;
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        tools: [GENERATE_STICKIES_SCHEMA],
+        tool_choice: { type: 'function', function: { name: 'generateStickies' } },
+        temperature: 0.6,
+      });
+      const toolCall = response.choices[0]?.message?.tool_calls?.find(tc => tc.function?.name === 'generateStickies');
+      if (!toolCall) {
+        items = makeBlankStickies(quantity, intent);
+      } else {
+        try {
+          const parsed = JSON.parse(toolCall.function.arguments);
+          const list = Array.isArray(parsed.stickies) ? parsed.stickies : [];
+          if (list.length >= quantity) {
+            const singleColor = intent.color && intent.color !== 'random' ? intent.color : null;
+            const colorList = Array.isArray(intent.colors) && intent.colors.length > 0 ? intent.colors : null;
+            items = list.slice(0, quantity).map((s, i) => {
+              const color = singleColor || (colorList ? colorList[i % colorList.length] : null) || (['green', 'yellow', 'pink', 'orange'].includes(s.color) ? s.color : 'yellow');
+              return {
+                text: String(s.text || '').trim() || 'Note',
+                color,
+              };
+            });
+          } else {
+            items = makeBlankStickies(quantity, intent);
+          }
+        } catch (e) {
+          items = makeBlankStickies(quantity, intent);
+        }
+      }
     } else {
       items = makeBlankStickies(quantity, intent);
     }
@@ -182,9 +219,11 @@ export async function executeCreateAndArrangeAgent(openai, intent) {
   const typeLabel = isShape ? (objectType === 'rect' ? 'rectangles' : objectType + 's') : 'sticky notes';
   const summary = prosAndCons && !isShape
     ? `Created ${quantity} sticky notes for pros and cons in a ${rows}×${columns} grid on the canvas.`
-    : topic && isShape
-      ? `Created ${quantity} ${typeLabel} for ${topic} in a ${rows}×${columns} grid on the canvas.`
-      : `Created ${quantity} ${typeLabel} in a ${rows}×${columns} grid on the canvas.`;
+    : topic && !isShape
+      ? `Created ${quantity} sticky notes about ${topic} in a ${rows}×${columns} grid on the canvas.`
+      : topic && isShape
+        ? `Created ${quantity} ${typeLabel} for ${topic} in a ${rows}×${columns} grid on the canvas.`
+        : `Created ${quantity} ${typeLabel} in a ${rows}×${columns} grid on the canvas.`;
 
   return { toolCalls, summary };
 }

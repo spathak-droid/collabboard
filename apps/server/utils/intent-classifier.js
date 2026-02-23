@@ -26,7 +26,7 @@ export const INTENT_CLASSIFIER = {
           operation: {
             type: 'string',
             enum: ['CREATE', 'CREATE_AND_ARRANGE', 'UPDATE', 'DELETE', 'CLEAR_CANVAS', 'MOVE', 'RESIZE', 'ROTATE', 'CHANGE_COLOR', 'ARRANGE', 'ANALYZE', 'CONNECT', 'FIT_FRAME_TO_CONTENTS', 'MULTI_STEP', 'CREATIVE', 'CONVERSATION', 'UNKNOWN'],
-            description: 'Primary operation type. Use CREATE_AND_ARRANGE when user asks to create a grid of sticky notes (e.g. 2x3) and arrange them in one shot, especially "for pros and cons".',
+            description: 'Primary operation type. Use CREATE_AND_ARRANGE when user asks to create a grid of sticky notes OR shapes (rectangles, circles, stars, triangles) with rows×columns and arrange in one shot. Use objectType=shape + shapeType=rect|circle|star|triangle for "grid of rectangles/circles/stars/triangles"; use objectType=sticky only for sticky notes.',
           },
           objectType: {
             type: 'string',
@@ -212,6 +212,7 @@ When user specifies exact colors for multiple objects:
   * Examples:
     - "create a 2x3 grid of sticky notes for pros and cons" → operation=CREATE_AND_ARRANGE, objectType=sticky, quantity=6, rows=2, columns=3, prosAndCons=true, topic=""
     - "create 2x3 grid of stickies for pros and cons of remote work" → operation=CREATE_AND_ARRANGE, objectType=sticky, quantity=6, rows=2, columns=3, prosAndCons=true, topic="remote work"
+    - "4×4 grid of pink rectangles" → operation=CREATE_AND_ARRANGE, objectType=shape, shapeType=rect, quantity=16, rows=4, columns=4, color="#EC4899"
     - "4×2 grid of rectangles for student time management" → operation=CREATE_AND_ARRANGE, objectType=shape, shapeType=rect, quantity=8, rows=4, columns=2, prosAndCons=false, topic="student time management"
     - "create a 3x2 grid of circles for categories" → operation=CREATE_AND_ARRANGE, objectType=shape, shapeType=circle, quantity=6, rows=3, columns=2, topic="categories"
     - "make a 2x4 grid of stars" → operation=CREATE_AND_ARRANGE, objectType=shape, shapeType=star, quantity=8, rows=2, columns=4
@@ -729,6 +730,17 @@ User: "create a 2x3 grid of sticky notes for pros and cons"
   "columns": 3,
   "prosAndCons": true,
   "topic": ""
+}
+
+User: "create a 4×4 grid of pink rectangles"
+{
+  "operation": "CREATE_AND_ARRANGE",
+  "objectType": "shape",
+  "shapeType": "rect",
+  "quantity": 16,
+  "rows": 4,
+  "columns": 4,
+  "color": "#EC4899"
 }
 
 User: "create a 4×2 grid of rectangles for student time management"

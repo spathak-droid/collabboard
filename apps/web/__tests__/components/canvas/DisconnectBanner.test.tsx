@@ -39,13 +39,13 @@ describe('DisconnectBanner', () => {
     expect(banner).toBeInTheDocument();
   });
 
-  it('shows connecting message when status is connecting', async () => {
+  it('shows nothing when status is connecting (no banner on initial load)', async () => {
     render(
       <DisconnectBanner status={{ status: 'connecting' }} />
     );
 
-    const banner = await screen.findByText(/Connecting to server/i);
-    expect(banner).toBeInTheDocument();
+    // Connecting state is intentionally hidden — no "Connecting to server" at top when canvas loads
+    expect(screen.queryByText(/Connecting to server/i)).not.toBeInTheDocument();
   });
 
   it('shows additional message when provided', async () => {

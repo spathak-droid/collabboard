@@ -54,6 +54,15 @@ const GENERATE_LABELS_SCHEMA = {
 
 const SHAPE_COLORS = ['#EF4444', '#3B82F6', '#10B981', '#A855F7', '#F97316'];
 
+/** Resolve shape color for one item. Uses intent.color (single) or intent.colors (cycle) when specified; else default palette. */
+function getShapeColorForIndex(intent, index) {
+  const single = intent.color && intent.color !== 'random' ? intent.color : null;
+  const multi = Array.isArray(intent.colors) && intent.colors.length > 0 ? intent.colors : null;
+  if (single) return single;
+  if (multi) return multi[index % multi.length];
+  return SHAPE_COLORS[index % SHAPE_COLORS.length];
+}
+
 /**
  * Run the create-and-arrange agent: generate content then return one tool call.
  *
@@ -93,16 +102,16 @@ export async function executeCreateAndArrangeAgent(openai, intent) {
           const list = Array.isArray(parsed.labels) ? parsed.labels : [];
           items = list.slice(0, quantity).map((text, i) => ({
             text: String(text || '').trim() || `Item ${i + 1}`,
-            color: SHAPE_COLORS[i % SHAPE_COLORS.length],
+            color: getShapeColorForIndex(intent, i),
           }));
         } catch (e) {
-          items = makePlaceholderItems(quantity, true);
+          items = makePlaceholderItems(quantity, true, intent);
         }
       } else {
-        items = makePlaceholderItems(quantity, true);
+        items = makePlaceholderItems(quantity, true, intent);
       }
     } else {
-      items = makePlaceholderItems(quantity, true);
+      items = makePlaceholderItems(quantity, true, intent);
     }
   } else {
     if (prosAndCons && quantity > 0) {
@@ -148,7 +157,7 @@ export async function executeCreateAndArrangeAgent(openai, intent) {
         }
       }
     } else {
-      items = makePlaceholderStickies(quantity);
+      items = makeBlankStickies(quantity, intent);
     }
   }
 
@@ -180,6 +189,25 @@ export async function executeCreateAndArrangeAgent(openai, intent) {
   return { toolCalls, summary };
 }
 
+const DEFAULT_STICKY_COLOR = 'yellow';
+
+/** Sticky notes with blank text for generic grids (not pros/cons). Uses default color unless intent specifies color(s). */
+function makeBlankStickies(quantity, intent = {}) {
+  const specifiedColor = intent.color && intent.color !== 'random' ? intent.color : null;
+  const specifiedColors = Array.isArray(intent.colors) && intent.colors.length > 0 ? intent.colors : null;
+  const stickies = [];
+  for (let i = 0; i < quantity; i++) {
+    const color = specifiedColor
+      ? specifiedColor
+      : specifiedColors
+        ? specifiedColors[i % specifiedColors.length]
+        : DEFAULT_STICKY_COLOR;
+    stickies.push({ text: '', color });
+  }
+  return stickies;
+}
+
+/** Sticky notes with "Pro N" / "Con N" text for pros-and-cons grids only. */
 function makePlaceholderStickies(quantity) {
   const stickies = [];
   const half = Math.ceil(quantity / 2);
@@ -195,12 +223,13 @@ function makePlaceholderStickies(quantity) {
   return stickies;
 }
 
-function makePlaceholderItems(quantity, isShape) {
+function makePlaceholderItems(quantity, isShape, intent = {}) {
   const items = [];
   for (let i = 0; i < quantity; i++) {
+    const color = isShape ? getShapeColorForIndex(intent, i) : (intent.color && intent.color !== 'random' ? intent.color : intent.colors?.[i % (intent.colors?.length || 1)] ?? 'yellow');
     items.push({
       text: `Item ${i + 1}`,
-      color: isShape ? SHAPE_COLORS[i % SHAPE_COLORS.length] : 'yellow',
+      color,
     });
   }
   return items;

@@ -18,7 +18,6 @@ interface DisconnectBannerProps {
 
 type BannerState = 
   | { type: 'hidden' }
-  | { type: 'connecting' }
   | { type: 'disconnected'; pendingCount: number }
   | { type: 'syncing'; pendingCount: number }
   | { type: 'synced'; message: string }
@@ -99,13 +98,13 @@ export const DisconnectBanner = ({ status }: DisconnectBannerProps) => {
     };
   }, []);
 
-  // Sync banner state with connection status
+  // Sync banner state with connection status (connecting state is hidden — no banner on initial load)
   useEffect(() => {
     if (status.status === 'connecting') {
-      setBannerState({ type: 'connecting' });
+      setBannerState({ type: 'hidden' });
     } else if (status.status === 'disconnected' && bannerState.type !== 'syncing' && bannerState.type !== 'synced') {
       setBannerState({ type: 'disconnected', pendingCount: 0 });
-    } else if (status.status === 'connected' && (bannerState.type === 'disconnected' || bannerState.type === 'connecting')) {
+    } else if (status.status === 'connected' && bannerState.type === 'disconnected') {
       setBannerState({ type: 'hidden' });
     }
   }, [status.status, bannerState.type]);
@@ -114,15 +113,6 @@ export const DisconnectBanner = ({ status }: DisconnectBannerProps) => {
     return null;
   }
   
-  // Connecting banner
-  if (bannerState.type === 'connecting') {
-    return (
-      <div className="fixed top-0 left-0 right-0 p-3 text-center text-white z-50 bg-blue-500">
-        Connecting to server...
-      </div>
-    );
-  }
-
   // Recovery banner (page refresh with pending changes)
   if (bannerState.type === 'recovery') {
     return (

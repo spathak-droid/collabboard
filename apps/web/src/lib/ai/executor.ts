@@ -1764,7 +1764,8 @@ export function executeToolCalls(
         for (let i = 0; i < count; i++) {
           const id = generateId();
           const item = items[i];
-          const text = (item?.text ?? '').trim() || (isShape ? `Item ${i + 1}` : 'Note');
+          const rawText = (item?.text ?? '').trim();
+          const text = isShape ? (rawText || `Item ${i + 1}`) : rawText;
           const color = item?.color;
           if (isShape) {
             const width = cellW;

@@ -16,6 +16,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { YjsProvider } from '@/lib/yjs/provider';
 import { getUserColor } from '@/lib/utils/colors';
 import { getCachedSnapshot } from '@/lib/utils/snapshotCache';
@@ -57,12 +58,18 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
 
     const provider = new YjsProvider();
     providerRef.current = provider;
-    
-    // Store unsubscribe functions
+
+    // Clear awareness on tab close so other clients see us offline immediately (avoids ~30s timeout)
+    const handleUnload = () => providerRef.current?.clearAwareness?.();
+    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+
+    // Store unsubscribe functions and interval for stale check
     let unsubObjects: (() => void) | null = null;
     let unsubStatus: (() => void) | null = null;
     let unsubAwareness: (() => void) | null = null;
     let unsubMeta: (() => void) | null = null;
+    let staleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
     // --- object change listener ---
     unsubObjects = provider.onObjectsChange(() => {
@@ -142,28 +149,58 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
         }
 
         // --- awareness (online users) listener ---
-        // Only update React state when user list changes (join/leave),
-        // NOT on every cursor move. This prevents full-page re-renders.
+        // Everyone sends a lastPing heartbeat every 2s; remove from list if no update in STALE_DISPLAY_MS
+        const STALE_DISPLAY_MS = 3500; // ~1.5s after last 2s heartbeat = remove within ~3.5–4s of disconnect
+        const lastSeenByUserId = new Map<string, number>();
         let lastUserIds = '';
-        const updateOnlineUsers = () => {
+        let lastFilterRun = 0;
+        const THROTTLE_MS = 400;
+
+        type AwarenessStateWithPing = AwarenessState & { lastPing?: number; cursor?: { lastUpdate?: number } };
+
+        const applyStaleFilterAndUpdate = () => {
           const states = provider.getAwarenessStates();
+          const now = Date.now();
           const users: AwarenessState[] = [];
           states.forEach((state) => {
             if (state.user) {
-              users.push(state as AwarenessState);
+              const s = state as AwarenessStateWithPing;
+              const lastSeen = s.lastPing ?? s.cursor?.lastUpdate ?? now;
+              lastSeenByUserId.set(state.user.id, lastSeen);
+              if (now - lastSeen < STALE_DISPLAY_MS) {
+                users.push(state as AwarenessState);
+              }
             }
           });
-
-          // Only trigger React re-render if user list changed
           const currentUserIds = users.map((u) => u.user.id).sort().join(',');
           if (currentUserIds !== lastUserIds) {
             lastUserIds = currentUserIds;
-            setOnlineUsers(users);
+            flushSync(() => setOnlineUsers(users));
+          }
+        };
+
+        const updateOnlineUsers = () => {
+          const states = provider.getAwarenessStates();
+          const now = Date.now();
+          states.forEach((state) => {
+            if (state.user) {
+              const s = state as AwarenessStateWithPing;
+              const lastSeen = s.lastPing ?? s.cursor?.lastUpdate ?? now;
+              lastSeenByUserId.set(state.user.id, lastSeen);
+            }
+          });
+          const since = now - lastFilterRun;
+          if (since >= THROTTLE_MS) {
+            lastFilterRun = now;
+            applyStaleFilterAndUpdate();
           }
         };
 
         unsubAwareness = provider.onAwarenessChange(updateOnlineUsers);
-        updateOnlineUsers();
+        applyStaleFilterAndUpdate();
+
+        // Re-check every 500ms so we remove stale users from the list soon after disconnect
+        staleCheckInterval = setInterval(applyStaleFilterAndUpdate, 500);
 
         // --- board metadata (title, backgroundColor) listener ---
         unsubMeta = provider.onMetaChange(() => {
@@ -199,6 +236,9 @@ export const useYjs = ({ boardId, userId, userName, preloadedSnapshot }: UseYjsO
     })();
 
     return () => {
+      if (staleCheckInterval) clearInterval(staleCheckInterval);
+      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
       if (initialSaveTimeout) {
         clearTimeout(initialSaveTimeout);
       }

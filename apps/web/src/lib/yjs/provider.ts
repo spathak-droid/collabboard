@@ -34,6 +34,7 @@ export class YjsProvider {
   private boardId: string | null = null;
   private isOnline = false;
   private pendingUpdateCount = 0;
+  private _heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.ydoc = new Y.Doc();
@@ -100,7 +101,23 @@ export class YjsProvider {
     // Set user awareness (shared with other clients)
     this.hocuspocus.setAwarenessField('user', user);
 
+    // Heartbeat so other clients can remove us from the list within ~4s of disconnect (no 30s wait)
+    if (this._heartbeatInterval) clearInterval(this._heartbeatInterval);
+    this._heartbeatInterval = setInterval(() => {
+      this.hocuspocus?.setAwarenessField('lastPing', Date.now());
+    }, 2000);
+
     return this.hocuspocus;
+  }
+
+  /**
+   * Clear local awareness state so the server and other clients see us as offline immediately.
+   * Call on beforeunload/pagehide so removal is broadcast before the tab closes (avoids ~30s delay).
+   */
+  clearAwareness() {
+    if (this.hocuspocus?.awareness) {
+      this.hocuspocus.awareness.setLocalState(null);
+    }
   }
 
   disconnect() {
@@ -119,6 +136,10 @@ export class YjsProvider {
       this.offlineSnapshotTimeout = null;
     }
 
+    if (this._heartbeatInterval) {
+      clearInterval(this._heartbeatInterval);
+      this._heartbeatInterval = null;
+    }
     if (this.hocuspocus) {
       this.hocuspocus.disconnect();
       this.hocuspocus.destroy();
